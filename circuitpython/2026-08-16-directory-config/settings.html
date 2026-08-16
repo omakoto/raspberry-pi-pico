@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico Folder Settings Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #0f172a;
+            --bg-card: #1e293b;
+            --border-color: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --color-primary: #0ea5e9;
+            --color-primary-hover: #38bdf8;
+            --color-success: #10b981;
+            --color-warning: #f59e0b;
+            --color-error: #ef4444;
+            --font-main: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+            line-height: 1.5;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        p.subtitle {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        .connection-panel {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .status-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--color-error);
+            transition: background-color 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background-color: var(--color-success);
+            box-shadow: 0 0 8px var(--color-success);
+        }
+
+        .status-dot.pending {
+            background-color: var(--color-warning);
+            box-shadow: 0 0 8px var(--color-warning);
+        }
+
+        .status-text {
+            font-weight: 500;
+            font-size: 1rem;
+        }
+
+        button {
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 0.625rem 1.25rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button.btn-primary {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        button.btn-primary:hover {
+            background-color: var(--color-primary-hover);
+        }
+
+        button.btn-success {
+            background-color: var(--color-success);
+            color: white;
+        }
+
+        button.btn-success:hover {
+            opacity: 0.9;
+        }
+
+        button.btn-warning {
+            background-color: var(--color-warning);
+            color: black;
+        }
+
+        button.btn-warning:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            background-color: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        input[type="text"] {
+            width: 100%;
+            background-color: var(--bg-main);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.625rem 0.875rem;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--color-primary);
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        input[type="range"] {
+            flex-grow: 1;
+            accent-color: var(--color-primary);
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .slider-val {
+            font-family: monospace;
+            font-size: 1rem;
+            font-weight: 600;
+            width: 3.5rem;
+            text-align: right;
+        }
+
+        /* Toggle switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #475569;
+            transition: .3s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--color-success);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .btn-row {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 1.5rem;
+        }
+
+        #log-area {
+            font-family: monospace;
+            font-size: 0.8rem;
+            background-color: #020617;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem;
+            max-height: 120px;
+            overflow-y: auto;
+            color: #10b981;
+            white-space: pre-wrap;
+        }
+
+        .disabled-overlay {
+            opacity: 0.4;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .disabled-overlay.enabled {
+            opacity: 1;
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Pico Folder Configuration</h1>
+            <p class="subtitle">Directly update settings on your CIRCUITPY drive</p>
+        </header>
+
+        <!-- Connection Panel -->
+        <section class="card connection-panel">
+            <div class="status-info">
+                <div id="status-dot" class="status-dot"></div>
+                <div id="status-text" class="status-text">Folder Not Selected</div>
+            </div>
+            <button id="btn-select" class="btn-primary">Select Folder</button>
+        </section>
+
+        <!-- Configuration Panel -->
+        <section id="config-panel" class="card disabled-overlay">
+            <form id="settings-form" onsubmit="event.preventDefault();">
+                <div class="form-group">
+                    <label for="device_name">Device Name</label>
+                    <input type="text" id="device_name" name="device_name" maxlength="32" placeholder="e.g. My Folder Controller">
+                </div>
+
+                <div class="form-group">
+                    <label for="blink_rate">LED Blink Rate (Seconds)</label>
+                    <div class="slider-container">
+                        <input type="range" id="blink_rate" name="blink_rate" min="0.05" max="2.00" step="0.05" value="0.50">
+                        <span id="blink_rate_val" class="slider-val">0.50s</span>
+                    </div>
+                </div>
+
+                <div class="form-group toggle-group">
+                    <label for="feature_enabled">Enable LED Blinking</label>
+                    <label class="switch">
+                        <input type="checkbox" id="feature_enabled" name="feature_enabled" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="btn-row">
+                    <button type="submit" id="btn-save" class="btn-success">Save Configuration</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Log Area -->
+        <section class="card">
+            <label style="display: block; margin-bottom: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">Debug Log</label>
+            <div id="log-area">Initializing directory picker...</div>
+        </section>
+    </div>
+
+    <script>
+        const btnSelect = document.getElementById('btn-select');
+        const btnSave = document.getElementById('btn-save');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const configPanel = document.getElementById('config-panel');
+        const logArea = document.getElementById('log-area');
+
+        // Form Fields
+        const fldDeviceName = document.getElementById('device_name');
+        const fldBlinkRate = document.getElementById('blink_rate');
+        const fldBlinkRateVal = document.getElementById('blink_rate_val');
+        const fldFeatureEnabled = document.getElementById('feature_enabled');
+
+        let dirHandle = null;
+
+        // IndexedDB Configuration
+        const DB_NAME = 'PicoDirectoryDB';
+        const STORE_NAME = 'handles';
+        const KEY_NAME = 'circuitpy_dir';
+
+        // Update range value display
+        fldBlinkRate.addEventListener('input', (e) => {
+            fldBlinkRateVal.textContent = parseFloat(e.target.value).toFixed(2) + 's';
+        });
+
+        // Logging helper
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        // Open IndexedDB
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    db.createObjectStore(STORE_NAME);
+                };
+                request.onsuccess = (e) => resolve(e.target.result);
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        // Save directory handle
+        async function saveHandle(handle) {
+            try {
+                const db = await openDB();
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                await store.put(handle, KEY_NAME);
+                log("Directory handle saved to IndexedDB.");
+            } catch (err) {
+                log(`Failed to save handle to IndexedDB: ${err.message}`);
+            }
+        }
+
+        // Retrieve directory handle
+        async function getSavedHandle() {
+            try {
+                const db = await openDB();
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const store = tx.objectStore(STORE_NAME);
+                const request = store.get(KEY_NAME);
+                return new Promise((resolve) => {
+                    request.onsuccess = () => resolve(request.result || null);
+                    request.onerror = () => resolve(null);
+                });
+            } catch (err) {
+                return null;
+            }
+        }
+
+        // Verify folder handle permissions
+        async function verifyPermission(handle, readWrite) {
+            const options = {};
+            if (readWrite) {
+                options.mode = 'readwrite';
+            }
+            if ((await handle.queryPermission(options)) === 'granted') {
+                return true;
+            }
+            // Permission request must be handled by user action
+            return false;
+        }
+
+        // Request Folder Handle Permissions
+        async function requestPermission(handle, readWrite) {
+            const options = {};
+            if (readWrite) {
+                options.mode = 'readwrite';
+            }
+            return (await handle.requestPermission(options)) === 'granted';
+        }
+
+        // Initialize directory setup
+        async function init() {
+            log("Checking for saved directory handle...");
+            const savedHandle = await getSavedHandle();
+            if (savedHandle) {
+                log(`Found saved handle for folder: "${savedHandle.name}". Checking permissions...`);
+                dirHandle = savedHandle;
+                const hasPermission = await verifyPermission(dirHandle, true);
+                if (hasPermission) {
+                    onConnected();
+                } else {
+                    onPendingPermission();
+                }
+            } else {
+                onDisconnected();
+            }
+        }
+
+        function onConnected() {
+            statusDot.className = "status-dot connected";
+            statusText.textContent = `Linked to: ${dirHandle.name}`;
+            btnSelect.textContent = "Change Folder";
+            btnSelect.className = "btn-primary";
+            configPanel.classList.add('enabled');
+            log(`Linked to "${dirHandle.name}". Reading settings...`);
+            loadSettingsFile();
+        }
+
+        function onPendingPermission() {
+            statusDot.className = "status-dot pending";
+            statusText.textContent = "Permission Required";
+            btnSelect.textContent = "Authorize Access";
+            btnSelect.className = "btn-warning";
+            configPanel.classList.remove('enabled');
+            log("Directory handle exists, but requires user permission to read/write.");
+        }
+
+        function onDisconnected() {
+            dirHandle = null;
+            statusDot.className = "status-dot";
+            statusText.textContent = "Folder Not Selected";
+            btnSelect.textContent = "Select Folder";
+            btnSelect.className = "btn-primary";
+            configPanel.classList.remove('enabled');
+            log("No folder linked. Select your CIRCUITPY drive to begin.");
+        }
+
+        // Read settings_data.py
+        async function loadSettingsFile() {
+            if (!dirHandle) return;
+            try {
+                const fileHandle = await dirHandle.getFileHandle('settings_data.py');
+                const file = await fileHandle.getFile();
+                const text = await file.text();
+                log("settings_data.py loaded successfully. Parsing data...");
+                parsePythonConfig(text);
+            } catch (err) {
+                if (err.name === 'NotFoundError') {
+                    log("settings_data.py not found. Form will write a new file on Save.");
+                    // Set default UI values
+                    fldDeviceName.value = "Pico Default";
+                    fldBlinkRate.value = 0.5;
+                    fldBlinkRateVal.textContent = "0.50s";
+                    fldFeatureEnabled.checked = true;
+                } else {
+                    log(`Failed to read file: ${err.message}`);
+                }
+            }
+        }
+
+        // Parse Python key-value assignments
+        function parsePythonConfig(text) {
+            const config = {};
+            const lines = text.split('\n');
+            for (let line of lines) {
+                line = line.trim();
+                if (line.startsWith('#') || !line) continue;
+                const parts = line.split('=');
+                if (parts.length >= 2) {
+                    const key = parts[0].trim();
+                    let val = parts.slice(1).join('=').trim();
+                    // Strip quotes for strings
+                    if (val.startsWith('"') && val.endsWith('"')) {
+                        val = val.slice(1, -1);
+                    } else if (val.startsWith("'") && val.endsWith("'")) {
+                        val = val.slice(1, -1);
+                    } else if (val === 'True') {
+                        val = true;
+                    } else if (val === 'False') {
+                        val = false;
+                    } else {
+                        const num = parseFloat(val);
+                        if (!isNaN(num)) {
+                            val = num;
+                        }
+                    }
+                    config[key] = val;
+                }
+            }
+
+            // Apply values to UI
+            if (config.device_name !== undefined) fldDeviceName.value = config.device_name;
+            if (config.blink_rate !== undefined) {
+                fldBlinkRate.value = config.blink_rate;
+                fldBlinkRateVal.textContent = parseFloat(config.blink_rate).toFixed(2) + 's';
+            }
+            if (config.feature_enabled !== undefined) fldFeatureEnabled.checked = config.feature_enabled;
+            log("UI populated with parsed settings.");
+        }
+
+        // Select or Authorize Folder
+        btnSelect.addEventListener('click', async () => {
+            if (statusText.textContent === "Permission Required" && dirHandle) {
+                log("Requesting folder permissions from user...");
+                const granted = await requestPermission(dirHandle, true);
+                if (granted) {
+                    onConnected();
+                } else {
+                    log("Permission denied by user.");
+                }
+            } else {
+                log("Opening directory picker...");
+                try {
+                    const handle = await window.showDirectoryPicker();
+                    dirHandle = handle;
+                    await saveHandle(dirHandle);
+                    onConnected();
+                } catch (err) {
+                    log(`Directory selection canceled or failed: ${err.message}`);
+                }
+            }
+        });
+
+        // Save settings_data.py
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!dirHandle) {
+                alert("Please select your CIRCUITPY folder first.");
+                return;
+            }
+
+            log("Preparing Python configuration file contents...");
+            const devName = fldDeviceName.value.replace(/"/g, '\\"'); // escape double quotes
+            const blinkRate = parseFloat(fldBlinkRate.value);
+            const enabled = fldFeatureEnabled.checked ? "True" : "False";
+
+            const pyContent = `# Generated by Pico Folder Settings Portal
+device_name = "${devName}"
+blink_rate = ${blinkRate}
+feature_enabled = ${enabled}
+`;
+
+            try {
+                log("Writing settings_data.py to folder...");
+                const fileHandle = await dirHandle.getFileHandle('settings_data.py', { create: true });
+                const writable = await fileHandle.createWritable();
+                await writable.write(pyContent);
+                await writable.close();
+                log("settings_data.py saved successfully!");
+                log("CircuitPython will auto-reload the Pico and apply changes immediately.");
+            } catch (err) {
+                log(`Error saving configuration: ${err.message}`);
+                alert(`Error saving file: ${err.message}`);
+            }
+        });
+
+        // Initialize on load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
