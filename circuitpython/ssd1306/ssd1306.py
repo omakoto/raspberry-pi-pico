@@ -190,8 +190,11 @@ class Term:
         self.auto_show: bool = auto_show
         self.cursor_x: int = 0
         self.cursor_y: int = 0
+        self.saved_cursor_x: int = 0
+        self.saved_cursor_y: int = 0
         self.line_char_widths: list[int] = []
         self._esc_state: int = 0  # 0: normal, 1: esc, 2: csi
+        self._csi_buf: list[str] = []
 
     def clear(self) -> None:
         """Clears the terminal screen and resets cursor position."""
@@ -216,6 +219,20 @@ class Term:
         for i in range((pages - 1) * w, len(buf)):
             buf[i] = 0x00
 
+    def scroll_down(self) -> None:
+        """Scrolls the screen contents down by one line height (8 pixels) and clears the top line."""
+        buf = self.oled.buffer
+        w = self.oled.width
+        h = self.oled.height
+        pages = h // 8
+
+        # Shift all pages down by one page (8 pixels)
+        buf[w : pages * w] = buf[0 : (pages - 1) * w]
+
+        # Clear the first page (top 8 pixels)
+        for i in range(w):
+            buf[i] = 0x00
+
     def print(self, s: str) -> None:
         """Prints a string to the terminal, parsing supported ANSI escape/control codes."""
         for c in s:
@@ -227,18 +244,105 @@ class Term:
         """Prints a string followed by a newline."""
         self.print(s + "\n")
 
+    def _execute_csi(self, cmd: str) -> None:
+        # Parse parameters
+        param_str = "".join(self._csi_buf)
+        parts = param_str.split(";")
+        params: list[int] = []
+        for p in parts:
+            if p:
+                try:
+                    params.append(int(p))
+                except ValueError:
+                    params.append(0)
+            else:
+                params.append(0)
+
+        def get_param(index: int, default: int) -> int:
+            if index < len(params) and params[index] != 0:
+                return params[index]
+            return default
+
+        # Execute commands
+        if cmd == 'A':  # CUU - Cursor Up
+            n = get_param(0, 1)
+            self.cursor_y = max(0, self.cursor_y - n * 8)
+        elif cmd == 'B':  # CUD - Cursor Down
+            n = get_param(0, 1)
+            self.cursor_y = min(self.oled.height - 8, self.cursor_y + n * 8)
+        elif cmd == 'C':  # CUF - Cursor Forward
+            n = get_param(0, 1)
+            self.cursor_x = min(self.oled.width, self.cursor_x + n * 4)
+        elif cmd == 'D':  # CUB - Cursor Back
+            n = get_param(0, 1)
+            self.cursor_x = max(0, self.cursor_x - n * 4)
+        elif cmd == 'E':  # CNL - Cursor Next Line
+            n = get_param(0, 1)
+            self.cursor_x = 0
+            self.cursor_y = min(self.oled.height - 8, self.cursor_y + n * 8)
+        elif cmd == 'F':  # CPL - Cursor Previous Line
+            n = get_param(0, 1)
+            self.cursor_x = 0
+            self.cursor_y = max(0, self.cursor_y - n * 8)
+        elif cmd == 'G':  # CHA - Cursor Horizontal Absolute
+            n = get_param(0, 1)
+            self.cursor_x = max(0, min(self.oled.width, (n - 1) * 4))
+        elif cmd in ('H', 'f'):  # CUP / HVP - Cursor Position
+            r = get_param(0, 1)
+            c = get_param(1, 1)
+            self.cursor_y = max(0, min(self.oled.height - 8, (r - 1) * 8))
+            self.cursor_x = max(0, min(self.oled.width, (c - 1) * 4))
+        elif cmd == 'J':  # ED - Erase in Display
+            n = get_param(0, 0)
+            if n == 0:  # Clear from cursor to end of screen
+                self.oled.fill_rect(self.cursor_x, self.cursor_y, self.oled.width - self.cursor_x, 8, False)
+                if self.cursor_y + 8 < self.oled.height:
+                    self.oled.fill_rect(0, self.cursor_y + 8, self.oled.width, self.oled.height - (self.cursor_y + 8), False)
+            elif n == 1:  # Clear from start of screen to cursor
+                if self.cursor_y > 0:
+                    self.oled.fill_rect(0, 0, self.oled.width, self.cursor_y, False)
+                self.oled.fill_rect(0, self.cursor_y, self.cursor_x, 8, False)
+            elif n in (2, 3):  # Clear entire screen
+                self.oled.clear()
+        elif cmd == 'K':  # EL - Erase in Line
+            n = get_param(0, 0)
+            if n == 0:  # Clear from cursor to end of line
+                self.oled.fill_rect(self.cursor_x, self.cursor_y, self.oled.width - self.cursor_x, 8, False)
+            elif n == 1:  # Clear from start of line to cursor
+                self.oled.fill_rect(0, self.cursor_y, self.cursor_x, 8, False)
+            elif n == 2:  # Clear entire line
+                self.oled.fill_rect(0, self.cursor_y, self.oled.width, 8, False)
+        elif cmd == 'S':  # SU - Scroll Up
+            n = get_param(0, 1)
+            for _ in range(n):
+                self.scroll_up()
+        elif cmd == 'T':  # SD - Scroll Down
+            n = get_param(0, 1)
+            for _ in range(n):
+                self.scroll_down()
+        elif cmd == 's':  # Save cursor position
+            self.saved_cursor_x = self.cursor_x
+            self.saved_cursor_y = self.cursor_y
+        elif cmd == 'u':  # Restore cursor position
+            self.cursor_x = self.saved_cursor_x
+            self.cursor_y = self.saved_cursor_y
+
     def _write_char(self, c: str) -> None:
-        # ESC / CSI state machine to skip unsupported ANSI escape sequences
+        # ESC / CSI state machine to handle ANSI escape sequences
         if self._esc_state == 1:  # ESC state
             if c == '[':
                 self._esc_state = 2  # Transition to CSI state
+                self._csi_buf.clear()
             else:
                 self._esc_state = 0  # Ignore non-CSI escape sequence for now
             return
         elif self._esc_state == 2:  # CSI state
-            # CSI sequences terminate with a character in ASCII range 64 to 126 (@ to ~)
-            if 64 <= ord(c) <= 126:
+            if 48 <= ord(c) <= 63:
+                self._csi_buf.append(c)
+            elif 64 <= ord(c) <= 126:
+                self._execute_csi(c)
                 self._esc_state = 0
+                self._csi_buf.clear()
             return
 
         # Control character decoding

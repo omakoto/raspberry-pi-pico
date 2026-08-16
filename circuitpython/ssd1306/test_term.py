@@ -78,8 +78,8 @@ def test_basic_print() -> None:
     assert term.cursor_y == 0
 
     # 9. ANSI escape sequence ignoring
-    # \x1b[31m (red) and \x1b[H should be ignored and not advance cursor or print anything
-    term.print("\x1b[31mABC\x1b[H")
+    # \x1b[31m (red) and \x1b[?25h (show cursor) should be ignored and not advance cursor
+    term.print("\x1b[31mABC\x1b[?25h")
     # Only "ABC" should be rendered
     assert term.cursor_x == 12
     assert term.cursor_y == 0
@@ -87,5 +87,50 @@ def test_basic_print() -> None:
     print("All Term unit tests passed successfully!")
 
 
+def test_csi_sequences() -> None:
+    i2c = MockI2C()
+    import typing
+    oled = SSD1306(typing.cast(typing.Any, i2c), width=128, height=64)
+    term = Term(oled)
+
+    # Move cursor down by 2 lines (CUD: CSI 2 B)
+    term.print("\x1b[2B")
+    assert term.cursor_y == 16
+    assert term.cursor_x == 0
+
+    # Move cursor up by 1 line (CUU: CSI A or CSI 1 A)
+    term.print("\x1b[A")
+    assert term.cursor_y == 8
+
+    # Move cursor forward by 10 columns (CUF: CSI 10 C)
+    term.print("\x1b[10C")
+    assert term.cursor_x == 40
+
+    # Move cursor back by 5 columns (CUB: CSI 5 D)
+    term.print("\x1b[5D")
+    assert term.cursor_x == 20
+
+    # Cursor position: row 5, col 8 (CUP: CSI 5 ; 8 H)
+    term.print("\x1b[5;8H")
+    assert term.cursor_y == 32
+    assert term.cursor_x == 28
+
+    # Save cursor position (CSI s)
+    term.print("\x1b[s")
+
+    # Move cursor to home (CSI H or CSI f)
+    term.print("\x1b[H")
+    assert term.cursor_x == 0
+    assert term.cursor_y == 0
+
+    # Restore cursor position (CSI u)
+    term.print("\x1b[u")
+    assert term.cursor_x == 28
+    assert term.cursor_y == 32
+
+    print("All CSI unit tests passed successfully!")
+
+
 if __name__ == "__main__":
     test_basic_print()
+    test_csi_sequences()
