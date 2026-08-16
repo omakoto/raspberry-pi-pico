@@ -6,4 +6,4 @@
 
 ## Test ir-cloner
 
-## Create a web server for settings
+## Create a web server for settings (Done, not easily possible; instead created 2026-08-16-directory-config to store the setting html to write the settings.json)
