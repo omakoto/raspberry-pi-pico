@@ -33,7 +33,9 @@ Hold the sensor with the **dome / rounded lens facing you** and the pins pointin
 ## Features
 
 - **Universal Pulse Logging**: Captures and displays microsecond-level pulse/space durations for any remote control (NEC, Sony, RC-5, Samsung, etc.).
-- **Automatic NEC Decoding**: Automatically identifies and parses standard 32-bit NEC packets (used by most hobby mini remotes), displaying the hex Address, Command, and button name.
+- **Automatic Protocol Decoding**:
+  - **NEC Protocol**: Parses 32-bit NEC packets with Address, Command, and known button names.
+  - **Sony SIRC Protocol**: Parses 12-bit, 15-bit, and 20-bit Sony remote codes with Device ID and Command names (e.g. TV keypad, volume, channels).
 - **Built-in `pulseio`**: Uses CircuitPython's built-in `pulseio.PulseIn` with zero external library dependencies.
 - **Visual Feedback**: Flashes the Pico's onboard LED upon receiving IR bursts.
 
