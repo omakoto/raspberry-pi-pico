@@ -2,4 +2,4 @@
 
 ## Terminal emulator library w/ ssd1306
 
-## Keyboard
+## Keyboard (Done: [2026-08-16-usb-keyboard](2026-08-16-usb-keyboard/))
