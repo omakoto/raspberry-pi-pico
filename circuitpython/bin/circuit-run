@@ -1,0 +1,44 @@
+#!/bin/bash
+# Shebang executor for CircuitPython scripts. Copies the script to the CircuitPython mount directory as code.py.
+#
+# To run the test:
+#   src/pico/circuitpython/bin/circuit-run_test.bash
+#
+# Simple script, no help needed.
+
+set -e
+
+# Resolve the directory where this script and find-circut-dir reside
+DIR="$(dirname "${BASH_SOURCE[0]}")"
+
+if [[ -z "$1" ]]; then
+  echo "Usage: $0 <script_to_copy>" >&2
+  exit 1
+fi
+
+src_file="$1"
+if [[ ! -f "$src_file" ]]; then
+  echo "Error: File '$src_file' not found." >&2
+  exit 1
+fi
+
+# Find the CircuitPython mount directory
+if ! circuit_dir=$("$DIR/find-circut-dir" 2>/dev/null); then
+  echo "Error: CircuitPython mount directory not found." >&2
+  exit 1
+fi
+
+if [[ ! -d "$circuit_dir" ]]; then
+  echo "Error: CircuitPython mount directory '$circuit_dir' does not exist or is not a directory." >&2
+  exit 1
+fi
+
+dest_file="$circuit_dir/code.py"
+echo "Copying '$src_file' to '$dest_file'..."
+cp "$src_file" "$dest_file"
+
+if [[ -z "$MOCK_CIRCUIT_DIR" && -c /dev/ttyACM0 ]]; then
+  echo 'Press ctrl-a ctrl-q to quit.'
+  picocom -q -b 115200 /dev/ttyACM0
+fi
+

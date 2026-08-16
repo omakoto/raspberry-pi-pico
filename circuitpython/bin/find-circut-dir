@@ -1,0 +1,28 @@
+#!/bin/bash
+# Find CircuitPython's mount directory.
+#
+# To run the test:
+#   src/pico/circuitpython/bin/find-circut-dir_test.bash
+#
+# Simple script, no help needed.
+
+out=""
+
+if command -v findmnt >/dev/null 2>&1; then
+  out=$(findmnt -rn -o TARGET -S LABEL=CIRCUITPY 2>/dev/null)
+else
+  # Fallback: Find device via /dev/disk/by-label and lookup mountpoint in /proc/mounts
+  if [[ -L "/dev/disk/by-label/CIRCUITPY" ]]; then
+    dev=$(readlink -f /dev/disk/by-label/CIRCUITPY)
+    out=$(awk -v dev="$dev" '$1 == dev {print $2; exit}' /proc/mounts)
+  fi
+fi
+
+if [[ -n "$out" ]]; then
+  echo "$out" | head -n 1
+  exit 0
+else
+  echo "CircuitPython mount directory not found" >&2
+  exit 1
+fi
+
