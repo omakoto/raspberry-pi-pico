@@ -39,7 +39,7 @@ echo "Copying '$src_file' to '$dest_file'..."
 # Prepend supervisor.runtime.autoreload = False to prevent unintended soft reboots
 # caused by host OS desktop daemons and background USB filesystem access.
 {
-  echo "import supervisor; supervisor.runtime.autoreload = False"
+  echo -n "import supervisor; supervisor.runtime.autoreload = False;"
   cat "$src_file"
 } > "$dest_file"
 

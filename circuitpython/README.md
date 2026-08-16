@@ -39,6 +39,7 @@ Below is an overview of the projects and utilities contained in this directory:
 | [`2026-08-16-usb-keyboard`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-usb-keyboard) | Emulates a USB HID keyboard, sending keys in response to physical buttons ([`usb-keyboard.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-usb-keyboard/usb-keyboard.py)). |
 | [`2026-08-16-web-serial-config`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config) | Configuration settings portal running over secondary USB Serial (CDC Data), parsing/saving options to JSON with storage protection selector GP14. |
 | [`2026-08-16-directory-config`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-directory-config) | Zero-connection settings portal using browser Directory Picker API to write config values directly as variables to `settings_data.py`, triggering soft-reboot on write. |
+| [`2026-08-16-ifttt-desk-light`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-ifttt-desk-light) | Triggers an IFTTT webhook event via HTTP GET request when a button on GP14 is pressed ([`ifttt-desk-light.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-ifttt-desk-light/ifttt-desk-light.py)). |
 
 ### Utilities
 
