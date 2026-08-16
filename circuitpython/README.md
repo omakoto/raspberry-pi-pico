@@ -21,3 +21,25 @@ picocom -b 115200 /dev/ttyACM0
   ```bash
   chmod +x <script-name>.py
   ```
+
+## Project Directories
+
+Below is an overview of the projects and utilities contained in this directory:
+
+### Projects
+
+| Project | Description |
+| :--- | :--- |
+| [`2026-08-15-first-led`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-first-led) | A simple test script ([`led-blinker.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-first-led/led-blinker.py)) to blink the onboard LED. |
+| [`2026-08-15-rotary-test-ec11`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-rotary-test-ec11) | Reads and prints rotation steps/directions from an EC11 rotary encoder ([`rotary-encoder.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-rotary-test-ec11/rotary-encoder.py)). |
+| [`2026-08-15-sht31-test`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-sht31-test) | Reads and prints temperature/humidity values from an SHT31 sensor over I2C ([`sht31-test.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-sht31-test/sht31-test.py)). |
+| [`2026-08-15-ssd1306-test`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-ssd1306-test) | Initializes and renders simple text on an SSD1306 OLED display using standard I2C connection ([`ssd1306-test.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-15-ssd1306-test/ssd1306-test.py)). |
+| [`2026-08-16-ir-receiver`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-ir-receiver) | Captures raw IR pulses and logs NEC remote protocol commands ([`ir-receiver.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-ir-receiver/ir-receiver.py)). |
+| [`2026-08-16-ir-cloner`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-ir-cloner) | Recording cloner and blaster that logs remote signals and replicates them on an IR LED transmitter ([`ir-cloner.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-ir-cloner/ir-cloner.py)). |
+| [`2026-08-16-usb-keyboard`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-usb-keyboard) | Emulates a USB HID keyboard, sending keys in response to physical buttons ([`usb-keyboard.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-usb-keyboard/usb-keyboard.py)). |
+| [`2026-08-16-web-serial-config`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config) | Configuration settings portal running over secondary USB Serial (CDC Data), parsing/saving options to JSON with storage protection selector GP14. |
+| [`2026-08-16-directory-config`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-directory-config) | Zero-connection settings portal using browser Directory Picker API to write config values directly as variables to `settings_data.py`, triggering soft-reboot on write. |
+
+### Utilities
+
+* [`bin/`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/bin): Contains helper scripts (`circuit-run`, `find-circut-dir`) to run and monitor Python code on connected Pico devices, along with bash unit test files.
