@@ -47,7 +47,8 @@ if [[ ! -f "$DEST_FILE" ]]; then
 fi
 
 dest_content=$(cat "$DEST_FILE")
-if [[ "$dest_content" != "print('Hello CircuitPython')" ]]; then
+expected_content=$(printf "import supervisor; supervisor.runtime.autoreload = False\nprint('Hello CircuitPython')")
+if [[ "$dest_content" != "$expected_content" ]]; then
   echo "FAIL: Destination file content incorrect: '$dest_content'"
   exit 1
 fi

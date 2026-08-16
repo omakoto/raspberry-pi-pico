@@ -21,10 +21,6 @@ import time
 import board
 import digitalio
 import pulseio
-import supervisor
-
-# Disable auto-reload on filesystem writes to prevent spurious restarts from OS daemons
-supervisor.runtime.autoreload = False
 
 # When True, all captured raw pulse timings are printed; when False, output is truncated to the first 32 pulses
 VERBOSE: bool = True

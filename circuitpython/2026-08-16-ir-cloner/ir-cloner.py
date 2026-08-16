@@ -18,10 +18,6 @@ import time
 import board
 import digitalio
 import pulseio
-import supervisor
-
-# Disable auto-reload on filesystem writes to prevent spurious restarts from OS daemons
-supervisor.runtime.autoreload = False
 
 # Known NEC remote button codes commonly found on 21-key mini IR remotes
 NEC_BUTTON_MAP: dict[int, str] = {
