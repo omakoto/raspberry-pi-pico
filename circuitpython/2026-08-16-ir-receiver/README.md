@@ -70,3 +70,9 @@ When pressing buttons on an IR remote, you may notice varying pulse counts or le
 3. **Optical Noise & Jitter**:
    - Infrared receivers use Automatic Gain Control (AGC). Ambient lighting (fluorescent fixtures, screen backlights), reflections, or low remote batteries can occasionally introduce slight microsecond timing variations or 1–2 stray edge transitions at the boundary of a transmission burst.
 
+---
+
+## Protocol Reference
+
+For an in-depth reference of common IR remote protocols (NEC, Sony SIRC, Samsung, Philips RC-5/RC-6, Panasonic/Kaseikyo, and HVAC/AC remotes), see [PROTOCOL.md](PROTOCOL.md).
+
