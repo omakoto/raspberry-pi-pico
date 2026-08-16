@@ -337,6 +337,31 @@
                 <div class="form-group">
                     <label for="key_combo">Key Combination (Shortcut)</label>
                     <input type="text" id="key_combo" name="key_combo" placeholder="Click here and press key combo..." readonly style="caret-color: transparent; cursor: pointer;">
+                    
+                    <div style="margin-top: 0.5rem; text-align: right;">
+                        <a href="#" id="toggle-manual-key" style="font-size: 0.8rem; color: var(--color-primary); text-decoration: none;">Configure manually (for blocked shortcuts)</a>
+                    </div>
+                    
+                    <div id="manual-key-container" style="display: none; margin-top: 0.75rem; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; background-color: var(--bg-main); gap: 0.75rem; flex-direction: column;">
+                        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: 0.25rem; font-weight: normal; font-size: 0.85rem;">
+                                <input type="checkbox" id="m-ctrl"> Ctrl
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.25rem; font-weight: normal; font-size: 0.85rem;">
+                                <input type="checkbox" id="m-alt"> Alt
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.25rem; font-weight: normal; font-size: 0.85rem;">
+                                <input type="checkbox" id="m-shift"> Shift
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.25rem; font-weight: normal; font-size: 0.85rem;">
+                                <input type="checkbox" id="m-meta"> Meta
+                            </label>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <label for="m-key" style="font-weight: normal; font-size: 0.85rem;">Key:</label>
+                            <input type="text" id="m-key" placeholder="e.g. w, t, enter" style="width: 120px; padding: 0.25rem 0.5rem; font-size: 0.85rem; background-color: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+                        </div>
+                    </div>
                 </div>
 
                 <div class="btn-row">
@@ -379,6 +404,57 @@
             fldBlinkRateVal.textContent = parseFloat(e.target.value).toFixed(2) + 's';
         });
 
+        // Manual Configuration Elements
+        const toggleManualKey = document.getElementById('toggle-manual-key');
+        const manualKeyContainer = document.getElementById('manual-key-container');
+        const mCtrl = document.getElementById('m-ctrl');
+        const mAlt = document.getElementById('m-alt');
+        const mShift = document.getElementById('m-shift');
+        const mMeta = document.getElementById('m-meta');
+        const mKey = document.getElementById('m-key');
+
+        function populateManualFields() {
+            const parts = fldKeyCombo.value.split('+');
+            mCtrl.checked = parts.includes('ctrl');
+            mAlt.checked = parts.includes('alt');
+            mShift.checked = parts.includes('shift');
+            mMeta.checked = parts.includes('meta');
+            const keyPart = parts.filter(p => !['ctrl', 'alt', 'shift', 'meta'].includes(p)).join('+');
+            mKey.value = keyPart;
+        }
+
+        function updateKeyComboFromManual() {
+            const modifiers = [];
+            if (mCtrl.checked) modifiers.push('ctrl');
+            if (mAlt.checked) modifiers.push('alt');
+            if (mShift.checked) modifiers.push('shift');
+            if (mMeta.checked) modifiers.push('meta');
+            const keyVal = mKey.value.trim().toLowerCase();
+            if (keyVal) {
+                modifiers.push(keyVal);
+            }
+            fldKeyCombo.value = modifiers.join('+');
+        }
+
+        // Attach listeners for manual inputs
+        [mCtrl, mAlt, mShift, mMeta].forEach(el => {
+            el.addEventListener('change', updateKeyComboFromManual);
+        });
+        mKey.addEventListener('input', updateKeyComboFromManual);
+
+        // Toggle link
+        toggleManualKey.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (manualKeyContainer.style.display === 'none') {
+                manualKeyContainer.style.display = 'flex';
+                toggleManualKey.textContent = "Hide manual configuration";
+                populateManualFields();
+            } else {
+                manualKeyContainer.style.display = 'none';
+                toggleManualKey.textContent = "Configure manually (for blocked shortcuts)";
+            }
+        });
+
         // Key combo recorder
         fldKeyCombo.addEventListener('keydown', (e) => {
             e.preventDefault();
@@ -394,6 +470,7 @@
             if (['control', 'alt', 'shift', 'meta'].includes(key)) {
                 // Just modifiers pressed so far
                 fldKeyCombo.value = modifiers.join('+');
+                populateManualFields();
                 return;
             }
 
@@ -409,6 +486,7 @@
             // Combine modifiers and the key
             const combo = [...modifiers, keyName].join('+');
             fldKeyCombo.value = combo;
+            populateManualFields();
             log(`Captured key combo: ${combo}`);
         });
 
@@ -592,6 +670,7 @@
             }
             if (config.feature_enabled !== undefined) fldFeatureEnabled.checked = config.feature_enabled;
             fldKeyCombo.value = config.key_combo || "ctrl+a";
+            populateManualFields();
             log("UI populated with parsed settings.");
         }
 
