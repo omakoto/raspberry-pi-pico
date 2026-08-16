@@ -17,8 +17,11 @@ import array
 import time
 import board
 import digitalio
-import pwmio
 import pulseio
+import supervisor
+
+# Disable auto-reload on filesystem writes to prevent spurious restarts from OS daemons
+supervisor.runtime.autoreload = False
 
 # Known NEC remote button codes commonly found on 21-key mini IR remotes
 NEC_BUTTON_MAP: dict[int, str] = {
@@ -250,18 +253,15 @@ def decode_sony_sirc(pulses: list[int]) -> tuple[int, int, int, int] | None:
 def blast_ir_signal(pin: board.Pin, pulses: list[int], frequency: int = 38000, repeat_count: int = 1) -> None:
     """
     Transmits an array of raw microsecond pulse durations over the specified GPIO pin
-    using hardware PWM carrier modulation.
+    using hardware carrier modulation.
     """
     pulse_arr: array.array = array.array("H", pulses)
     for i in range(repeat_count):
-        # Create hardware carrier PWM and PulseOut transmitter
-        pwm: pwmio.PWMOut = pwmio.PWMOut(pin, frequency=frequency, duty_cycle=2**15)
-        emitter: pulseio.PulseOut = pulseio.PulseOut(pwm)
+        emitter: pulseio.PulseOut = pulseio.PulseOut(pin, frequency=frequency, duty_cycle=2**15)
         try:
             emitter.send(pulse_arr)
         finally:
             emitter.deinit()
-            pwm.deinit()
 
         if i < repeat_count - 1:
             time.sleep(0.045)  # Standard 45ms inter-frame gap

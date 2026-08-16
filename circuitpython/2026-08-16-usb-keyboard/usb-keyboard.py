@@ -14,6 +14,10 @@ import time
 import board
 import digitalio
 import usb_hid
+import supervisor
+
+# Disable auto-reload on filesystem writes to prevent spurious restarts from OS daemons
+supervisor.runtime.autoreload = False
 
 # Standard USB HID Keyboard usage page and usage ID
 HID_USAGE_PAGE_KEYBOARD: int = 0x01
