@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico USB Settings Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #0f172a;
+            --bg-card: #1e293b;
+            --border-color: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --color-primary: #0ea5e9;
+            --color-primary-hover: #38bdf8;
+            --color-success: #10b981;
+            --color-warning: #f59e0b;
+            --color-error: #ef4444;
+            --font-main: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+            line-height: 1.5;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        p.subtitle {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        .connection-panel {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .status-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--color-error);
+            transition: background-color 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background-color: var(--color-success);
+            box-shadow: 0 0 8px var(--color-success);
+        }
+
+        .status-text {
+            font-weight: 500;
+            font-size: 1rem;
+        }
+
+        button {
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 0.625rem 1.25rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button.btn-primary {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        button.btn-primary:hover {
+            background-color: var(--color-primary-hover);
+        }
+
+        button.btn-success {
+            background-color: var(--color-success);
+            color: white;
+        }
+
+        button.btn-success:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            background-color: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        .alert {
+            display: none;
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.9rem;
+            border: 1px solid transparent;
+        }
+
+        .alert.alert-warning {
+            display: block;
+            background-color: rgba(245, 158, 11, 0.15);
+            border-color: rgba(245, 158, 11, 0.3);
+            color: #fbd38d;
+        }
+
+        .alert.alert-success {
+            display: block;
+            background-color: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.3);
+            color: #a7f3d0;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        input[type="text"] {
+            width: 100%;
+            background-color: var(--bg-main);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.625rem 0.875rem;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--color-primary);
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        input[type="range"] {
+            flex-grow: 1;
+            accent-color: var(--color-primary);
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .slider-val {
+            font-family: monospace;
+            font-size: 1rem;
+            font-weight: 600;
+            width: 3.5rem;
+            text-align: right;
+        }
+
+        /* Toggle switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #475569;
+            transition: .3s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--color-success);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .btn-row {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 1.5rem;
+        }
+
+        #log-area {
+            font-family: monospace;
+            font-size: 0.8rem;
+            background-color: #020617;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem;
+            max-height: 120px;
+            overflow-y: auto;
+            color: #10b981;
+            white-space: pre-wrap;
+        }
+
+        .disabled-overlay {
+            opacity: 0.4;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .disabled-overlay.enabled {
+            opacity: 1;
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Pico Settings Portal</h1>
+            <p class="subtitle">Configure your device in real-time over USB Web Serial</p>
+        </header>
+
+        <!-- Connection Panel -->
+        <section class="card connection-panel">
+            <div class="status-info">
+                <div id="status-dot" class="status-dot"></div>
+                <div id="status-text" class="status-text">Disconnected</div>
+            </div>
+            <button id="btn-connect" class="btn-primary">Connect Device</button>
+        </section>
+
+        <!-- Warnings & Alerts -->
+        <section id="alert-container" style="display: none;">
+            <div id="alert-box" class="alert"></div>
+        </section>
+
+        <!-- Configuration Panel -->
+        <section id="config-panel" class="card disabled-overlay">
+            <form id="settings-form" onsubmit="event.preventDefault();">
+                <div class="form-group">
+                    <label for="device_name">Device Name</label>
+                    <input type="text" id="device_name" name="device_name" maxlength="32" placeholder="e.g. My Custom Controller">
+                </div>
+
+                <div class="form-group">
+                    <label for="blink_rate">LED Blink Rate (Seconds)</label>
+                    <div class="slider-container">
+                        <input type="range" id="blink_rate" name="blink_rate" min="0.05" max="2.00" step="0.05" value="0.50">
+                        <span id="blink_rate_val" class="slider-val">0.50s</span>
+                    </div>
+                </div>
+
+                <div class="form-group toggle-group">
+                    <label for="feature_enabled">Enable Status Blinking</label>
+                    <label class="switch">
+                        <input type="checkbox" id="feature_enabled" name="feature_enabled" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="btn-row">
+                    <button type="submit" id="btn-save" class="btn-success">Save Configuration</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Log Area -->
+        <section class="card">
+            <label style="display: block; margin-bottom: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">Debug Log</label>
+            <div id="log-area">Ready to connect...</div>
+        </section>
+    </div>
+
+    <script>
+        const btnConnect = document.getElementById('btn-connect');
+        const btnSave = document.getElementById('btn-save');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const configPanel = document.getElementById('config-panel');
+        const alertContainer = document.getElementById('alert-container');
+        const alertBox = document.getElementById('alert-box');
+        const logArea = document.getElementById('log-area');
+
+        // Form Fields
+        const fldDeviceName = document.getElementById('device_name');
+        const fldBlinkRate = document.getElementById('blink_rate');
+        const fldBlinkRateVal = document.getElementById('blink_rate_val');
+        const fldFeatureEnabled = document.getElementById('feature_enabled');
+
+        let port = null;
+        let reader = null;
+        let keepReading = true;
+        let inputBuffer = '';
+
+        // Update range value display
+        fldBlinkRate.addEventListener('input', (e) => {
+            fldBlinkRateVal.textContent = parseFloat(e.target.value).toFixed(2) + 's';
+        });
+
+        // Logging helper
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logArea.textContent += `[${time}] ${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        // Web Serial: Connect
+        async function connect() {
+            log("Requesting serial port...");
+            try {
+                port = await navigator.serial.requestPort();
+                log("Opening port...");
+                await port.open({ baudRate: 115200 });
+                
+                statusDot.classList.add('connected');
+                statusText.textContent = "Connected";
+                btnConnect.textContent = "Disconnect";
+                configPanel.classList.add('enabled');
+                log("Port opened. Fetching board status...");
+                
+                keepReading = true;
+                readLoop(); // Start read loop asynchronously
+                
+                // Query state
+                await send({ command: "get_state" });
+            } catch (err) {
+                log(`Error connecting: ${err.message}`);
+                cleanupConnection();
+            }
+        }
+
+        // Web Serial: Disconnect
+        async function disconnect() {
+            log("Disconnecting...");
+            keepReading = false;
+            if (reader) {
+                try {
+                    await reader.cancel();
+                } catch (e) {
+                    console.error("Reader cancel error:", e);
+                }
+            }
+        }
+
+        function cleanupConnection() {
+            port = null;
+            reader = null;
+            keepReading = false;
+            inputBuffer = '';
+            statusDot.classList.remove('connected');
+            statusText.textContent = "Disconnected";
+            btnConnect.textContent = "Connect Device";
+            configPanel.classList.remove('enabled');
+            alertContainer.style.display = 'none';
+            btnSave.disabled = false; // Reset button state
+            log("Disconnected.");
+        }
+
+        // Send JSON data to Pico
+        async function send(obj) {
+            if (!port || !port.writable) {
+                log("Cannot write: port is not writeable or closed.");
+                return;
+            }
+            try {
+                const encoder = new TextEncoder();
+                const writer = port.writable.getWriter();
+                const line = JSON.stringify(obj) + "\n";
+                await writer.write(encoder.encode(line));
+                writer.releaseLock();
+            } catch (err) {
+                log(`Error sending data: ${err.message}`);
+            }
+        }
+
+        // Read Loop
+        async function readLoop() {
+            const decoder = new TextDecoder();
+            while (port && port.readable && keepReading) {
+                try {
+                    reader = port.readable.getReader();
+                    while (keepReading) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        
+                        inputBuffer += decoder.decode(value, { stream: true });
+                        let newlineIdx;
+                        while ((newlineIdx = inputBuffer.indexOf('\n')) >= 0) {
+                            const line = inputBuffer.slice(0, newlineIdx).trim();
+                            inputBuffer = inputBuffer.slice(newlineIdx + 1);
+                            if (line) {
+                                handleIncomingLine(line);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    log(`Read error (likely disconnected): ${err.message}`);
+                    break;
+                } finally {
+                    if (reader) {
+                        try {
+                            reader.releaseLock();
+                        } catch (e) {
+                            console.error("Lock release error:", e);
+                        }
+                        reader = null;
+                    }
+                }
+            }
+
+            // After loop exits, close the port cleanly
+            if (port) {
+                try {
+                    await port.close();
+                } catch (err) {
+                    console.error("Port close error:", err);
+                }
+                port = null;
+            }
+            cleanupConnection();
+        }
+
+        // Handle received JSON messages
+        function handleIncomingLine(line) {
+            try {
+                const response = JSON.parse(line);
+                log(`Received: ${JSON.stringify(response)}`);
+                
+                if (response.status === "ok") {
+                    if (response.settings) {
+                        // Apply settings to form
+                        fldDeviceName.value = response.settings.device_name || '';
+                        fldBlinkRate.value = response.settings.blink_rate || 0.5;
+                        fldBlinkRateVal.textContent = parseFloat(fldBlinkRate.value).toFixed(2) + 's';
+                        fldFeatureEnabled.checked = response.settings.feature_enabled !== false;
+                    }
+                    
+                    if (response.readonly !== undefined) {
+                        alertContainer.style.display = 'block';
+                        if (response.readonly) {
+                            alertBox.className = "alert alert-warning";
+                            alertBox.innerHTML = `⚠️ <strong>Read-Only Mode Active:</strong> The Pico's storage is write-locked by the computer. You can see settings live, but to save permanently you must disconnect GP14 from GND and reboot the Pico.`;
+                            btnSave.disabled = true;
+                        } else {
+                            alertBox.className = "alert alert-success";
+                            alertBox.innerHTML = `✅ <strong>Ready for Writes:</strong> The Pico has full write access. Saved settings will persist across power cycles.`;
+                            btnSave.disabled = false;
+                        }
+                    }
+                } else if (response.status === "error") {
+                    log(`Board reported error: ${response.message}`);
+                    alert(response.message);
+                }
+            } catch (err) {
+                log(`Failed to parse response: ${line}`);
+            }
+        }
+
+        // Event Listeners
+        btnConnect.addEventListener('click', () => {
+            if (port) {
+                disconnect();
+            } else {
+                connect();
+            }
+        });
+
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!port) return;
+            
+            const config = {
+                command: "set_settings",
+                settings: {
+                    device_name: fldDeviceName.value,
+                    blink_rate: parseFloat(fldBlinkRate.value),
+                    feature_enabled: fldFeatureEnabled.checked
+                }
+            };
+            
+            log(`Sending save request...`);
+            await send(config);
+        });
+
+        // Listen for browser disconnect event
+        if (navigator.serial) {
+            navigator.serial.addEventListener('disconnect', (event) => {
+                if (event.target === port) {
+                    log("USB physical disconnection detected.");
+                    disconnect();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
