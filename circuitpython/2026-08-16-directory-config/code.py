@@ -9,6 +9,7 @@ class DefaultSettings:
     device_name: str = "Pico Default (Fallback)"
     blink_rate: float = 0.5
     feature_enabled: bool = True
+    key_combo: str = "ctrl+a"
 
 settings: DefaultSettings
 
@@ -26,6 +27,7 @@ print("----- Pico Configuration Started -----")
 print(f"Device Name: {settings.device_name}")
 print(f"Blink Rate: {settings.blink_rate}s")
 print(f"Blinking Enabled: {settings.feature_enabled}")
+print(f"Key Combination: {getattr(settings, 'key_combo', 'ctrl+a')}")
 print("--------------------------------------")
 
 last_blink_time: float = time.monotonic()
