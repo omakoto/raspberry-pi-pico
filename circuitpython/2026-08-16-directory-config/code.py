@@ -1,8 +1,11 @@
+#!/usr/bin/env circuit-run
 # code.py
 # Main loop that blinks the onboard LED using imported settings from settings_data.py.
 import board
 import digitalio
 import time
+
+#file:settings.html
 
 # Default fallback settings class
 class DefaultSettings:

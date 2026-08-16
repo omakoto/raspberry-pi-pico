@@ -43,6 +43,23 @@ echo "Copying '$src_file' to '$dest_file'..."
   cat "$src_file"
 } > "$dest_file"
 
+# Extract and copy files tagged with "#file:"
+src_dir="$(dirname "$src_file")"
+while IFS= read -r line; do
+  if [[ "$line" =~ \#file:[[:space:]]*([^[:space:]]+) ]]; then
+    tagged_file="${BASH_REMATCH[1]}"
+    tagged_src_path="$src_dir/$tagged_file"
+    tagged_dest_path="$circuit_dir/$(basename "$tagged_file")"
+    
+    if [[ -f "$tagged_src_path" ]]; then
+      echo "Copying tagged file '$tagged_file' to '$tagged_dest_path'..."
+      cp "$tagged_src_path" "$tagged_dest_path"
+    else
+      echo "Warning: Tagged file '$tagged_src_path' not found. Skipping." >&2
+    fi
+  fi
+done < "$src_file"
+
 if [[ -z "$MOCK_CIRCUIT_DIR" && -c /dev/ttyACM0 ]]; then
   # Send soft reboot sequence (Ctrl-C then Ctrl-D) to trigger immediate execution of new code.py
   python3 -c "import os; fd=os.open('/dev/ttyACM0', os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK); os.write(fd, b'\x03\x04'); os.close(fd)" 2>/dev/null || true

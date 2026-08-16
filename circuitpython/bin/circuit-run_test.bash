@@ -74,4 +74,28 @@ if "$BIN_DIR/circuit-run" "$SRC_FILE" 2>/dev/null; then
   exit 1
 fi
 
+# Test 5: Copy tagged files using #file: comments
+export MOCK_CIRCUIT_DIR="$MOCK_MOUNT"
+SRC_FILE_TAGGED="$TEMP_DIR/test_script_tagged.py"
+EXTRA_FILE="$TEMP_DIR/extra_file.txt"
+
+echo "print('Hello')" > "$SRC_FILE_TAGGED"
+echo "#file:extra_file.txt" >> "$SRC_FILE_TAGGED"
+echo "data" > "$EXTRA_FILE"
+
+"$BIN_DIR/circuit-run" "$SRC_FILE_TAGGED"
+
+# Verify extra_file.txt was copied
+EXTRA_DEST_FILE="$MOCK_MOUNT/extra_file.txt"
+if [[ ! -f "$EXTRA_DEST_FILE" ]]; then
+  echo "FAIL: Extra file $EXTRA_DEST_FILE was not copied"
+  exit 1
+fi
+
+extra_content=$(cat "$EXTRA_DEST_FILE")
+if [[ "$extra_content" != "data" ]]; then
+  echo "FAIL: Extra file content incorrect: '$extra_content'"
+  exit 1
+fi
+
 echo "All tests passed!"
