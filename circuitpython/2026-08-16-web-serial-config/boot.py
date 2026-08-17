@@ -15,10 +15,13 @@ supervisor.set_usb_identification(
 # Enable both console (REPL) and secondary data CDC ports
 usb_cdc.enable(console=True, data=True)
 
-# Set up GP14 as an input with internal pull-up.
-# Jumper GP14 to GND to make filesystem writable by PC (Default Mode).
-# Leave GP14 open (disconnected) to make filesystem writable by CircuitPython.
-write_switch: digitalio.DigitalInOut = digitalio.DigitalInOut(board.GP14)
+# Pin Definitions
+PIN_STORAGE_SWITCH: board.Pin = board.GP14
+
+# Set up write protect switch as an input with internal pull-up.
+# Jumper switch to GND to make filesystem writable by PC (Default Mode).
+# Leave switch open (disconnected) to make filesystem writable by CircuitPython.
+write_switch: digitalio.DigitalInOut = digitalio.DigitalInOut(PIN_STORAGE_SWITCH)
 write_switch.direction = digitalio.Direction.INPUT
 write_switch.pull = digitalio.Pull.UP
 

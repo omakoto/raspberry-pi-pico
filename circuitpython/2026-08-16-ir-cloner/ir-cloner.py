@@ -19,6 +19,12 @@ import board
 import digitalio
 import pulseio
 
+# Pin Definitions
+PIN_IR_RECEIVER: board.Pin = board.GP19
+PIN_IR_BLASTER: board.Pin = board.GP20
+PIN_TRIGGER_BUTTON: board.Pin = board.GP17
+PIN_LED: board.Pin = board.LED
+
 # Known NEC remote button codes commonly found on 21-key mini IR remotes
 NEC_BUTTON_MAP: dict[int, str] = {
     0x45: "CH- / POWER",
@@ -273,16 +279,16 @@ def main() -> None:
     print("==================================================")
     print("\nStep 1: Point your remote at the receiver and press any key to record.")
 
-    # Initialize PulseIn on GP19 for signal recording
-    receiver: pulseio.PulseIn = pulseio.PulseIn(board.GP19, maxlen=300, idle_state=True)
+    # Initialize PulseIn for IR receiver
+    receiver: pulseio.PulseIn = pulseio.PulseIn(PIN_IR_RECEIVER, maxlen=300, idle_state=True)
 
-    # Initialize Trigger Button on GP17
-    button: DebouncedButton = DebouncedButton(board.GP17)
+    # Initialize Trigger Button
+    button: DebouncedButton = DebouncedButton(PIN_TRIGGER_BUTTON)
 
     # Optional onboard LED indicator
     led: digitalio.DigitalInOut | None = None
     try:
-        led = digitalio.DigitalInOut(board.LED)
+        led = digitalio.DigitalInOut(PIN_LED)
         led.direction = digitalio.Direction.OUTPUT
         led.value = False
     except Exception:
@@ -375,7 +381,7 @@ def main() -> None:
                     led.value = True
 
                 blast_ir_signal(
-                    board.GP20,
+                    PIN_IR_BLASTER,
                     cloned_pulses,
                     frequency=cloned_carrier_freq,
                     repeat_count=cloned_repeat_count,

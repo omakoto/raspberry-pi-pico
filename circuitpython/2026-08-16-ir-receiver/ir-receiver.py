@@ -22,6 +22,10 @@ import board
 import digitalio
 import pulseio
 
+# Pin Definitions
+PIN_IR_RECEIVER: board.Pin = board.GP19
+PIN_LED: board.Pin = board.LED
+
 # When True, all captured raw pulse timings are printed; when False, output is truncated to the first 32 pulses
 VERBOSE: bool = True
 
@@ -237,14 +241,14 @@ def main() -> None:
     print("Point your IR remote at the receiver and press any key.")
     print("==================================================")
 
-    # Initialize PulseIn on GP19.
+    # Initialize PulseIn for IR receiver.
     # IR receivers pull the line HIGH when idle, and pulse LOW when carrier is detected.
-    pulses: pulseio.PulseIn = pulseio.PulseIn(board.GP19, maxlen=200, idle_state=True)
+    pulses: pulseio.PulseIn = pulseio.PulseIn(PIN_IR_RECEIVER, maxlen=200, idle_state=True)
 
     # Optional onboard LED indicator
     led: digitalio.DigitalInOut | None = None
     try:
-        led = digitalio.DigitalInOut(board.LED)
+        led = digitalio.DigitalInOut(PIN_LED)
         led.direction = digitalio.Direction.OUTPUT
         led.value = False
     except Exception:

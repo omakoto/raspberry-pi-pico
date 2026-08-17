@@ -19,6 +19,10 @@ import wifi
 import socketpool
 import adafruit_requests
 
+# Pin Definitions
+PIN_BUTTON: board.Pin = board.GP14
+PIN_LED: board.Pin = board.LED
+
 # Wi-Fi Credentials
 WIFI_SSID: str = "mguest"
 WIFI_PASSWORD: str = "EmorY961"
@@ -137,15 +141,15 @@ def main() -> None:
     # Setup onboard LED
     led: digitalio.DigitalInOut | None = None
     try:
-        led = digitalio.DigitalInOut(board.LED)
+        led = digitalio.DigitalInOut(PIN_LED)
         led.direction = digitalio.Direction.OUTPUT
         led.value = False
     except Exception:
-        # Fallback if board.LED is not defined on this target
+        # Fallback if PIN_LED is not defined on this target
         pass
 
-    # Initialize button on GP14
-    button: DebouncedButton = DebouncedButton(board.GP14)
+    # Initialize button
+    button: DebouncedButton = DebouncedButton(PIN_BUTTON)
 
     # Establish initial Wi-Fi connection
     connect_wifi(led)

@@ -14,6 +14,11 @@ import digitalio
 import busio
 import time
 
+# Pin Definitions
+PIN_LED: board.Pin = board.LED
+PIN_I2C_SDA: board.Pin = board.GP0
+PIN_I2C_SCL: board.Pin = board.GP1
+
 def check_crc(data: bytes) -> bool:
     """
     Calculates 8-bit checksum (CRC-8) for SHT3x data block.
@@ -32,7 +37,7 @@ def check_crc(data: bytes) -> bool:
     return crc == data[2]
 
 # Initialize the onboard LED for visual diagnostics
-led: digitalio.DigitalInOut = digitalio.DigitalInOut(board.LED)
+led: digitalio.DigitalInOut = digitalio.DigitalInOut(PIN_LED)
 led.direction = digitalio.Direction.OUTPUT
 
 # Blink rapidly 5 times to show script execution has started
@@ -47,8 +52,8 @@ print("SHT31 Temperature & Humidity Sensor Test Initialized.")
 i2c = None
 while i2c is None:
     try:
-        # Initialize the I2C bus on SCL=GP1, SDA=GP0
-        i2c = busio.I2C(board.GP1, board.GP0)
+        # Initialize the I2C bus
+        i2c = busio.I2C(PIN_I2C_SCL, PIN_I2C_SDA)
         print("I2C bus successfully initialized.")
     except Exception as e:
         print(f"I2C Initialization Error (Check SHT31 VCC/GND power and SDA/SCL wiring): {e}")

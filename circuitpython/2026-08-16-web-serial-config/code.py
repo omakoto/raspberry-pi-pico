@@ -14,18 +14,22 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "feature_enabled": True
 }
 
+# Pin Definitions
+PIN_STORAGE_SWITCH: board.Pin = board.GP14
+PIN_LED: board.Pin = board.LED
+
 # Determine if the filesystem is read-only for CircuitPython
-# boot.py configures storage.remount based on GP14 pin.
-# We can read the same GP14 pin to know our write status:
-# GP14 High (value True) means boot.py remounted as read-write to Pico.
-# GP14 Low (value False) means it is read-only to Pico.
-gp14_pin: digitalio.DigitalInOut = digitalio.DigitalInOut(board.GP14)
+# boot.py configures storage.remount based on storage switch pin.
+# We can read the same pin to know our write status:
+# Switch High (value True) means boot.py remounted as read-write to Pico.
+# Switch Low (value False) means it is read-only to Pico.
+gp14_pin: digitalio.DigitalInOut = digitalio.DigitalInOut(PIN_STORAGE_SWITCH)
 gp14_pin.direction = digitalio.Direction.INPUT
 gp14_pin.pull = digitalio.Pull.UP
 is_readonly: bool = not gp14_pin.value
 
 # Initialize LED
-led: digitalio.DigitalInOut = digitalio.DigitalInOut(board.LED)
+led: digitalio.DigitalInOut = digitalio.DigitalInOut(PIN_LED)
 led.direction = digitalio.Direction.OUTPUT
 
 # Load settings from settings.json

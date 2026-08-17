@@ -13,6 +13,10 @@ import busio
 import time
 from ssd1306 import SSD1306, Term
 
+# Pin Definitions
+PIN_I2C_SCL: board.Pin = board.GP3
+PIN_I2C_SDA: board.Pin = board.GP2
+
 
 def show_ascii_table(term: Term) -> None:
     """Draws every printable ASCII character as a table of 16 columns per high nibble.
@@ -33,7 +37,7 @@ def run_demo() -> None:
     print("Initializing SSD1306 display on SCL=GP3, SDA=GP2...")
 
     # Initialize I2C bus
-    i2c = busio.I2C(board.GP3, board.GP2)
+    i2c = busio.I2C(PIN_I2C_SCL, PIN_I2C_SDA)
 
     # Wait to acquire I2C lock
     while not i2c.try_lock():

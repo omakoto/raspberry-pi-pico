@@ -14,6 +14,11 @@ import digitalio
 import busio
 import time
 
+# Pin Definitions
+PIN_LED: board.Pin = board.LED
+PIN_I2C_SDA: board.Pin = board.GP2
+PIN_I2C_SCL: board.Pin = board.GP3
+
 # 3x5 Font definitions (column-major order) for rendering characters on the screen
 FONT: dict[str, list[int]] = {
     ' ': [0x00, 0x00, 0x00],
@@ -171,7 +176,7 @@ class SSD1306:
 
 
 # Initialize the onboard LED for diagnostics
-led: digitalio.DigitalInOut = digitalio.DigitalInOut(board.LED)
+led: digitalio.DigitalInOut = digitalio.DigitalInOut(PIN_LED)
 led.direction = digitalio.Direction.OUTPUT
 
 # Blink onboard LED to signal script start
@@ -186,8 +191,8 @@ print("SSD1306 Display Test Initialized.")
 i2c = None
 while i2c is None:
     try:
-        # Initialize I2C1 bus (SCL=GP3, SDA=GP2)
-        i2c = busio.I2C(board.GP3, board.GP2)
+        # Initialize I2C1 bus
+        i2c = busio.I2C(PIN_I2C_SCL, PIN_I2C_SDA)
         print("I2C1 bus successfully initialized.")
     except Exception as e:
         print(f"I2C1 Initialization Error (Check SSD1306 VCC/GND power and SDA/SCL wiring): {e}")

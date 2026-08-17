@@ -16,6 +16,11 @@ import board
 import digitalio
 import time
 
+# Pin Definitions
+PIN_ENCODER_A: board.Pin = board.GP15
+PIN_ENCODER_B: board.Pin = board.GP9
+PIN_BUTTON: board.Pin = board.GP8
+
 class SoftwareEncoder:
     """A software-based quadrature decoder for rotary encoders."""
     def __init__(self, pin_a: board.Pin, pin_b: board.Pin) -> None:
@@ -58,11 +63,11 @@ class SoftwareEncoder:
             return change != 0
         return False
 
-# Initialize the software encoder on GP15 and GP9
-encoder: SoftwareEncoder = SoftwareEncoder(board.GP15, board.GP9)
+# Initialize the software encoder
+encoder: SoftwareEncoder = SoftwareEncoder(PIN_ENCODER_A, PIN_ENCODER_B)
 
-# Initialize the push button on GP8 with an internal pull-up
-button: digitalio.DigitalInOut = digitalio.DigitalInOut(board.GP8)
+# Initialize the push button with an internal pull-up
+button: digitalio.DigitalInOut = digitalio.DigitalInOut(PIN_BUTTON)
 button.direction = digitalio.Direction.INPUT
 button.pull = digitalio.Pull.UP
 

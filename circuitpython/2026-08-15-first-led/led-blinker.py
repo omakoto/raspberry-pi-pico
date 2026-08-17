@@ -3,8 +3,11 @@ import time
 import board
 import digitalio
 
+# Pin Definitions
+PIN_LED: board.Pin = board.LED
+
 # Setup the onboard LED
-led = digitalio.DigitalInOut(board.LED)
+led = digitalio.DigitalInOut(PIN_LED)
 led.direction = digitalio.Direction.OUTPUT
 
 while True:

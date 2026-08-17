@@ -15,6 +15,11 @@ import board
 import digitalio
 import usb_hid
 
+# Pin Definitions
+PIN_BUTTON_A: board.Pin = board.GP17
+PIN_BUTTON_B: board.Pin = board.GP18
+PIN_LED: board.Pin = board.LED
+
 # Standard USB HID Keyboard usage page and usage ID
 HID_USAGE_PAGE_KEYBOARD: int = 0x01
 HID_USAGE_KEYBOARD: int = 0x06
@@ -118,14 +123,14 @@ def main() -> None:
     print("Initializing USB Keyboard...")
     keyboard: USBKeyboard = USBKeyboard()
 
-    # Configure buttons on GP17 ('a') and GP18 ('b')
-    button_a: DebouncedButton = DebouncedButton(board.GP17)
-    button_b: DebouncedButton = DebouncedButton(board.GP18)
+    # Configure buttons
+    button_a: DebouncedButton = DebouncedButton(PIN_BUTTON_A)
+    button_b: DebouncedButton = DebouncedButton(PIN_BUTTON_B)
 
     # Configure onboard LED for visual activity indicator
     led: digitalio.DigitalInOut | None = None
     try:
-        led = digitalio.DigitalInOut(board.LED)
+        led = digitalio.DigitalInOut(PIN_LED)
         led.direction = digitalio.Direction.OUTPUT
         led.value = False
     except Exception:

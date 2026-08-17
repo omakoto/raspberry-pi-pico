@@ -7,6 +7,9 @@ import time
 
 #file:settings.html
 
+# Pin Definitions
+PIN_LED: board.Pin = board.LED
+
 # Default fallback settings class
 class DefaultSettings:
     device_name: str = "Pico Default (Fallback)"
@@ -23,7 +26,7 @@ except ImportError:
     settings = DefaultSettings()
 
 # Initialize LED
-led: digitalio.DigitalInOut = digitalio.DigitalInOut(board.LED)
+led: digitalio.DigitalInOut = digitalio.DigitalInOut(PIN_LED)
 led.direction = digitalio.Direction.OUTPUT
 
 print("----- Pico Configuration Started -----")
