@@ -3,8 +3,8 @@
 Script to read and print temperature and humidity from an SHT31 sensor on a Raspberry Pi Pico.
 
 Pin Connections:
-- GP0: I2C0 SDA
-- GP1: I2C0 SCL
+- GP10: I2C1 SDA
+- GP11: I2C1 SCL
 - VCC: 3.3V
 - GND: GND
 """
@@ -16,8 +16,8 @@ import time
 
 # Pin Definitions
 PIN_LED: board.Pin = board.LED
-PIN_I2C_SDA: board.Pin = board.GP0
-PIN_I2C_SCL: board.Pin = board.GP1
+PIN_I2C_SDA: board.Pin = board.GP10
+PIN_I2C_SCL: board.Pin = board.GP11
 
 def check_crc(data: bytes) -> bool:
     """
@@ -69,7 +69,7 @@ if i2c.try_lock():
             print(f"SHT31 sensor detected at I2C address {hex(SHT31_ADDR)}.")
         else:
             print(f"Warning: SHT31 sensor not detected. Found addresses: {[hex(a) for a in addresses]}")
-            print("Please check if SDA (GP0) and SCL (GP1) pins might be swapped.")
+            print("Please check if SDA (GP10) and SCL (GP11) pins might be swapped.")
     except Exception as e:
         print(f"I2C Scan Error (check if SDA/SCL are swapped or sensor is powered): {e}")
     finally:
