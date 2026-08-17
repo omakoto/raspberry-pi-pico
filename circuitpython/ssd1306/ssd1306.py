@@ -6,6 +6,9 @@ This library provides:
 - SSD1306: A lightweight I2C driver for the SSD1306 128x64 (or custom sizes) OLED display.
 - Term: A simple terminal simulator with cursor movement, auto-wrapping, scrolling,
         and ANSI escape sequence support.
+
+Run test_term.py in this directory every time this file is touched:
+    python3 test_term.py
 """
 
 try:
@@ -17,49 +20,59 @@ except ImportError:
             pass
     busio = _DummyBusIO  # type: ignore
 
-# 3x5 Font definitions (column-major order) for rendering characters on the screen
+# Cell geometry. Every glyph is exactly FONT_WIDTH x FONT_HEIGHT pixels so the terminal is
+# a uniform character grid: CHAR_WIDTH leaves a one pixel gap between neighbouring cells,
+# and LINE_HEIGHT matches the display's 8 pixel page height so scrolling is a page copy
+# (it also leaves 3 blank rows below each glyph as line spacing).
+FONT_WIDTH: int = 4
+FONT_HEIGHT: int = 5
+CHAR_WIDTH: int = 5
+LINE_HEIGHT: int = 8
+
+# 4x5 Font definitions, column-major order with bit 0 as the top row. The comment beside
+# each entry pictures the glyph as its five rows, top to bottom.
 FONT: dict[str, list[int]] = {
-    ' ': [0x00, 0x00, 0x00],
-    'A': [0x1E, 0x05, 0x1E],
-    'B': [0x1F, 0x15, 0x0A],
-    'C': [0x0E, 0x11, 0x11],
-    'D': [0x1F, 0x11, 0x0E],
-    'E': [0x1F, 0x15, 0x11],
-    'F': [0x1F, 0x05, 0x01],
-    'G': [0x0E, 0x15, 0x1D],
-    'H': [0x1F, 0x04, 0x1F],
-    'I': [0x11, 0x1F, 0x11],
-    'J': [0x10, 0x10, 0x0F],
-    'K': [0x1F, 0x04, 0x1B],
-    'L': [0x1F, 0x10, 0x10],
-    'M': [0x1F, 0x02, 0x0C, 0x02, 0x1F],
-    'N': [0x1F, 0x02, 0x04, 0x08, 0x1F],
-    'O': [0x0E, 0x11, 0x0E],
-    'P': [0x1F, 0x09, 0x06],
-    'Q': [0x0E, 0x11, 0x1E],
-    'R': [0x1F, 0x09, 0x16],
-    'S': [0x12, 0x15, 0x09],
-    'T': [0x01, 0x1F, 0x01],
-    'U': [0x0F, 0x10, 0x0F],
-    'V': [0x07, 0x18, 0x07],
-    'W': [0x1F, 0x10, 0x0E, 0x10, 0x1F],
-    'X': [0x1B, 0x04, 0x1B],
-    'Y': [0x03, 0x1C, 0x03],
-    'Z': [0x19, 0x15, 0x13],
-    '0': [0x0E, 0x11, 0x0E],
-    '1': [0x12, 0x1F, 0x10],
-    '2': [0x12, 0x15, 0x19],
-    '3': [0x11, 0x15, 0x1F],
-    '4': [0x07, 0x04, 0x1F],
-    '5': [0x17, 0x15, 0x1D],
-    '6': [0x1E, 0x15, 0x1D],
-    '7': [0x11, 0x09, 0x07],
-    '8': [0x1A, 0x15, 0x1A],
-    '9': [0x13, 0x15, 0x1E],
-    '-': [0x04, 0x04, 0x04],
-    ':': [0x0A, 0x00, 0x00],
-    '.': [0x10, 0x00, 0x00],
-    '!': [0x00, 0x1D, 0x00]
+    ' ': [0x00, 0x00, 0x00, 0x00],  # ....  ....  ....  ....  ....
+    'A': [0x1E, 0x05, 0x05, 0x1E],  # .##.  #..#  ####  #..#  #..#
+    'B': [0x1F, 0x15, 0x15, 0x0A],  # ###.  #..#  ###.  #..#  ###.
+    'C': [0x0E, 0x11, 0x11, 0x11],  # .###  #...  #...  #...  .###
+    'D': [0x1F, 0x11, 0x11, 0x0E],  # ###.  #..#  #..#  #..#  ###.
+    'E': [0x1F, 0x15, 0x15, 0x11],  # ####  #...  ###.  #...  ####
+    'F': [0x1F, 0x05, 0x05, 0x01],  # ####  #...  ###.  #...  #...
+    'G': [0x0E, 0x11, 0x15, 0x1D],  # .###  #...  #.##  #..#  .###
+    'H': [0x1F, 0x04, 0x04, 0x1F],  # #..#  #..#  ####  #..#  #..#
+    'I': [0x11, 0x1F, 0x11, 0x11],  # ####  .#..  .#..  .#..  ####
+    'J': [0x08, 0x10, 0x11, 0x0F],  # ..##  ...#  ...#  #..#  .##.
+    'K': [0x1F, 0x04, 0x0A, 0x11],  # #..#  #.#.  ##..  #.#.  #..#
+    'L': [0x1F, 0x10, 0x10, 0x10],  # #...  #...  #...  #...  ####
+    'M': [0x1F, 0x02, 0x02, 0x1F],  # #..#  ####  #..#  #..#  #..#
+    'N': [0x1F, 0x02, 0x04, 0x1F],  # #..#  ##.#  #.##  #..#  #..#
+    'O': [0x0E, 0x11, 0x11, 0x0E],  # .##.  #..#  #..#  #..#  .##.
+    'P': [0x1F, 0x05, 0x05, 0x02],  # ###.  #..#  ###.  #...  #...
+    'Q': [0x0E, 0x11, 0x09, 0x16],  # .##.  #..#  #..#  #.#.  .#.#
+    'R': [0x1F, 0x05, 0x0D, 0x12],  # ###.  #..#  ###.  #.#.  #..#
+    'S': [0x12, 0x15, 0x15, 0x09],  # .###  #...  .##.  ...#  ###.
+    'T': [0x01, 0x1F, 0x01, 0x01],  # ####  .#..  .#..  .#..  .#..
+    'U': [0x0F, 0x10, 0x10, 0x0F],  # #..#  #..#  #..#  #..#  .##.
+    'V': [0x07, 0x18, 0x18, 0x07],  # #..#  #..#  #..#  .##.  .##.
+    'W': [0x1F, 0x08, 0x08, 0x1F],  # #..#  #..#  #..#  ####  #..#
+    'X': [0x1B, 0x04, 0x04, 0x1B],  # #..#  #..#  .##.  #..#  #..#
+    'Y': [0x03, 0x1C, 0x1C, 0x03],  # #..#  #..#  .##.  .##.  .##.
+    'Z': [0x19, 0x15, 0x15, 0x13],  # ####  ...#  .##.  #...  ####
+    '0': [0x0E, 0x11, 0x11, 0x0E],  # .##.  #..#  #..#  #..#  .##.
+    '1': [0x12, 0x1F, 0x10, 0x10],  # .#..  ##..  .#..  .#..  ####
+    '2': [0x12, 0x19, 0x15, 0x12],  # .##.  #..#  ..#.  .#..  ####
+    '3': [0x11, 0x15, 0x15, 0x0A],  # ###.  ...#  .##.  ...#  ###.
+    '4': [0x07, 0x04, 0x04, 0x1F],  # #..#  #..#  ####  ...#  ...#
+    '5': [0x17, 0x15, 0x15, 0x09],  # ####  #...  ###.  ...#  ###.
+    '6': [0x0E, 0x15, 0x15, 0x09],  # .###  #...  ###.  #..#  .##.
+    '7': [0x01, 0x19, 0x05, 0x03],  # ####  ...#  ..#.  .#..  .#..
+    '8': [0x0A, 0x15, 0x15, 0x0A],  # .##.  #..#  .##.  #..#  .##.
+    '9': [0x12, 0x15, 0x15, 0x0E],  # .##.  #..#  .###  ...#  ###.
+    '-': [0x00, 0x04, 0x04, 0x00],  # ....  ....  .##.  ....  ....
+    ':': [0x00, 0x0A, 0x00, 0x00],  # ....  .#..  ....  .#..  ....
+    '.': [0x00, 0x10, 0x00, 0x00],  # ....  ....  ....  ....  .#..
+    '!': [0x00, 0x17, 0x00, 0x00]   # .#..  .#..  .#..  ....  .#..
 }
 
 
@@ -160,7 +173,7 @@ class SSD1306:
             for row_idx in range(8):
                 if col_data & (1 << row_idx):
                     self.pixel(x + col_idx, y + row_idx, color)
-        return len(pattern) + 1  # Returns width of character plus 1 pixel gap
+        return CHAR_WIDTH  # Glyph width plus the 1 pixel inter-character gap
 
     def text(self, s: str, x: int, y: int, color: bool) -> None:
         """Renders a string of text onto the screen buffer."""
@@ -182,7 +195,17 @@ class SSD1306:
 
 
 class Term:
-    """A simple terminal simulator on top of the SSD1306 display."""
+    """A simple terminal simulator on top of the SSD1306 display.
+
+    Because every glyph occupies a uniform CHAR_WIDTH x LINE_HEIGHT cell, the terminal
+    is a plain character grid. Alongside the pixel framebuffer, Term keeps a shadow text
+    buffer holding the character visible in each cell, so callers can read the screen
+    contents back as text (see get_text()) without decoding pixels.
+
+    Cursor coordinates are kept in pixels to match the drawing primitives; they are
+    always cell-aligned, so the grid indices are simply cursor_x // CHAR_WIDTH and
+    cursor_y // LINE_HEIGHT.
+    """
 
     def __init__(self, oled: SSD1306, tab_size: int = 8, auto_show: bool = True) -> None:
         self.oled: SSD1306 = oled
@@ -192,16 +215,54 @@ class Term:
         self.cursor_y: int = 0
         self.saved_cursor_x: int = 0
         self.saved_cursor_y: int = 0
-        self.line_char_widths: list[int] = []
+        self.cols: int = oled.width // CHAR_WIDTH
+        self.rows: int = oled.height // LINE_HEIGHT
+        # A display is not necessarily an exact number of cells wide or tall (a 128 pixel
+        # wide panel holds 25 five pixel cells and 3 spare pixels). Confine the cursor to
+        # the whole cells so it always stays grid aligned; the remainder is never drawn on.
+        self.text_width: int = self.cols * CHAR_WIDTH
+        self.text_height: int = self.rows * LINE_HEIGHT
+        self.text_buffer: list[list[str]] = [[' '] * self.cols for _ in range(self.rows)]
         self._esc_state: int = 0  # 0: normal, 1: esc, 2: csi
         self._csi_buf: list[str] = []
+
+    def get_text(self) -> list[str]:
+        """Returns the on-screen text, one blank-padded string per character row."""
+        return ["".join(row) for row in self.text_buffer]
+
+    def get_line(self, row: int) -> str:
+        """Returns a single character row of on-screen text, blank-padded."""
+        return "".join(self.text_buffer[row])
+
+    def _cursor_col(self) -> int:
+        return self.cursor_x // CHAR_WIDTH
+
+    def _cursor_row(self) -> int:
+        return self.cursor_y // LINE_HEIGHT
+
+    def _blank_text(self, row: int, col_start: int, col_end: int) -> None:
+        """Blanks the text cells in [col_start, col_end) of the given row."""
+        if row < 0 or row >= self.rows:
+            return
+        line = self.text_buffer[row]
+        for col in range(max(0, col_start), min(self.cols, col_end)):
+            line[col] = ' '
+
+    def _next_line(self) -> None:
+        """Moves the cursor to the start of the next line, scrolling when past the bottom."""
+        self.cursor_x = 0
+        self.cursor_y += LINE_HEIGHT
+        if self.cursor_y >= self.text_height:
+            self.scroll_up()
+            self.cursor_y = self.text_height - LINE_HEIGHT
 
     def clear(self) -> None:
         """Clears the terminal screen and resets cursor position."""
         self.oled.clear()
         self.cursor_x = 0
         self.cursor_y = 0
-        self.line_char_widths.clear()
+        for row in range(self.rows):
+            self._blank_text(row, 0, self.cols)
         if self.auto_show:
             self.oled.show()
 
@@ -219,6 +280,9 @@ class Term:
         for i in range((pages - 1) * w, len(buf)):
             buf[i] = 0x00
 
+        del self.text_buffer[0]
+        self.text_buffer.append([' '] * self.cols)
+
     def scroll_down(self) -> None:
         """Scrolls the screen contents down by one line height (8 pixels) and clears the top line."""
         buf = self.oled.buffer
@@ -232,6 +296,9 @@ class Term:
         # Clear the first page (top 8 pixels)
         for i in range(w):
             buf[i] = 0x00
+
+        del self.text_buffer[-1]
+        self.text_buffer.insert(0, [' '] * self.cols)
 
     def print(self, s: str) -> None:
         """Prints a string to the terminal, parsing supported ANSI escape/control codes."""
@@ -266,52 +333,67 @@ class Term:
         # Execute commands
         if cmd == 'A':  # CUU - Cursor Up
             n = get_param(0, 1)
-            self.cursor_y = max(0, self.cursor_y - n * 8)
+            self.cursor_y = max(0, self.cursor_y - n * LINE_HEIGHT)
         elif cmd == 'B':  # CUD - Cursor Down
             n = get_param(0, 1)
-            self.cursor_y = min(self.oled.height - 8, self.cursor_y + n * 8)
+            self.cursor_y = min(self.text_height - LINE_HEIGHT, self.cursor_y + n * LINE_HEIGHT)
         elif cmd == 'C':  # CUF - Cursor Forward
             n = get_param(0, 1)
-            self.cursor_x = min(self.oled.width, self.cursor_x + n * 4)
+            self.cursor_x = min(self.text_width, self.cursor_x + n * CHAR_WIDTH)
         elif cmd == 'D':  # CUB - Cursor Back
             n = get_param(0, 1)
-            self.cursor_x = max(0, self.cursor_x - n * 4)
+            self.cursor_x = max(0, self.cursor_x - n * CHAR_WIDTH)
         elif cmd == 'E':  # CNL - Cursor Next Line
             n = get_param(0, 1)
             self.cursor_x = 0
-            self.cursor_y = min(self.oled.height - 8, self.cursor_y + n * 8)
+            self.cursor_y = min(self.text_height - LINE_HEIGHT, self.cursor_y + n * LINE_HEIGHT)
         elif cmd == 'F':  # CPL - Cursor Previous Line
             n = get_param(0, 1)
             self.cursor_x = 0
-            self.cursor_y = max(0, self.cursor_y - n * 8)
+            self.cursor_y = max(0, self.cursor_y - n * LINE_HEIGHT)
         elif cmd == 'G':  # CHA - Cursor Horizontal Absolute
             n = get_param(0, 1)
-            self.cursor_x = max(0, min(self.oled.width, (n - 1) * 4))
+            self.cursor_x = max(0, min(self.text_width, (n - 1) * CHAR_WIDTH))
         elif cmd in ('H', 'f'):  # CUP / HVP - Cursor Position
             r = get_param(0, 1)
             c = get_param(1, 1)
-            self.cursor_y = max(0, min(self.oled.height - 8, (r - 1) * 8))
-            self.cursor_x = max(0, min(self.oled.width, (c - 1) * 4))
+            self.cursor_y = max(0, min(self.text_height - LINE_HEIGHT, (r - 1) * LINE_HEIGHT))
+            self.cursor_x = max(0, min(self.text_width, (c - 1) * CHAR_WIDTH))
         elif cmd == 'J':  # ED - Erase in Display
             n = get_param(0, 0)
+            row = self._cursor_row()
+            col = self._cursor_col()
             if n == 0:  # Clear from cursor to end of screen
-                self.oled.fill_rect(self.cursor_x, self.cursor_y, self.oled.width - self.cursor_x, 8, False)
-                if self.cursor_y + 8 < self.oled.height:
-                    self.oled.fill_rect(0, self.cursor_y + 8, self.oled.width, self.oled.height - (self.cursor_y + 8), False)
+                self.oled.fill_rect(self.cursor_x, self.cursor_y, self.oled.width - self.cursor_x, LINE_HEIGHT, False)
+                self._blank_text(row, col, self.cols)
+                if self.cursor_y + LINE_HEIGHT < self.oled.height:
+                    self.oled.fill_rect(0, self.cursor_y + LINE_HEIGHT, self.oled.width, self.oled.height - (self.cursor_y + LINE_HEIGHT), False)
+                for r in range(row + 1, self.rows):
+                    self._blank_text(r, 0, self.cols)
             elif n == 1:  # Clear from start of screen to cursor
                 if self.cursor_y > 0:
                     self.oled.fill_rect(0, 0, self.oled.width, self.cursor_y, False)
-                self.oled.fill_rect(0, self.cursor_y, self.cursor_x, 8, False)
+                for r in range(0, row):
+                    self._blank_text(r, 0, self.cols)
+                self.oled.fill_rect(0, self.cursor_y, self.cursor_x, LINE_HEIGHT, False)
+                self._blank_text(row, 0, col)
             elif n in (2, 3):  # Clear entire screen
                 self.oled.clear()
+                for r in range(self.rows):
+                    self._blank_text(r, 0, self.cols)
         elif cmd == 'K':  # EL - Erase in Line
             n = get_param(0, 0)
+            row = self._cursor_row()
+            col = self._cursor_col()
             if n == 0:  # Clear from cursor to end of line
-                self.oled.fill_rect(self.cursor_x, self.cursor_y, self.oled.width - self.cursor_x, 8, False)
+                self.oled.fill_rect(self.cursor_x, self.cursor_y, self.oled.width - self.cursor_x, LINE_HEIGHT, False)
+                self._blank_text(row, col, self.cols)
             elif n == 1:  # Clear from start of line to cursor
-                self.oled.fill_rect(0, self.cursor_y, self.cursor_x, 8, False)
+                self.oled.fill_rect(0, self.cursor_y, self.cursor_x, LINE_HEIGHT, False)
+                self._blank_text(row, 0, col)
             elif n == 2:  # Clear entire line
-                self.oled.fill_rect(0, self.cursor_y, self.oled.width, 8, False)
+                self.oled.fill_rect(0, self.cursor_y, self.oled.width, LINE_HEIGHT, False)
+                self._blank_text(row, 0, self.cols)
         elif cmd == 'S':  # SU - Scroll Up
             n = get_param(0, 1)
             for _ in range(n):
@@ -351,61 +433,46 @@ class Term:
             return
         elif c == '\x07':  # ^G / Bell (Ignore)
             return
-        elif c == '\x08':  # ^H / Backspace
-            if self.line_char_widths:
-                w = self.line_char_widths.pop()
-                self.cursor_x = max(0, self.cursor_x - w)
+        elif c == '\x08':  # ^H / Backspace (moves the cursor back one cell without erasing)
+            self.cursor_x = max(0, self.cursor_x - CHAR_WIDTH)
             return
         elif c == '\x09':  # ^I / Tab (Align to next tab stop)
-            tab_width_px: int = self.tab_size * 4  # Assuming standard width of 4 pixels per cell
+            tab_width_px: int = self.tab_size * CHAR_WIDTH
             next_x: int = ((self.cursor_x // tab_width_px) + 1) * tab_width_px
-            if next_x >= self.oled.width:
-                self.cursor_x = 0
-                self.cursor_y += 8
-                if self.cursor_y >= self.oled.height:
-                    self.scroll_up()
-                    self.cursor_y = self.oled.height - 8
-                self.line_char_widths.clear()
+            if next_x >= self.text_width:
+                self._next_line()
             else:
-                self.line_char_widths.append(next_x - self.cursor_x)
                 self.cursor_x = next_x
             return
         elif c == '\x0a':  # ^J / Line Feed
-            self.cursor_x = 0
-            self.cursor_y += 8
-            if self.cursor_y >= self.oled.height:
-                self.scroll_up()
-                self.cursor_y = self.oled.height - 8
-            self.line_char_widths.clear()
+            self._next_line()
             return
         elif c == '\x0c':  # ^L / Form Feed (Clear Screen)
             self.clear()
             return
         elif c == '\x0d':  # ^M / Carriage Return
             self.cursor_x = 0
-            self.line_char_widths.clear()
             return
 
         # Printable character rendering
         c_upper = c.upper()
         pattern = FONT.get(c_upper)
-        # Default width to 4 if the character is not found in FONT
-        width = len(pattern) + 1 if pattern is not None else 4
 
-        # Wrap if character exceeds display width
-        if self.cursor_x + width > self.oled.width:
-            self.cursor_x = 0
-            self.cursor_y += 8
-            if self.cursor_y >= self.oled.height:
-                self.scroll_up()
-                self.cursor_y = self.oled.height - 8
-            self.line_char_widths.clear()
+        # Wrap if the cell no longer fits on the current line
+        if self.cursor_x + CHAR_WIDTH > self.text_width:
+            self._next_line()
 
-        # Clear background area before drawing character (for overwrites)
-        self.oled.fill_rect(self.cursor_x, self.cursor_y, width, 8, False)
+        # Clear the cell first so the glyph replaces whatever occupied it
+        self.oled.fill_rect(self.cursor_x, self.cursor_y, CHAR_WIDTH, LINE_HEIGHT, False)
 
         if pattern is not None:
-            self.oled.char(c, self.cursor_x, self.cursor_y, True)
+            self.oled.char(c_upper, self.cursor_x, self.cursor_y, True)
 
-        self.line_char_widths.append(width)
-        self.cursor_x += width
+        # The shadow buffer mirrors what is visible: the font is upper case only, and a
+        # character with no glyph leaves the cell blank.
+        self.text_buffer[self._cursor_row()][self._cursor_col()] = c_upper if pattern is not None else ' '
+        self.cursor_x += CHAR_WIDTH
+
+    def get_buffer(self) -> bytearray:
+        """Returns a copy of the display framebuffer."""
+        return bytearray(self.oled.buffer)

@@ -88,7 +88,7 @@ def run_demo() -> None:
         print("Sub-step 6c: Erasing line...")
         term.print("TO BE ERASED...")
         time.sleep(1.0)
-        term.print("\x1b[14D")     # Move cursor back 14 character widths (56px)
+        term.print("\x1b[14D")     # Move cursor back over the 14 characters just printed
         term.print("\x1b[K")       # Clear line from cursor to end of line
         term.println("ERASED OK!")
         time.sleep(1.5)
