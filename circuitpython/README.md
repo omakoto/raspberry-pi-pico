@@ -22,6 +22,8 @@ picocom -b 115200 /dev/ttyACM0
   chmod +x <script-name>.py
   ```
 
+- **Pin Configuration Constants**: Define all the GPIO pin number / etc at the top of the script for easy customization.
+
 ## Project Directories
 
 Below is an overview of the projects and utilities contained in this directory:
