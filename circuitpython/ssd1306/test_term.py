@@ -23,6 +23,10 @@ import typing
 from ssd1306 import CHAR_WIDTH, FONT, FONT_HEIGHT, FONT_WIDTH, LINE_HEIGHT, SSD1306, Term
 
 
+# A character outside printable ASCII, so the font deliberately has no glyph for it.
+NO_GLYPH = 'é'  # e-acute
+
+
 class MockI2C:
     """Mock I2C bus that records writes instead of talking to hardware."""
 
@@ -121,7 +125,18 @@ def test_font_is_fixed_width() -> None:
     assert oled.char('A', 0, 0, True) == CHAR_WIDTH
     assert oled.char('M', 0, 0, True) == CHAR_WIDTH
     assert oled.char('W', 0, 0, True) == CHAR_WIDTH
-    assert oled.char('~', 0, 0, True) == 0  # No glyph, nothing drawn
+    assert oled.char(NO_GLYPH, 0, 0, True) == 0  # No glyph, nothing drawn
+
+
+@test
+def test_every_printable_ascii_character_has_a_glyph() -> None:
+    for code in range(0x20, 0x7F):
+        char = chr(code)
+        assert char.upper() in FONT, "no glyph for %r (%#04x)" % (char, code)
+
+    # Lower case is served by the upper case glyphs rather than its own entries.
+    assert not [c for c in FONT if c.islower()]
+    assert len(FONT) == 0x7F - 0x20 - 26  # All of printable ASCII, less a-z
 
 
 @test
@@ -131,7 +146,8 @@ def test_glyphs_are_distinguishable() -> None:
         if char == ' ':
             continue
         key = tuple(pattern)
-        assert key not in seen or (seen[key], char) == ('O', '0'), \
+        # 'O' and '0' share a glyph, as they did before the font was widened.
+        assert key not in seen or {seen[key], char} == {'O', '0'}, \
             "glyphs %r and %r are identical" % (seen.get(key), char)
         seen[key] = char
 
@@ -176,12 +192,20 @@ def test_lowercase_is_folded_to_upper() -> None:
     term.print("hello")
     assert_screen(term, ["HELLO"])
 
+    # Every letter must render as its upper case twin, pixels included.
+    lower = make_term()
+    lower.print("abcdefghijklmnopqrstuvwxyz")
+    upper = make_term()
+    upper.print("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    assert lower.get_text() == upper.get_text()
+    assert lower.get_buffer() == upper.get_buffer()
+
 
 @test
 def test_characters_without_glyphs_render_blank() -> None:
-    # '@' has no glyph: it still consumes a cell, but leaves it empty.
+    # A character outside the font still consumes a cell, but leaves it empty.
     term = make_term()
-    term.print("A@B")
+    term.print("A" + NO_GLYPH + "B")
     assert_screen(term, ["A B"])
     assert_cursor(term, 3 * CHAR_WIDTH, 0)
 
@@ -194,7 +218,7 @@ def test_write_overwrites_previous_cell() -> None:
     assert_cursor(term, 2 * CHAR_WIDTH, 0)
 
     # A blank-rendering character must erase the glyph underneath it.
-    term.print("\r@")
+    term.print("\r" + NO_GLYPH)
     assert_screen(term, [" YC"])
 
 

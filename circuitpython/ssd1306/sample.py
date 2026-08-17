@@ -14,6 +14,21 @@ import time
 from ssd1306 import SSD1306, Term
 
 
+def show_ascii_table(term: Term) -> None:
+    """Draws every printable ASCII character as a table of 16 columns per high nibble.
+
+    A 128 pixel wide screen holds 25 characters, so a "4:" style row label plus 16
+    characters fits, and the six nibble rows plus a heading fill the 8 available lines
+    exactly. Lower case has no glyphs of its own, so the last two rows echo the two
+    upper case rows above them.
+    """
+    term.print("\f")  # Form feed: clear the screen and home the cursor
+    term.println("ASCII TABLE:")
+    for high in range(0x20, 0x80, 0x10):
+        chars = "".join(chr(c) for c in range(high, min(high + 0x10, 0x7F)))
+        term.println("%X:%s" % (high >> 4, chars))
+
+
 def run_demo() -> None:
     print("Initializing SSD1306 display on SCL=GP3, SDA=GP2...")
 
@@ -93,6 +108,12 @@ def run_demo() -> None:
         term.println("ERASED OK!")
         time.sleep(1.5)
 
+        # 7. Full printable ASCII character set
+        print("Step 7: Showing the ASCII table...")
+        show_ascii_table(term)
+        time.sleep(5.0)
+
+        term.print("\f")
         term.println("DEMO DONE!")
         print("Demo completed successfully!")
 
