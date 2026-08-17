@@ -891,6 +891,24 @@ def test_ansi_sgr_font_switching() -> None:
     assert term.cursor_x == 3 * 8 + 5 * 5
 
 
+@test
+def test_mixed_font_line_height_on_newline() -> None:
+    term = make_term(width=128, height=64)
+    # Print large header, switch back to 4x5 before newline
+    term.print("\x1b[11mHEADER\x1b[10m\n")
+    # Even though font is now 4x5, newline must advance by 16 px because 8x16 was drawn
+    assert term.cursor_y == 16
+    assert term.cursor_x == 0
+
+    # Next line in 4x5 only
+    term.print("Line 2\n")
+    assert term.cursor_y == 24
+
+    # Mixed line with 8x16 prefix and 4x5 suffix
+    term.print("\x1b[11m24.5C\x1b[10m Temp\n")
+    assert term.cursor_y == 40
+
+
 def main() -> int:
     failures = 0
     for fn in TESTS:

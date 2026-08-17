@@ -290,6 +290,7 @@ class Term:
         self.saved_cursor_x: int = 0
         self.saved_cursor_y: int = 0
         self._update_geometry()
+        self._current_line_height: int = self.font.line_height
         self.text_buffer: list[list[str]] = [[' '] * self.cols for _ in range(self.rows)]
         self._esc_state: int = 0  # 0: normal, 1: esc, 2: csi
         self._csi_buf: list[str] = []
@@ -298,6 +299,10 @@ class Term:
         """Dynamically switches the active font for subsequent text output."""
         self.font = font
         self._update_geometry()
+        if self.cursor_x == 0:
+            self._current_line_height = font.line_height
+        else:
+            self._current_line_height = max(self._current_line_height, font.line_height)
 
     def _update_geometry(self) -> None:
         """Updates grid dimension calculations based on active font."""
@@ -330,10 +335,12 @@ class Term:
 
     def _next_line(self) -> None:
         """Moves the cursor to the start of the next line, scrolling when past the bottom."""
+        line_h: int = max(self.font.line_height, self._current_line_height)
         self.cursor_x = 0
-        self.cursor_y += self.font.line_height
+        self.cursor_y += line_h
+        self._current_line_height = self.font.line_height
         if self.cursor_y >= self.text_height:
-            self.scroll_up(self.font.line_height)
+            self.scroll_up(line_h)
             self.cursor_y = self.text_height - self.font.line_height
 
     def clear(self) -> None:
@@ -341,6 +348,7 @@ class Term:
         self.oled.clear()
         self.cursor_x = 0
         self.cursor_y = 0
+        self._current_line_height = self.font.line_height
         self.text_buffer = [[' '] * self.cols for _ in range(self.rows)]
         if self.auto_show:
             self.oled.show()
@@ -556,10 +564,12 @@ class Term:
         # Printable character rendering
         glyph = self.font.get_glyph(c)
         disp_char = c.upper() if self.font.fold_case else c
+        self._current_line_height = max(self._current_line_height, self.font.line_height)
 
         # Wrap if the cell no longer fits on the current line
         if self.cursor_x + self.font.cell_width > self.text_width:
             self._next_line()
+            self._current_line_height = max(self._current_line_height, self.font.line_height)
 
         # Clear the cell first so the glyph replaces whatever occupied it
         self.oled.fill_rect(self.cursor_x, self.cursor_y, self.font.cell_width, self.font.line_height, False)

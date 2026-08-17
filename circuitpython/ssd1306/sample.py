@@ -52,76 +52,78 @@ def run_demo() -> None:
         # Initialize Terminal Simulator
         term = Term(oled)
 
-        # 1. Basic print and println
-        print("Step 1: Printing text...")
-        term.println("OLED TERMINAL DEMO")
-        term.print("Initializing...\n")
-        time.sleep(1.0)
+        while True:
+            # 1. Basic print and println
+            print("Step 1: Printing text...")
+            term.clear()
+            term.println("OLED TERMINAL DEMO")
+            term.print("Initializing...\n")
+            time.sleep(1.0)
 
-        # 2. Tabs demonstration (^I)
-        print("Step 2: Testing tabs...")
-        term.println("TESTING TABS:")
-        term.print("1\t2\t3\n")
-        time.sleep(1.0)
+            # 2. Tabs demonstration (^I)
+            print("Step 2: Testing tabs...")
+            term.println("TESTING TABS:")
+            term.print("1\t2\t3\n")
+            time.sleep(1.0)
 
-        # 3. Backspace demonstration (^H)
-        print("Step 3: Testing backspaces...")
-        term.print("Erase this: ERROR\b\b\b\b\bOK   \n")
-        time.sleep(1.0)
+            # 3. Backspace demonstration (^H)
+            print("Step 3: Testing backspaces...")
+            term.print("Erase this: ERROR\b\b\b\b\bOK   \n")
+            time.sleep(1.0)
 
-        # 4. Auto-wrapping demonstration
-        print("Step 4: Testing auto-wrapping...")
-        term.println("TESTING WRAPPING:")
-        term.println("THIS IS A VERY LONG STRING THAT WILL AUTOMATICALLY WRAP TO THE NEXT LINE ONCE IT EXCEEDS THE SCREEN WIDTH")
-        time.sleep(2.0)
+            # 4. Auto-wrapping demonstration
+            print("Step 4: Testing auto-wrapping...")
+            term.println("TESTING WRAPPING:")
+            term.println("THIS IS A VERY LONG STRING THAT WILL AUTOMATICALLY WRAP TO THE NEXT LINE ONCE IT EXCEEDS THE SCREEN WIDTH")
+            time.sleep(2.0)
 
-        # 5. Scrolling demonstration
-        print("Step 5: Testing scrolling...")
-        term.println("TESTING SCROLLING:")
-        for i in range(1, 6):
-            term.println(f"Log line number {i}")
-            time.sleep(0.3)
+            # 5. Scrolling demonstration
+            print("Step 5: Testing scrolling...")
+            term.println("TESTING SCROLLING:")
+            for i in range(1, 6):
+                term.println(f"Log line number {i}")
+                time.sleep(0.3)
 
-        # 6. CSI Escape Sequence Demonstration
-        print("Step 6: Testing CSI escape sequences...")
-        term.println("TESTING ANSI CSI:")
-        time.sleep(1.0)
+            # 6. CSI Escape Sequence Demonstration
+            print("Step 6: Testing CSI escape sequences...")
+            term.println("TESTING ANSI CSI:")
+            time.sleep(1.0)
 
-        # Save cursor, move to (0,0), write OVERWRITE, then restore cursor and write RESTORED!
-        print("Sub-step 6a: Save and restore cursor...")
-        term.print("\x1b[s")      # Save cursor position
-        term.print("\x1b[1;1H")   # Move cursor to home (row 1, col 1)
-        term.print("OVERWRITE")
-        time.sleep(1.0)
+            # Save cursor, move to (0,0), write OVERWRITE, then restore cursor and write RESTORED!
+            print("Sub-step 6a: Save and restore cursor...")
+            term.print("\x1b[s")      # Save cursor position
+            term.print("\x1b[1;1H")   # Move cursor to home (row 1, col 1)
+            term.print("OVERWRITE")
+            time.sleep(1.0)
 
-        term.print("\x1b[u")      # Restore cursor position
-        term.println("RESTORED!")
-        time.sleep(1.0)
+            term.print("\x1b[u")      # Restore cursor position
+            term.println("RESTORED!")
+            time.sleep(1.0)
 
-        # Cursor movement: Move up 2 lines, print UP HERE!, then move down 2 lines
-        print("Sub-step 6b: Cursor up/down movement...")
-        term.print("\x1b[2A")      # Move up 2 lines
-        term.print("UP HERE!")
-        time.sleep(1.0)
-        term.print("\x1b[2B")      # Move down 2 lines
+            # Cursor movement: Move up 2 lines, print UP HERE!, then move down 2 lines
+            print("Sub-step 6b: Cursor up/down movement...")
+            term.print("\x1b[2A")      # Move up 2 lines
+            term.print("UP HERE!")
+            time.sleep(1.0)
+            term.print("\x1b[2B")      # Move down 2 lines
 
-        # Erase line: print, move cursor back, clear line from cursor
-        print("Sub-step 6c: Erasing line...")
-        term.print("TO BE ERASED...")
-        time.sleep(1.0)
-        term.print("\x1b[14D")     # Move cursor back over the 14 characters just printed
-        term.print("\x1b[K")       # Clear line from cursor to end of line
-        term.println("ERASED OK!")
-        time.sleep(1.5)
+            # Erase line: print, move cursor back, clear line from cursor
+            print("Sub-step 6c: Erasing line...")
+            term.print("TO BE ERASED...")
+            time.sleep(1.0)
+            term.print("\x1b[14D")     # Move cursor back over the 14 characters just printed
+            term.print("\x1b[K")       # Clear line from cursor to end of line
+            term.println("ERASED OK!")
+            time.sleep(1.5)
 
-        # 7. Full printable ASCII character set
-        print("Step 7: Showing the ASCII table...")
-        show_ascii_table(term)
-        time.sleep(5.0)
+            # 7. Full printable ASCII character set
+            print("Step 7: Showing the ASCII table...")
+            show_ascii_table(term)
+            time.sleep(5.0)
 
-        term.print("\f")
-        term.println("DEMO DONE!")
-        print("Demo completed successfully!")
+            term.print("\f")
+            term.println("LOOP RESTARTING...")
+            time.sleep(1.5)
 
     finally:
         i2c.unlock()
