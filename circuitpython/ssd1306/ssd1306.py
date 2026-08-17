@@ -280,11 +280,13 @@ class Term:
         font: Font | None = None,
         tab_size: int = 8,
         auto_show: bool = True,
+        autowrap: bool = True,
     ) -> None:
         self.oled: SSD1306 = oled
         self.font: Font = font if font is not None else FONT_4X5
         self.tab_size: int = tab_size
         self.auto_show: bool = auto_show
+        self.autowrap: bool = autowrap
         self.cursor_x: int = 0
         self.cursor_y: int = 0
         self.saved_cursor_x: int = 0
@@ -415,7 +417,9 @@ class Term:
     def _execute_csi(self, cmd: str) -> None:
         # Parse parameters
         param_str = "".join(self._csi_buf)
-        parts = param_str.split(";")
+        is_private = param_str.startswith("?")
+        clean_param_str = param_str[1:] if is_private else param_str
+        parts = clean_param_str.split(";")
         params: list[int] = []
         for p in parts:
             if p:
@@ -503,6 +507,12 @@ class Term:
             n = get_param(0, 1)
             for _ in range(n):
                 self.scroll_down()
+        elif cmd == 'h':  # SM / DEC Private Mode Set (e.g. \x1b[?7h: Enable Auto-Wrap)
+            if is_private and 7 in params:
+                self.autowrap = True
+        elif cmd == 'l':  # RM / DEC Private Mode Reset (e.g. \x1b[?7l: Disable Auto-Wrap)
+            if is_private and 7 in params:
+                self.autowrap = False
         elif cmd == 'm':  # SGR - Font Selection (10: default 4x5, 11: 8x16 alternate)
             for p in params:
                 if p in (0, 10):
@@ -547,7 +557,10 @@ class Term:
             tab_width_px: int = self.tab_size * self.font.cell_width
             next_x: int = ((self.cursor_x // tab_width_px) + 1) * tab_width_px
             if next_x + self.font.cell_width > self.text_width:
-                self._next_line()
+                if self.autowrap:
+                    self._next_line()
+                else:
+                    self.cursor_x = max(0, self.text_width - self.font.cell_width)
             else:
                 self.cursor_x = next_x
             return
@@ -566,10 +579,13 @@ class Term:
         disp_char = c.upper() if self.font.fold_case else c
         self._current_line_height = max(self._current_line_height, self.font.line_height)
 
-        # Wrap if the cell no longer fits on the current line
+        # Deferred wrap at right margin
         if self.cursor_x + self.font.cell_width > self.text_width:
-            self._next_line()
-            self._current_line_height = max(self._current_line_height, self.font.line_height)
+            if self.autowrap:
+                self._next_line()
+                self._current_line_height = max(self._current_line_height, self.font.line_height)
+            else:
+                self.cursor_x = max(0, self.text_width - self.font.cell_width)
 
         # Clear the cell first so the glyph replaces whatever occupied it
         self.oled.fill_rect(self.cursor_x, self.cursor_y, self.font.cell_width, self.font.line_height, False)
@@ -581,7 +597,9 @@ class Term:
         col = self._cursor_col()
         if 0 <= row < len(self.text_buffer) and 0 <= col < len(self.text_buffer[row]):
             self.text_buffer[row][col] = disp_char if glyph is not None else ' '
-        self.cursor_x += self.font.cell_width
+
+        if self.autowrap or (self.cursor_x + self.font.cell_width <= self.text_width):
+            self.cursor_x += self.font.cell_width
 
     def get_buffer(self) -> bytearray:
         """Returns a copy of the display framebuffer."""

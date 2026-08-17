@@ -909,6 +909,21 @@ def test_mixed_font_line_height_on_newline() -> None:
     assert term.cursor_y == 40
 
 
+@test
+def test_decawm_autowrap_modes() -> None:
+    # Test autowrap disabled via escape sequence \x1b[?7l
+    term = make_term(width=40, height=24)  # 8x3 grid
+    term.print("\x1b[?7l")  # Disable autowrap
+    term.print("ABCDEFGHIJKLM")  # 13 characters on an 8-char wide terminal
+    # Must not wrap to second line; characters past the 8th column overwrite the last cell
+    assert_screen(term, ["ABCDEFGM", "", ""])
+
+    # Re-enable autowrap via \x1b[?7h
+    term.print("\x1b[?7h")
+    term.print("N")  # Now should wrap to next line
+    assert_screen(term, ["ABCDEFGM", "N", ""])
+
+
 def main() -> int:
     failures = 0
     for fn in TESTS:

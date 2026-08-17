@@ -36,7 +36,7 @@ def demo_large_font(term: Term) -> None:
     term.println("LARGE FONT 8x16")
     term.println("16 Cols x 4 Rows")
     term.println("Upper & lower!")
-    term.println("0123456789 +-=")
+    term.print("0123456789 +-=")
     time.sleep(3.0)
 
 
@@ -44,17 +44,18 @@ def demo_mixed_fonts_terminal(term: Term) -> None:
     """Demonstrates dynamic font switching in Term to mix headers and body text."""
     term.clear()
 
-    # Large header line using set_font
+    # Large header line using set_font (16px high)
     term.set_font(FONT_8X16)
     term.println("DEVICE STATUS")
 
-    # Switch to compact 4x5 font for detailed info
+    # Switch to compact 4x5 font for detailed info (8px high each, 6 lines = 48px)
     term.set_font(FONT_4X5)
-    term.println("CPU: RP2040 Dual Core @ 133MHz")
+    term.println("CPU: RP2040 @ 133MHz")
     term.println("RAM: 264 KB SRAM")
-    term.println("FLASH: 2 MB Quad-SPI")
-    term.println("I2C: 400kHz (GP2/GP3)")
-    term.println("STATUS: RUNNING NORMAL")
+    term.println("FLASH: 2 MB Q-SPI")
+    term.println("I2C: 400kHz GP2/GP3")
+    term.println("PORTS: CDC + I2C")
+    term.print("STATUS: RUNNING NORMAL")
     time.sleep(3.0)
 
 
@@ -67,7 +68,7 @@ def demo_ansi_font_switching(term: Term) -> None:
     term.print("-------------------------\n")
     term.print("\x1b[11m24.5C\x1b[10m Temp (Ambient)\n")
     term.print("\x1b[11m48.2%\x1b[10m Humidity (RH)\n")
-    term.print("-------------------------\n")
+    term.print("-------------------------")
     time.sleep(3.0)
 
 
