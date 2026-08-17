@@ -126,6 +126,98 @@ def _build_font_dict(font: Font) -> dict[str, list[int]]:
 FONT: dict[str, list[int]] = _build_font_dict(FONT_4X5)
 
 
+BOX_CHARS: dict[str, tuple[int, int, int, int]] = {
+    # Single lines: (left, right, top, bottom)
+    '─': (1, 1, 0, 0),  # U+2500 Light Horizontal
+    '│': (0, 0, 1, 1),  # U+2502 Light Vertical
+    '┌': (0, 1, 0, 1),  # U+250C Light Down and Right
+    '┐': (1, 0, 0, 1),  # U+2510 Light Down and Left
+    '└': (0, 1, 1, 0),  # U+2514 Light Up and Right
+    '┘': (1, 0, 1, 0),  # U+2518 Light Up and Left
+    '├': (0, 1, 1, 1),  # U+251C Light Vertical and Right
+    '┤': (1, 0, 1, 1),  # U+2524 Light Vertical and Left
+    '┬': (1, 1, 0, 1),  # U+252C Light Down and Horizontal
+    '┴': (1, 1, 1, 0),  # U+2534 Light Up and Horizontal
+    '┼': (1, 1, 1, 1),  # U+253C Light Vertical and Horizontal
+
+    # Double lines: (left, right, top, bottom)
+    '═': (2, 2, 0, 0),  # U+2550 Double Horizontal
+    '║': (0, 0, 2, 2),  # U+2551 Double Vertical
+    '╔': (0, 2, 0, 2),  # U+2554 Double Down and Right
+    '╗': (2, 0, 0, 2),  # U+2557 Double Down and Left
+    '╚': (0, 2, 2, 0),  # U+255A Double Up and Right
+    '╝': (2, 0, 2, 0),  # U+255D Double Up and Left
+    '╠': (0, 2, 2, 2),  # U+2560 Double Vertical and Right
+    '╣': (2, 0, 2, 2),  # U+2563 Double Vertical and Left
+    '╦': (2, 2, 0, 2),  # U+2566 Double Down and Horizontal
+    '╩': (2, 2, 2, 0),  # U+2569 Double Up and Horizontal
+    '╬': (2, 2, 2, 2),  # U+256C Double Vertical and Horizontal
+
+    # Rounded corners:
+    '╭': (3, 3, 3, 3),  # U+256D Rounded Down and Right
+    '╮': (4, 4, 4, 4),  # U+256E Rounded Down and Left
+    '╯': (5, 5, 5, 5),  # U+256F Rounded Up and Left
+    '╰': (6, 6, 6, 6),  # U+2570 Rounded Up and Right
+}
+
+
+def _draw_box_char(oled: "SSD1306", c: str, x: int, y: int, color: bool, font: Font) -> None:
+    """Procedurally renders a Unicode box drawing character spanning full cell dimensions."""
+    if c not in BOX_CHARS:
+        return
+    left, right, top, bottom = BOX_CHARS[c]
+    x_mid: int = x + (font.cell_width // 2)
+    y_mid: int = y + (font.line_height // 2)
+
+    # Rounded corners
+    if c == '╭':
+        oled.line(x_mid + 1, y_mid, x + font.cell_width - 1, y_mid, color)
+        oled.line(x_mid, y_mid + 1, x_mid, y + font.line_height - 1, color)
+        oled.pixel(x_mid + 1, y_mid + 1, color)
+        return
+    elif c == '╮':
+        oled.line(x, y_mid, x_mid - 1, y_mid, color)
+        oled.line(x_mid, y_mid + 1, x_mid, y + font.line_height - 1, color)
+        oled.pixel(x_mid - 1, y_mid + 1, color)
+        return
+    elif c == '╯':
+        oled.line(x, y_mid, x_mid - 1, y_mid, color)
+        oled.line(x_mid, y, x_mid, y_mid - 1, color)
+        oled.pixel(x_mid - 1, y_mid - 1, color)
+        return
+    elif c == '╰':
+        oled.line(x_mid + 1, y_mid, x + font.cell_width - 1, y_mid, color)
+        oled.line(x_mid, y, x_mid, y_mid - 1, color)
+        oled.pixel(x_mid + 1, y_mid - 1, color)
+        return
+
+    # Single lines (1)
+    if left == 1:
+        oled.line(x, y_mid, x_mid, y_mid, color)
+    if right == 1:
+        oled.line(x_mid, y_mid, x + font.cell_width - 1, y_mid, color)
+    if top == 1:
+        oled.line(x_mid, y, x_mid, y_mid, color)
+    if bottom == 1:
+        oled.line(x_mid, y_mid, x_mid, y + font.line_height - 1, color)
+
+    # Double lines (2)
+    y_off: int = 1
+    x_off: int = 1
+    if left == 2:
+        oled.line(x, y_mid - y_off, x_mid + (x_off if top or bottom else 0), y_mid - y_off, color)
+        oled.line(x, y_mid + y_off, x_mid + (x_off if top or bottom else 0), y_mid + y_off, color)
+    if right == 2:
+        oled.line(x_mid - (x_off if top or bottom else 0), y_mid - y_off, x + font.cell_width - 1, y_mid - y_off, color)
+        oled.line(x_mid - (x_off if top or bottom else 0), y_mid + y_off, x + font.cell_width - 1, y_mid + y_off, color)
+    if top == 2:
+        oled.line(x_mid - x_off, y, x_mid - x_off, y_mid + (y_off if left or right else 0), color)
+        oled.line(x_mid + x_off, y, x_mid + x_off, y_mid + (y_off if left or right else 0), color)
+    if bottom == 2:
+        oled.line(x_mid - x_off, y_mid - (y_off if left or right else 0), x_mid - x_off, y + font.line_height - 1, color)
+        oled.line(x_mid + x_off, y_mid - (y_off if left or right else 0), x_mid + x_off, y + font.line_height - 1, color)
+
+
 class SSD1306:
     """A lightweight driver for the SSD1306 OLED display using pure busio.I2C."""
 
@@ -216,6 +308,9 @@ class SSD1306:
     def char(self, c: str, x: int, y: int, color: bool = True, font: Font | None = None) -> int:
         """Renders a single font character and returns its drawn cell width."""
         f: Font = font if font is not None else FONT_4X5
+        if c in BOX_CHARS:
+            _draw_box_char(self, c, x, y, color, f)
+            return f.cell_width
         glyph = f.get_glyph(c)
         if glyph is None:
             return 0
@@ -575,8 +670,9 @@ class Term:
             return
 
         # Printable character rendering
-        glyph = self.font.get_glyph(c)
-        disp_char = c.upper() if self.font.fold_case else c
+        is_box: bool = c in BOX_CHARS
+        glyph = self.font.get_glyph(c) if not is_box else None
+        disp_char: str = c if is_box else (c.upper() if self.font.fold_case else c)
         self._current_line_height = max(self._current_line_height, self.font.line_height)
 
         # Deferred wrap at right margin
@@ -590,13 +686,13 @@ class Term:
         # Clear the cell first so the glyph replaces whatever occupied it
         self.oled.fill_rect(self.cursor_x, self.cursor_y, self.font.cell_width, self.font.line_height, False)
 
-        if glyph is not None:
+        if glyph is not None or is_box:
             self.oled.char(c, self.cursor_x, self.cursor_y, True, font=self.font)
 
         row = self._cursor_row()
         col = self._cursor_col()
         if 0 <= row < len(self.text_buffer) and 0 <= col < len(self.text_buffer[row]):
-            self.text_buffer[row][col] = disp_char if glyph is not None else ' '
+            self.text_buffer[row][col] = disp_char if (glyph is not None or is_box) else ' '
 
         if self.autowrap or (self.cursor_x + self.font.cell_width <= self.text_width):
             self.cursor_x += self.font.cell_width

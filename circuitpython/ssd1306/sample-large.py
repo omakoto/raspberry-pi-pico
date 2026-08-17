@@ -72,6 +72,32 @@ def demo_ansi_font_switching(term: Term) -> None:
     time.sleep(3.0)
 
 
+def demo_unicode_box_borders(term: Term) -> None:
+    """Demonstrates text-based box drawing borders using Unicode box characters."""
+    term.set_font(FONT_8X16)
+    term.clear()
+
+    # 16-column box in 8x16 font (4 rows)
+    term.println("╔══════════════╗")
+    term.println("║ UNICODE BOX  ║")
+    term.println("╠════════╦═════╣")
+    term.print("║ STATUS ║ OK  ║")
+    time.sleep(3.0)
+
+    # 25-column table in 4x5 font (8 rows)
+    term.set_font(FONT_4X5)
+    term.clear()
+    term.println("┌───────────────────────┐")
+    term.println("│  SYSTEM TELEMETRY     │")
+    term.println("├───────────┬───────────┤")
+    term.println("│ SENSOR    │ VALUE     │")
+    term.println("├───────────┼───────────┤")
+    term.println("│ TEMP      │ 24.5 C    │")
+    term.println("│ HUMIDITY  │ 48.2 %    │")
+    term.print("└───────────┴───────────┘")
+    time.sleep(3.0)
+
+
 def demo_direct_mixed_drawing(oled: SSD1306) -> None:
     """Demonstrates direct framebuffer drawing with mixed fonts and border frame."""
     oled.clear()
@@ -121,7 +147,10 @@ def run_demo() -> None:
             print("Step 3: Demonstrating inline ANSI SGR font switching...")
             demo_ansi_font_switching(term)
 
-            print("Step 4: Demonstrating direct mixed drawing with borders...")
+            print("Step 4: Demonstrating Unicode text box borders...")
+            demo_unicode_box_borders(term)
+
+            print("Step 5: Demonstrating direct mixed drawing with borders...")
             demo_direct_mixed_drawing(oled)
 
             term.set_font(FONT_8X16)

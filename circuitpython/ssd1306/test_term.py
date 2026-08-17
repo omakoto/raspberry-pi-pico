@@ -924,6 +924,40 @@ def test_decawm_autowrap_modes() -> None:
     assert_screen(term, ["ABCDEFGM", "N", ""])
 
 
+@test
+def test_unicode_box_drawing_characters() -> None:
+    term = make_term(width=128, height=64)
+    # Print a single-line box with text inside
+    term.println("┌──────┐")
+    term.println("│TEST 1│")
+    term.print("└──────┘")
+
+    lines = term.get_text()
+    assert lines[0].startswith("┌──────┐")
+    assert lines[1].startswith("│TEST 1│")
+    assert lines[2].startswith("└──────┘")
+
+    # Verify pixels are drawn in oled framebuffer
+    assert any(b != 0 for b in term.oled.buffer)
+
+    # Test double-line and rounded box characters
+    term.clear()
+    term.println("╔══════╗")
+    term.println("║DOUBLE║")
+    term.println("╚══════╝")
+    term.println("╭──────╮")
+    term.println("│ROUND │")
+    term.print("╰──────╯")
+
+    lines2 = term.get_text()
+    assert lines2[0].startswith("╔══════╗")
+    assert lines2[1].startswith("║DOUBLE║")
+    assert lines2[2].startswith("╚══════╝")
+    assert lines2[3].startswith("╭──────╮")
+    assert lines2[4].startswith("│ROUND │")
+    assert lines2[5].startswith("╰──────╯")
+
+
 def main() -> int:
     failures = 0
     for fn in TESTS:
