@@ -20,7 +20,18 @@ scrolling tests are a more tractable 8x3.
 import sys
 import typing
 
-from ssd1306 import CHAR_WIDTH, FONT, FONT_HEIGHT, FONT_WIDTH, LINE_HEIGHT, SSD1306, Term
+from ssd1306 import (
+    CHAR_WIDTH,
+    FONT,
+    FONT_4X5,
+    FONT_8X16,
+    FONT_HEIGHT,
+    FONT_WIDTH,
+    Font,
+    LINE_HEIGHT,
+    SSD1306,
+    Term,
+)
 
 
 # A character outside printable ASCII, so the font deliberately has no glyph for it.
@@ -793,6 +804,91 @@ def test_repeated_scroll_stays_consistent() -> None:
     # empty line the cursor now sits on.
     assert_screen(term, ["LINE 8", "LINE 9", ""])
     assert_cursor(term, 0, 2 * LINE_HEIGHT)
+
+
+# ---------------------------------------------------------------------------
+# 8x16 Font & Dynamic Switching
+# ---------------------------------------------------------------------------
+
+@test
+def test_8x16_font_properties() -> None:
+    assert FONT_8X16.glyph_width == 8
+    assert FONT_8X16.glyph_height == 16
+    assert FONT_8X16.cell_width == 8
+    assert FONT_8X16.line_height == 16
+    assert FONT_8X16.bytes_per_char == 16
+    assert FONT_8X16.num_pages == 2
+
+    # Verify coverage of all printable ASCII characters
+    for code in range(0x20, 0x7F):
+        glyph = FONT_8X16.get_glyph(chr(code))
+        assert glyph is not None, "Missing glyph for %#04x" % code
+        assert len(glyph) == 16
+
+    # Verify case distinction in 8x16 font
+    glyph_upper = FONT_8X16.get_glyph('A')
+    glyph_lower = FONT_8X16.get_glyph('a')
+    assert glyph_upper != glyph_lower, "8x16 font should distinguish uppercase and lowercase"
+
+
+@test
+def test_8x16_page_aligned_blitting() -> None:
+    # Test that fast page-aligned blit reproduces pixel-by-pixel rendering exactly
+    oled_blit = SSD1306(typing.cast(typing.Any, MockI2C()), width=128, height=64)
+    oled_blit.text("Hello World!", 0, 0, True, font=FONT_8X16)
+    oled_blit.text("Test 123", 0, 16, True, font=FONT_8X16)
+
+    # Reconstruct unaligned (shifted by 0, but forced via single-pixel drawing check)
+    oled_pixel = SSD1306(typing.cast(typing.Any, MockI2C()), width=128, height=64)
+    for c_idx, c in enumerate("Hello World!"):
+        glyph = FONT_8X16.get_glyph(c)
+        assert glyph is not None
+        for p in range(2):
+            for col in range(8):
+                val = glyph[p * 8 + col]
+                for row in range(8):
+                    if val & (1 << row):
+                        oled_pixel.pixel(c_idx * 8 + col, p * 8 + row, True)
+
+    for c_idx, c in enumerate("Test 123"):
+        glyph = FONT_8X16.get_glyph(c)
+        assert glyph is not None
+        for p in range(2):
+            for col in range(8):
+                val = glyph[p * 8 + col]
+                for row in range(8):
+                    if val & (1 << row):
+                        oled_pixel.pixel(c_idx * 8 + col, 16 + p * 8 + row, True)
+
+    assert oled_blit.buffer == oled_pixel.buffer, "Page blit buffer must match unaligned pixel buffer bit-for-bit"
+
+
+@test
+def test_dynamic_font_switching() -> None:
+    term = make_term(width=128, height=64)
+    # Start with 8x16 font
+    term.set_font(FONT_8X16)
+    assert term.cols == 16
+    assert term.rows == 4
+    term.println("TITLE")
+    assert term.cursor_y == 16
+
+    # Switch to 4x5 font
+    term.set_font(FONT_4X5)
+    assert term.cols == 25
+    assert term.rows == 8
+    term.println("Body line")
+    assert term.cursor_y == 24
+
+
+@test
+def test_ansi_sgr_font_switching() -> None:
+    term = make_term(width=128, height=64)
+    # Switch to 8x16 via ANSI sequence \x1b[11m
+    term.print("\x1b[11mBIG\x1b[10mSmall")
+    assert term.font == FONT_4X5
+    # "BIG" is 3 chars * 8 px = 24 px; "Small" is 5 chars * 5 px = 25 px -> total 49 px
+    assert term.cursor_x == 3 * 8 + 5 * 5
 
 
 def main() -> int:

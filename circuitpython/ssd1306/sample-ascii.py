@@ -2,6 +2,7 @@
 # ssd1306/sample-ascii.py
 #file: ssd1306.py
 #file: font-4x5.bin
+#file: font-8x16.bin
 """
 Sample script demonstrating the Term class terminal simulator on SSD1306 OLED display.
 Pins used:
