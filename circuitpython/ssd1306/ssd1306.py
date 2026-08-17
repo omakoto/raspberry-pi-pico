@@ -1,4 +1,5 @@
 # ssd1306/ssd1306.py
+#file: font-4x5.bin
 """
 SSD1306 OLED display driver and Terminal Simulator library for CircuitPython.
 
@@ -29,83 +30,48 @@ FONT_HEIGHT: int = 5
 CHAR_WIDTH: int = 5
 LINE_HEIGHT: int = 8
 
-# 4x5 Font definitions, column-major order with bit 0 as the top row. The comment beside
-# each entry pictures the glyph as its five rows, top to bottom.
-#
-# Every printable ASCII character (0x20..0x7E) has a glyph. Entries are listed in ASCII
-# order so the coverage is easy to audit. Lower case letters are deliberately absent:
-# rendering upper cases every character first, so a-z reuse the A-Z glyphs.
-FONT: dict[str, list[int]] = {
-    ' ':  [0x00, 0x00, 0x00, 0x00],  # ....  ....  ....  ....  ....
-    '!':  [0x00, 0x17, 0x00, 0x00],  # .#..  .#..  .#..  ....  .#..
-    '"':  [0x03, 0x00, 0x03, 0x00],  # #.#.  #.#.  ....  ....  ....
-    '#':  [0x0A, 0x1F, 0x0A, 0x1F],  # .#.#  ####  .#.#  ####  .#.#
-    '$':  [0x12, 0x1F, 0x15, 0x09],  # .###  ##..  .##.  .#.#  ###.
-    '%':  [0x19, 0x04, 0x04, 0x13],  # #..#  ...#  .##.  #...  #..#
-    '&':  [0x0A, 0x15, 0x0D, 0x12],  # .##.  #..#  .##.  #.#.  .#.#
-    "'":  [0x00, 0x03, 0x00, 0x00],  # .#..  .#..  ....  ....  ....
-    '(':  [0x00, 0x0E, 0x11, 0x00],  # ..#.  .#..  .#..  .#..  ..#.
-    ')':  [0x00, 0x11, 0x0E, 0x00],  # .#..  ..#.  ..#.  ..#.  .#..
-    '*':  [0x0A, 0x04, 0x0A, 0x00],  # ....  #.#.  .#..  #.#.  ....
-    '+':  [0x04, 0x0E, 0x04, 0x00],  # ....  .#..  ###.  .#..  ....
-    ',':  [0x10, 0x08, 0x00, 0x00],  # ....  ....  ....  .#..  #...
-    '-':  [0x00, 0x04, 0x04, 0x00],  # ....  ....  .##.  ....  ....
-    '.':  [0x00, 0x10, 0x00, 0x00],  # ....  ....  ....  ....  .#..
-    '/':  [0x10, 0x08, 0x06, 0x01],  # ...#  ..#.  ..#.  .#..  #...
-    '0':  [0x0E, 0x11, 0x11, 0x0E],  # .##.  #..#  #..#  #..#  .##.
-    '1':  [0x12, 0x1F, 0x10, 0x10],  # .#..  ##..  .#..  .#..  ####
-    '2':  [0x12, 0x19, 0x15, 0x12],  # .##.  #..#  ..#.  .#..  ####
-    '3':  [0x11, 0x15, 0x15, 0x0A],  # ###.  ...#  .##.  ...#  ###.
-    '4':  [0x07, 0x04, 0x04, 0x1F],  # #..#  #..#  ####  ...#  ...#
-    '5':  [0x17, 0x15, 0x15, 0x09],  # ####  #...  ###.  ...#  ###.
-    '6':  [0x0E, 0x15, 0x15, 0x09],  # .###  #...  ###.  #..#  .##.
-    '7':  [0x01, 0x19, 0x05, 0x03],  # ####  ...#  ..#.  .#..  .#..
-    '8':  [0x0A, 0x15, 0x15, 0x0A],  # .##.  #..#  .##.  #..#  .##.
-    '9':  [0x12, 0x15, 0x15, 0x0E],  # .##.  #..#  .###  ...#  ###.
-    ':':  [0x00, 0x0A, 0x00, 0x00],  # ....  .#..  ....  .#..  ....
-    ';':  [0x10, 0x0A, 0x00, 0x00],  # ....  .#..  ....  .#..  #...
-    '<':  [0x00, 0x04, 0x0A, 0x11],  # ...#  ..#.  .#..  ..#.  ...#
-    '=':  [0x0A, 0x0A, 0x0A, 0x0A],  # ....  ####  ....  ####  ....
-    '>':  [0x11, 0x0A, 0x04, 0x00],  # #...  .#..  ..#.  .#..  #...
-    '?':  [0x02, 0x01, 0x15, 0x02],  # .##.  #..#  ..#.  ....  ..#.
-    '@':  [0x0E, 0x11, 0x15, 0x06],  # .##.  #..#  #.##  #...  .##.
-    'A':  [0x1E, 0x05, 0x05, 0x1E],  # .##.  #..#  ####  #..#  #..#
-    'B':  [0x1F, 0x15, 0x15, 0x0A],  # ###.  #..#  ###.  #..#  ###.
-    'C':  [0x0E, 0x11, 0x11, 0x11],  # .###  #...  #...  #...  .###
-    'D':  [0x1F, 0x11, 0x11, 0x0E],  # ###.  #..#  #..#  #..#  ###.
-    'E':  [0x1F, 0x15, 0x15, 0x11],  # ####  #...  ###.  #...  ####
-    'F':  [0x1F, 0x05, 0x05, 0x01],  # ####  #...  ###.  #...  #...
-    'G':  [0x0E, 0x11, 0x15, 0x1D],  # .###  #...  #.##  #..#  .###
-    'H':  [0x1F, 0x04, 0x04, 0x1F],  # #..#  #..#  ####  #..#  #..#
-    'I':  [0x11, 0x1F, 0x11, 0x11],  # ####  .#..  .#..  .#..  ####
-    'J':  [0x08, 0x10, 0x11, 0x0F],  # ..##  ...#  ...#  #..#  .##.
-    'K':  [0x1F, 0x04, 0x0A, 0x11],  # #..#  #.#.  ##..  #.#.  #..#
-    'L':  [0x1F, 0x10, 0x10, 0x10],  # #...  #...  #...  #...  ####
-    'M':  [0x1F, 0x02, 0x02, 0x1F],  # #..#  ####  #..#  #..#  #..#
-    'N':  [0x1F, 0x02, 0x04, 0x1F],  # #..#  ##.#  #.##  #..#  #..#
-    'O':  [0x0E, 0x11, 0x11, 0x0E],  # .##.  #..#  #..#  #..#  .##.
-    'P':  [0x1F, 0x05, 0x05, 0x02],  # ###.  #..#  ###.  #...  #...
-    'Q':  [0x0E, 0x11, 0x09, 0x16],  # .##.  #..#  #..#  #.#.  .#.#
-    'R':  [0x1F, 0x05, 0x0D, 0x12],  # ###.  #..#  ###.  #.#.  #..#
-    'S':  [0x12, 0x15, 0x15, 0x09],  # .###  #...  .##.  ...#  ###.
-    'T':  [0x01, 0x1F, 0x01, 0x01],  # ####  .#..  .#..  .#..  .#..
-    'U':  [0x0F, 0x10, 0x10, 0x0F],  # #..#  #..#  #..#  #..#  .##.
-    'V':  [0x07, 0x18, 0x18, 0x07],  # #..#  #..#  #..#  .##.  .##.
-    'W':  [0x1F, 0x08, 0x08, 0x1F],  # #..#  #..#  #..#  ####  #..#
-    'X':  [0x1B, 0x04, 0x04, 0x1B],  # #..#  #..#  .##.  #..#  #..#
-    'Y':  [0x03, 0x1C, 0x1C, 0x03],  # #..#  #..#  .##.  .##.  .##.
-    'Z':  [0x19, 0x15, 0x15, 0x13],  # ####  ...#  .##.  #...  ####
-    '[':  [0x00, 0x1F, 0x11, 0x11],  # .###  .#..  .#..  .#..  .###
-    '\\': [0x01, 0x06, 0x08, 0x10],  # #...  .#..  .#..  ..#.  ...#
-    ']':  [0x11, 0x11, 0x1F, 0x00],  # ###.  ..#.  ..#.  ..#.  ###.
-    '^':  [0x02, 0x01, 0x02, 0x00],  # .#..  #.#.  ....  ....  ....
-    '_':  [0x10, 0x10, 0x10, 0x10],  # ....  ....  ....  ....  ####
-    '`':  [0x01, 0x02, 0x00, 0x00],  # #...  .#..  ....  ....  ....
-    '{':  [0x00, 0x04, 0x1B, 0x11],  # ..##  ..#.  .#..  ..#.  ..##
-    '|':  [0x00, 0x1F, 0x00, 0x00],  # .#..  .#..  .#..  .#..  .#..
-    '}':  [0x11, 0x1B, 0x04, 0x00],  # ##..  .#..  ..#.  .#..  ##..
-    '~':  [0x04, 0x02, 0x04, 0x02]   # ....  .#.#  #.#.  ....  ....
-}
+
+def _load_font(filename: str = "font-4x5.bin") -> dict[str, list[int]]:
+    """Loads 4x5 font definitions from the external binary file.
+
+    The binary file contains 4-byte column slices for ASCII characters 0x20..0x7E
+    in column-major order with bit 0 as the top row.
+    """
+    candidates: list[str] = []
+    try:
+        if "__file__" in globals() and __file__:
+            idx = __file__.rfind("/")
+            if idx != -1:
+                candidates.append(__file__[:idx + 1] + filename)
+    except Exception:
+        pass
+    candidates.extend([filename, "/" + filename])
+
+    data: bytes | None = None
+    for path in candidates:
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+                break
+        except OSError:
+            pass
+    if data is None:
+        raise OSError(f"Could not load font file {filename}")
+
+    font: dict[str, list[int]] = {}
+    for code in range(0x20, 0x7F):
+        char = chr(code)
+        if not char.islower():
+            offset = (code - 0x20) * 4
+            font[char] = list(data[offset:offset + 4])
+    return font
+
+
+# 4x5 Font definitions (column-major order with bit 0 as top row).
+# Every printable ASCII character (0x20..0x7E) has a glyph. Lower case letters
+# are deliberately absent so rendering converts to upper case first.
+FONT: dict[str, list[int]] = _load_font()
+
 
 
 class SSD1306:

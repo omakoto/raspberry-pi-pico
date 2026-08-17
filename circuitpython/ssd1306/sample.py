@@ -1,6 +1,7 @@
 #!/usr/bin/env circuit-run
 # ssd1306/sample.py
 #file: ssd1306.py
+#file: font-4x5.bin
 """
 Sample script demonstrating the Term class terminal simulator on SSD1306 OLED display.
 Pins used:
