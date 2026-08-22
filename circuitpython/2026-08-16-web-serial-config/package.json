@@ -1,0 +1,15 @@
+{
+  "name": "2026-08-16-web-serial-config",
+  "version": "1.0.0",
+  "description": "A real-time configuration portal for Raspberry Pi Pico (CircuitPython) using the browser's **Web Serial API** over a secondary USB CDC data channel.",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

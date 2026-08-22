@@ -59,3 +59,43 @@ When the filesystem is mounted as writable by CircuitPython, your host computer 
    * Momentarily shorting **RUN** (Pin 30) to **GND** (Pin 28).
 3. Upon booting, [`boot.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/boot.py) detects GP14 is pulled LOW and remounts the filesystem as read-only for CircuitPython and **read-write for the Host PC**.
 4. You can now edit [`code.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/code.py), [`boot.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/boot.py), or other files directly from your computer.
+
+---
+
+## How to Test
+
+The web configuration dashboard includes an automated browser regression test suite in [`tests/settings_portal.spec.js`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/tests/settings_portal.spec.js) built with **Playwright**. It runs against headless Chromium using a mock implementation of the browser's Web Serial API (`navigator.serial`).
+
+### 1. Prerequisites & Setup
+
+Install project dependencies and the Chromium browser binary:
+
+```bash
+npm install
+npx playwright install chromium
+```
+
+### 2. Run Tests
+
+```bash
+# Run all regression tests in headless mode
+npm test
+
+# Run tests with interactive UI / trace inspector
+npx playwright test --ui
+
+# Run tests in headed browser mode
+npx playwright test --headed
+```
+
+### 3. Test Coverage
+
+The test suite validates:
+* **Connection Lifecycle**: Port opening at `115200` baud, handshake query (`{"command":"get_state"}`), UI status transitions, and reader stream management.
+* **Storage Mode Detection**: Proper rendering of write-ready and read-only status alerts, plus locking the Save button when the Pico's storage is write-protected.
+* **State Synchronization & Live Controls**: Real-time slider text updates (`0.50s`), custom toggle state sync, and form population from incoming JSON.
+* **Configuration Persistence**: Verification of the `set_settings` JSON payload sent through the serial stream on form submission.
+* **Stream Fragmentation & Chunking**: Line buffer stability when serial data arrives in fragmented chunks across newlines.
+* **Disconnection & Hardware Events**: Clean resource release and UI reset on manual disconnect or physical USB unplug (`navigator.serial` `'disconnect'` event).
+* **Error Resilience**: Graceful error handling and debug logging when the board returns error payloads.
+
