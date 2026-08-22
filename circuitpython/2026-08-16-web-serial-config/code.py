@@ -1,6 +1,10 @@
 #!/usr/bin/env circuit-run
 # code.py
 # Main loop that listens for Web Serial configuration and manages LED blink rates.
+
+#file: boot.py
+#file: settings.html
+
 import board
 import digitalio
 import json
