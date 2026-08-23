@@ -35,13 +35,17 @@ CircuitPython does not allow concurrent write access to the flash filesystem fro
 1. Ensure GP14 is connected to GND (or default host write mode is active).
 2. Copy the project files to your `CIRCUITPY` drive:
    ```bash
-   cp boot.py code.py /run/media/$USER/CIRCUITPY/
+   cp boot.py code.py settings.html /run/media/$USER/CIRCUITPY/
    ```
 3. Disconnect GP14 from GND (leave it open/floating) so that CircuitPython can write to storage.
 4. Hard reset or power cycle the Pico (unplug and re-plug USB) so [`boot.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/boot.py) re-enumerates the USB CDC ports and remounts storage as Pico-writable.
 
 ### 2. Open the Web Portal
-1. Open [`settings.html`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/settings.html) in a Web Serial-supported browser (Google Chrome, Microsoft Edge, or Chromium).
+1. Open the settings portal in Chrome directly from the connected device using [`open-settings.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/open-settings.sh):
+   ```bash
+   ./open-settings.sh
+   ```
+   *(Or manually open the `settings.html` file from the mounted `CIRCUITPY` drive, e.g. `/run/media/$USER/CIRCUITPY/settings.html`, in Google Chrome, Microsoft Edge, or any Web Serial-compatible browser).*
 2. Click **Connect Device**.
 3. In the browser permission prompt, select the serial port for **Pico Config Portal** (the secondary CDC data port).
 4. The dashboard will connect, display real-time status, and populate current settings.
