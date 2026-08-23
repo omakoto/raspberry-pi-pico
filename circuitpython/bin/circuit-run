@@ -36,6 +36,13 @@ fi
 dest_file="$circuit_dir/code.py"
 echo "Copying '$src_file' to '$dest_file'..."
 
+ee() {
+  echo "Running: $*"
+  "$@"
+}
+
+ee rm -f "$circuit_dir/boot.py"
+
 # Prepend supervisor.runtime.autoreload = False to prevent unintended soft reboots
 # caused by host OS desktop daemons and background USB filesystem access.
 {
@@ -53,7 +60,7 @@ while IFS= read -r line; do
     
     if [[ -f "$tagged_src_path" ]]; then
       echo "Copying tagged file '$tagged_file' to '$tagged_dest_path'..."
-      cp "$tagged_src_path" "$tagged_dest_path"
+      ee cp "$tagged_src_path" "$tagged_dest_path"
     else
       echo "Warning: Tagged file '$tagged_src_path' not found. Skipping." >&2
     fi

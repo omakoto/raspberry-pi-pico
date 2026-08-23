@@ -16,7 +16,7 @@ The browser UI ([`settings.html`](file:///home/omakoto/cbin/src/raspberry-pi-pic
 
 ---
 
-## Storage Access Modes (GP14)
+## Storage Access Modes (GP14 / Pin 19)
 
 CircuitPython does not allow concurrent write access to the flash filesystem from both the Pico and the Host PC at the same time. [`boot.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-16-web-serial-config/boot.py) checks the state of **GP14** during boot:
 
