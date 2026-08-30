@@ -47,6 +47,8 @@ Below is an overview of the projects and utilities contained in this directory:
 | [`2026-08-29-gpio-monitor`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-29-gpio-monitor) | Dynamically monitors all available GPIO pins (0–44) across Pico/ESP32 boards with debouncing, logging on/off switch state transitions ([`gpio-monitor.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/2026-08-29-gpio-monitor/gpio-monitor.py)). |
 | [`ssd1306`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/ssd1306) | SSD1306 OLED driver and terminal simulator library ([`ssd1306.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/ssd1306/ssd1306.py)) supporting dynamic fonts (4x5, 8x16), ANSI sequences, and Unicode box drawing, with sample demos ([`sample.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/ssd1306/sample.py), [`sample-large.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/ssd1306/sample-large.py), [`sample-borders.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/ssd1306/sample-borders.py), [`sample-ascii.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/ssd1306/sample-ascii.py)). |
 
-### Utilities
+### Utilities & Libraries
 
-* [`bin/`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/bin): Contains helper scripts (`circuit-run`, `find-circut-dir`) to run and monitor Python code on connected Pico devices, along with bash unit test files.
+* [`libs/`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/libs): Shared library utilities for CircuitPython scripts, including cross-platform GPIO pin resolver ([`common.py`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/libs/common.py)).
+* [`bin/`](file:///home/omakoto/cbin/src/raspberry-pi-pico/circuitpython/bin): Contains helper scripts (`circuit-run`, `find-circut-dir`) to run and monitor Python code on connected Pico/ESP32 devices, along with bash unit test files.
+

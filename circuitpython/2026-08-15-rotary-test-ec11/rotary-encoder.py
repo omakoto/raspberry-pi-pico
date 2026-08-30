@@ -1,25 +1,26 @@
 #!/usr/bin/env circuit-run
-"""
-Script to test and print EC11 rotary encoder inputs on a Raspberry Pi Pico.
+#file: ../libs/common.py
+#
+# Script to test and print EC11 rotary encoder inputs on Raspberry Pi Pico, ESP32, and compatible boards.
+#
+# Pin Connections (default: GPIO 1, 2, 3):
+# - GPIO 1: Encoder Phase A
+# - GPIO 2: Encoder Phase B
+# - GPIO 3: Push Button (active LOW, internal pull-up)
+# - Common Ground: Connected directly to physical GND
+#
+# Note: This script uses a software-based quadrature decoder to support 
+# arbitrary / non-sequential GPIO pins across different microcontrollers.
 
-Pin Connections:
-- GP15 (r1): Encoder Phase A
-- GP9 (r2): Encoder Phase B
-- GP8 (r3): Push Button (active LOW, internal pull-up)
-- Common Ground: Connected directly to Pico physical GND
-
-Note: This script uses a software-based quadrature decoder to support 
-non-sequential GPIO pins on the RP2040.
-"""
-
+import time
 import board
 import digitalio
-import time
+from common import get_pin
 
 # Pin Definitions
-PIN_ENCODER_A: board.Pin = board.GP15
-PIN_ENCODER_B: board.Pin = board.GP9
-PIN_BUTTON: board.Pin = board.GP8
+PIN_ENCODER_A: board.Pin = get_pin(1)
+PIN_ENCODER_B: board.Pin = get_pin(2)
+PIN_BUTTON: board.Pin = get_pin(3)
 
 class SoftwareEncoder:
     """A software-based quadrature decoder for rotary encoders."""
