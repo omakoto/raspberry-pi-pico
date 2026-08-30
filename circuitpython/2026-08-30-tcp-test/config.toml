@@ -1,0 +1,4 @@
+hostname="tcp-test"
+wifi_ssid="SSID"
+wifi_password="PASSWORD"
+tcp_port=10100
