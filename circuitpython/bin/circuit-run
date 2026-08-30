@@ -71,6 +71,6 @@ if [[ -z "$MOCK_CIRCUIT_DIR" && -c /dev/ttyACM0 ]]; then
   # Send soft reboot sequence (Ctrl-C then Ctrl-D) to trigger immediate execution of new code.py
   python3 -c "import os; fd=os.open('/dev/ttyACM0', os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK); os.write(fd, b'\x03\x04'); os.close(fd)" 2>/dev/null || true
   echo 'Press ctrl-a ctrl-q to quit.'
-  picocom -q -b 115200 /dev/ttyACM0
+  ee picocom -q -b 115200 /dev/ttyACM0
 fi
 
