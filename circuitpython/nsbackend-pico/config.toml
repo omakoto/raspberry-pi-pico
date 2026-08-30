@@ -1,0 +1,6 @@
+hostname="nscon"
+wifi_ssid="WIFI-SSID"
+wifi_password="PASSWORD"
+tcp_port=10100
+log=true
+led_active_low=false
