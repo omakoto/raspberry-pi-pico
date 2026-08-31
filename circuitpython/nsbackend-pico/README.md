@@ -29,6 +29,7 @@ This project implements a CircuitPython backend for [`raspberry-switch-control`]
    wifi_password = "YOUR_WIFI_PASSWORD"
    tcp_port = 10100
    log = false
+   enable_echo = false
    ```
 
 2. Flash and run on your board:
@@ -38,9 +39,17 @@ This project implements a CircuitPython backend for [`raspberry-switch-control`]
 
 3. Connect your host controller or send commands from PC:
    ```bash
-   # Using nsfrontend with a physical controller:
-   nsfrontend -j /dev/input/js0 -o /dev/tcp/nscon/10100
+   # Using nsfrontend with a physical controller (via Bash /dev/tcp):
+   nsfrontend -j /dev/input/js0 -o >(cat > /dev/tcp/nscon.local/10100)
 
-   # Or sending commands directly over TCP:
+   # Or piping directly via nc (netcat):
+   nsfrontend -j /dev/input/js0 | nc nscon.local 10100
+
+   # Or sending one-off commands directly over TCP:
    echo "a" | nc nscon.local 10100
+   ```
+
+4. Measure TCP latency (requires `enable_echo = true` in `config.toml`):
+   ```bash
+   ./measure-latency.py --host nscon.local --port 10100
    ```
