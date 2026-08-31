@@ -233,39 +233,116 @@ def format_wifi_error(e: Exception) -> str:
     return err_str
 
 
-# Scans visible Wi-Fi access points and prints diagnostic details
-def scan_and_print_networks() -> None:
-    print("Scanning visible Wi-Fi networks...")
-    try:
-        count = 0
-        for net in wifi.radio.start_scanning_networks():
-            ssid_name = net.ssid if net.ssid else "<hidden>"
-            print(f"  [AP] SSID: '{ssid_name}', RSSI: {net.rssi} dBm, Ch: {net.channel}")
-            count += 1
-        wifi.radio.stop_scanning_networks()
-        if count == 0:
-            print("  No visible Wi-Fi networks found.")
-    except Exception as e:
-        print(f"  Wi-Fi scan failed: {e}")
+# Manages Wi-Fi network configuration and connections with multi-AP fallback and scan-based selection
+class WifiManager:
 
+    def __init__(self, config: dict[str, str | int | bool]) -> None:
+        self.ap_list: list[tuple[str, str]] = []
 
-# Connect to Wi-Fi network
-def connect_wifi(ssid: str, password: str, led: StatusLed) -> None:
-    if wifi.radio.connected:
-        print(f"Already connected to Wi-Fi. IP: {wifi.radio.ipv4_address}")
-        return
+        # Index 0: Check 'wifi_ssid' / 'wifi_password', accepting 'wifi_ssid0' / 'wifi_password0' as aliases
+        ssid0 = str(config.get("wifi_ssid") or config.get("wifi_ssid0") or "").strip()
+        pass0 = str(config.get("wifi_password") or config.get("wifi_password0") or "")
+        if ssid0:
+            self.ap_list.append((ssid0, pass0))
 
-    led.set_step(LedState.INITIALIZING)
-    print(f"Connecting to Wi-Fi SSID: '{ssid}' (password length: {len(password)})...")
-    while not wifi.radio.connected:
+        # Indices 1 to 9: Check 'wifi_ssid1'..'wifi_ssid9' and 'wifi_password1'..'wifi_password9'
+        for i in range(1, 10):
+            ssid_key = f"wifi_ssid{i}"
+            pass_key = f"wifi_password{i}"
+            ssid = str(config.get(ssid_key, "")).strip()
+            password = str(config.get(pass_key, ""))
+            if ssid:
+                self.ap_list.append((ssid, password))
+
+    @property
+    def configured_ssids(self) -> list[str]:
+        return [ssid for ssid, _ in self.ap_list]
+
+    def scan_networks(self) -> set[str]:
+        # Scans visible Wi-Fi access points and prints diagnostic details
+        print("Scanning visible Wi-Fi networks...")
+        visible_ssids: set[str] = set()
+        try:
+            count = 0
+            for net in wifi.radio.start_scanning_networks():
+                ssid_name = net.ssid if net.ssid else ""
+                display_name = ssid_name if ssid_name else "<hidden>"
+                print(f"  [AP] SSID: '{display_name}', RSSI: {net.rssi} dBm, Ch: {net.channel}")
+                if ssid_name:
+                    visible_ssids.add(ssid_name)
+                count += 1
+            if count == 0:
+                print("  No visible Wi-Fi networks found.")
+        except Exception as e:
+            print(f"  Wi-Fi scan failed: {e}")
+        finally:
+            try:
+                wifi.radio.stop_scanning_networks()
+            except Exception:
+                pass
+        return visible_ssids
+
+    def _attempt_connect(self, ssid: str, password: str) -> bool:
+        print(f"Connecting to Wi-Fi SSID: '{ssid}' (password length: {len(password)})...")
         try:
             wifi.radio.connect(ssid, password)
             print(f"Connected to Wi-Fi successfully! IP: {wifi.radio.ipv4_address}")
-            return
+            return True
         except Exception as e:
             err_msg = format_wifi_error(e)
-            print(f"Wi-Fi connection failed: {err_msg}")
-            scan_and_print_networks()
+            print(f"Wi-Fi connection to '{ssid}' failed: {err_msg}")
+            return False
+
+    def connect(self, led: StatusLed | None = None) -> None:
+        if wifi.radio.connected:
+            print(f"Already connected to Wi-Fi. IP: {wifi.radio.ipv4_address}")
+            return
+
+        if not self.ap_list:
+            print("Warning: No Wi-Fi SSIDs configured.")
+            time.sleep(5.0)
+            return
+
+        if led is not None:
+            led.set_step(LedState.INITIALIZING)
+
+        # First attempt: Try the first configured AP directly
+        last_tried_idx = 0
+        first_ssid, first_pass = self.ap_list[0]
+        if self._attempt_connect(first_ssid, first_pass):
+            return
+
+        # If the first attempt fails, scan visible networks and try next matching APs in scan result
+        while not wifi.radio.connected:
+            if led is not None:
+                led.update()
+
+            visible_ssids = self.scan_networks()
+
+            # Find and try candidates in order starting after the last tried index
+            candidates: list[tuple[int, str, str]] = []
+            num_aps = len(self.ap_list)
+            for step in range(1, num_aps + 1):
+                idx = (last_tried_idx + step) % num_aps
+                ssid, password = self.ap_list[idx]
+                if ssid in visible_ssids:
+                    candidates.append((idx, ssid, password))
+
+            if not candidates:
+                print("No configured Wi-Fi APs visible in scan. Retrying in 3 seconds...")
+                time.sleep(3.0)
+                continue
+
+            for idx, ssid, password in candidates:
+                if led is not None:
+                    led.update()
+                last_tried_idx = idx
+                if self._attempt_connect(ssid, password):
+                    return
+
+            # If all candidates in this scan cycle failed, pause before re-scanning
+            print("All visible Wi-Fi candidates failed. Retrying scan in 3 seconds...")
+            time.sleep(3.0)
 
 
 # Manages communication with the Nintendo Switch HID gamepad endpoint
@@ -615,8 +692,6 @@ def main() -> None:
     # Load configuration
     config = load_toml_config()
     hostname: str = str(config.get("hostname", "nscon"))
-    wifi_ssid: str = str(config.get("wifi_ssid", ""))
-    wifi_password: str = str(config.get("wifi_password", ""))
     tcp_port: int = int(config.get("tcp_port", 10100))
     log_enabled: bool = bool(config.get("log", False))
     led_active_low: bool = bool(config.get("led_active_low", False))
@@ -626,10 +701,11 @@ def main() -> None:
     led = StatusLed(active_low=led_active_low)
     led.set_step(LedState.INITIALIZING)
 
-    print(f"Loaded config: hostname='{hostname}', wifi_ssid='{wifi_ssid}', tcp_port={tcp_port}, log={log_enabled}, led_active_low={led_active_low}, enable_echo={enable_echo}")
+    wifi_manager = WifiManager(config)
+    print(f"Loaded config: hostname='{hostname}', wifi_ssids={wifi_manager.configured_ssids}, tcp_port={tcp_port}, log={log_enabled}, led_active_low={led_active_low}, enable_echo={enable_echo}")
 
     # Connect to Wi-Fi
-    connect_wifi(wifi_ssid, wifi_password, led)
+    wifi_manager.connect(led)
 
     # Initialize mDNS hostname advertisement
     print(f"Advertising mDNS hostname: {hostname}.local...")
@@ -666,7 +742,7 @@ def main() -> None:
         if not wifi.radio.connected:
             print("Wi-Fi disconnected. Reconnecting...")
             led.set_step(LedState.INITIALIZING)
-            connect_wifi(wifi_ssid, wifi_password, led)
+            wifi_manager.connect(led)
             led.set_step(LedState.WAITING_CLIENT)
 
         controller.check_scheduled()
