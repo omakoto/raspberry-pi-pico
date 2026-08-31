@@ -183,6 +183,72 @@ def load_toml_config(file_path: str = CONFIG_FILE_PATH, base_path: str = CONFIG_
     return config
 
 
+# Human-readable Wi-Fi disconnect reason descriptions (mapping ESP-IDF and CYW43 error codes)
+WIFI_DISCONNECT_REASONS: dict[int, str] = {
+    1: "Unspecified failure (General connection error)",
+    2: "Auth expired (AP timed out during authentication - check if SSID is on 2.4 GHz, signal strength, or AP MAC filtering)",
+    3: "Auth leave (Disconnected by AP)",
+    4: "Assoc expired (AP timed out during association - check 2.4 GHz band compatibility)",
+    5: "Assoc too many (AP rejected connection: Max client limit reached on AP)",
+    6: "Not authenticated",
+    7: "Not associated",
+    8: "Assoc leave (Disassociated by AP)",
+    9: "Assoc not authed",
+    10: "Disassoc power cap bad",
+    11: "Disassoc supported channels bad",
+    13: "Invalid Information Element",
+    14: "MIC failure (WPA encryption mismatch / corrupted frames)",
+    15: "4-way handshake timeout (WRONG PASSWORD, weak signal, or WPA3/PMF mismatch)",
+    16: "Group key update timeout",
+    17: "IE in 4-way differs",
+    18: "Invalid group cipher (Check AP security settings: WPA2-PSK recommended)",
+    19: "Invalid pairwise cipher (Check AP security settings: AES/CCMP recommended)",
+    20: "Invalid AKMP (Authentication Key Management Protocol mismatch)",
+    21: "Unsupported RSN IE version",
+    22: "Invalid RSN IE capabilities",
+    23: "802.1X auth failed (Enterprise auth not supported)",
+    24: "Cipher suite rejected",
+    200: "Beacon timeout (Lost connection to AP)",
+    201: "No AP found (SSID not found - verify SSID spelling and ensure 2.4 GHz band is active)",
+    202: "Auth failed (WRONG PASSWORD)",
+    203: "Assoc failed",
+    204: "Handshake timeout (WRONG PASSWORD or weak signal)",
+    205: "Connection failed (General radio/handshake failure, weak signal, or WPA3 mismatch)",
+}
+
+
+# Formats Wi-Fi connection exceptions into actionable error descriptions
+def format_wifi_error(e: Exception) -> str:
+    err_str = str(e)
+    if "Unknown failure" in err_str:
+        words = err_str.split()
+        for i, word in enumerate(words):
+            if word == "failure" and i + 1 < len(words):
+                code_str = words[i + 1].strip(".:;,()")
+                if code_str.isdigit():
+                    code = int(code_str)
+                    reason = WIFI_DISCONNECT_REASONS.get(code)
+                    if reason:
+                        return f"Unknown failure {code} ({reason})"
+    return err_str
+
+
+# Scans visible Wi-Fi access points and prints diagnostic details
+def scan_and_print_networks() -> None:
+    print("Scanning visible Wi-Fi networks...")
+    try:
+        count = 0
+        for net in wifi.radio.start_scanning_networks():
+            ssid_name = net.ssid if net.ssid else "<hidden>"
+            print(f"  [AP] SSID: '{ssid_name}', RSSI: {net.rssi} dBm, Ch: {net.channel}")
+            count += 1
+        wifi.radio.stop_scanning_networks()
+        if count == 0:
+            print("  No visible Wi-Fi networks found.")
+    except Exception as e:
+        print(f"  Wi-Fi scan failed: {e}")
+
+
 # Connect to Wi-Fi network
 def connect_wifi(ssid: str, password: str, led: StatusLed) -> None:
     if wifi.radio.connected:
@@ -190,15 +256,16 @@ def connect_wifi(ssid: str, password: str, led: StatusLed) -> None:
         return
 
     led.set_step(LedState.INITIALIZING)
-    print(f"Connecting to Wi-Fi SSID: '{ssid}'...")
+    print(f"Connecting to Wi-Fi SSID: '{ssid}' (password length: {len(password)})...")
     while not wifi.radio.connected:
         try:
             wifi.radio.connect(ssid, password)
             print(f"Connected to Wi-Fi successfully! IP: {wifi.radio.ipv4_address}")
             return
         except Exception as e:
-            print(f"Wi-Fi connection failed: {e}. Retrying in 1 second...")
-            time.sleep(1.0)
+            err_msg = format_wifi_error(e)
+            print(f"Wi-Fi connection failed: {err_msg}")
+            scan_and_print_networks()
 
 
 # Manages communication with the Nintendo Switch HID gamepad endpoint
