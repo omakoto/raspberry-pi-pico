@@ -26,8 +26,9 @@ import wifi
 # Pin Configuration Constants
 PIN_LED: board.Pin | None = getattr(board, "LED", None)
 
-# Configuration file location on the CircuitPython filesystem
+# Configuration file locations on the CircuitPython filesystem
 CONFIG_FILE_PATH: str = "config.toml"
+CONFIG_BASE_FILE_PATH: str = "config-base.toml"
 
 # Nintendo Switch HID Constants
 HID_USAGE_PAGE_GENERIC: int = 0x01
@@ -141,33 +142,44 @@ class StatusLed:
             self._set_raw(cycle_time < 1.0)
 
 
-# Load basic TOML configuration file
-def load_toml_config(file_path: str) -> dict[str, str | int]:
-    # Parse key = "value" or key = 123 from configuration file
-    config: dict[str, str | int] = {}
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key_part, val_part = line.split("=", 1)
-                key = key_part.strip()
-                val = val_part.strip()
+# Parse simple key-value pairs from a TOML file into the config dictionary
+def parse_toml_file(file_path: str, config: dict[str, str | int | bool]) -> bool:
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key_part, val_part = line.split("=", 1)
+                    key = key_part.strip()
+                    val = val_part.strip()
 
-                if "#" in val and not ((val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'"))):
-                    val = val.split("#", 1)[0].strip()
+                    if "#" in val and not ((val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'"))):
+                        val = val.split("#", 1)[0].strip()
 
-                if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-                    config[key] = val[1:-1]
-                elif val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
-                    config[key] = int(val)
-                elif val.lower() == "true":
-                    config[key] = True
-                elif val.lower() == "false":
-                    config[key] = False
-                else:
-                    config[key] = val
+                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                        config[key] = val[1:-1]
+                    elif val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
+                        config[key] = int(val)
+                    elif val.lower() == "true":
+                        config[key] = True
+                    elif val.lower() == "false":
+                        config[key] = False
+                    else:
+                        config[key] = val
+        return True
+    except OSError:
+        return False
+
+
+# Load TOML configuration, reading main config first and overriding with config-base.toml if present
+def load_toml_config(file_path: str = CONFIG_FILE_PATH, base_path: str = CONFIG_BASE_FILE_PATH) -> dict[str, str | int | bool]:
+    config: dict[str, str | int | bool] = {}
+    if parse_toml_file(file_path, config):
+        print(f"Loaded config from '{file_path}'")
+    if parse_toml_file(base_path, config):
+        print(f"Loaded override config from '{base_path}'")
     return config
 
 
@@ -185,8 +197,8 @@ def connect_wifi(ssid: str, password: str, led: StatusLed) -> None:
             print(f"Connected to Wi-Fi successfully! IP: {wifi.radio.ipv4_address}")
             return
         except Exception as e:
-            print(f"Wi-Fi connection failed: {e}. Retrying in 3 seconds...")
-            time.sleep(3.0)
+            print(f"Wi-Fi connection failed: {e}. Retrying in 1 second...")
+            time.sleep(1.0)
 
 
 # Manages communication with the Nintendo Switch HID gamepad endpoint
@@ -535,7 +547,7 @@ def main() -> None:
     print("Starting Nintendo Switch Controller TCP Backend (nsbackend-pico)...")
 
     # Load configuration
-    config = load_toml_config(CONFIG_FILE_PATH)
+    config = load_toml_config()
     hostname: str = str(config.get("hostname", "nscon"))
     wifi_ssid: str = str(config.get("wifi_ssid", ""))
     wifi_password: str = str(config.get("wifi_password", ""))
@@ -560,11 +572,13 @@ def main() -> None:
     print(f"mDNS active: {hostname}.local -> {wifi.radio.ipv4_address}")
 
     # Initialize Switch Gamepad HID interface
+    print(f"Initializing the USB HID Switch Gamepad interface...")
     gamepad = SwitchGamepad()
     controller = ControllerState(gamepad)
     controller.reset_all()
 
     # Setup TCP Server socket
+    print(f"Starting TCP sever...")
     pool = socketpool.SocketPool(wifi.radio)
     server_socket = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
     server_socket.bind(("0.0.0.0", tcp_port))

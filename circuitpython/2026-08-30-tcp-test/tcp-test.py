@@ -3,7 +3,7 @@
 #
 # TCP Test Server with mDNS advertisement for CircuitPython (Raspberry Pi Pico 2 W / ESP32).
 #
-# Reads Wi-Fi credentials, hostname, and TCP port from config.toml.
+# Reads Wi-Fi credentials, hostname, and TCP port from config.toml (overridden by config-base.toml if present).
 # Connects to the configured Wi-Fi AP, advertises its hostname via mDNS (e.g., tcp-test.local),
 # and runs a TCP server on the configured port that logs all incoming data to the serial console.
 
@@ -12,42 +12,54 @@ import mdns
 import socketpool
 import wifi
 
-# Configuration file location on the CircuitPython filesystem
+# Configuration file locations on the CircuitPython filesystem
 CONFIG_FILE_PATH: str = "config.toml"
+CONFIG_BASE_FILE_PATH: str = "config-base.toml"
 
 
-# Robust key-value parser for simple TOML files in CircuitPython
-def load_toml_config(file_path: str) -> dict[str, str | int]:
-    # Parse key = "value" or key = 123 from a TOML configuration file
-    config: dict[str, str | int] = {}
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            # Skip blank lines and whole-line comments
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key_part, val_part = line.split("=", 1)
-                key = key_part.strip()
-                val = val_part.strip()
+# Parse simple key-value pairs from a TOML file into the config dictionary
+def parse_toml_file(file_path: str, config: dict[str, str | int | bool]) -> bool:
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                # Skip blank lines and whole-line comments
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key_part, val_part = line.split("=", 1)
+                    key = key_part.strip()
+                    val = val_part.strip()
 
-                # Remove trailing comments if not enclosed in quotes
-                if "#" in val and not ((val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'"))):
-                    val = val.split("#", 1)[0].strip()
+                    # Remove trailing comments if not enclosed in quotes
+                    if "#" in val and not ((val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'"))):
+                        val = val.split("#", 1)[0].strip()
 
-                # Parse quoted string
-                if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-                    config[key] = val[1:-1]
-                # Parse integer
-                elif val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
-                    config[key] = int(val)
-                # Parse boolean
-                elif val.lower() == "true":
-                    config[key] = True
-                elif val.lower() == "false":
-                    config[key] = False
-                else:
-                    config[key] = val
+                    # Parse quoted string
+                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                        config[key] = val[1:-1]
+                    # Parse integer
+                    elif val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
+                        config[key] = int(val)
+                    # Parse boolean
+                    elif val.lower() == "true":
+                        config[key] = True
+                    elif val.lower() == "false":
+                        config[key] = False
+                    else:
+                        config[key] = val
+        return True
+    except OSError:
+        return False
+
+
+# Load TOML configuration, reading main config first and overriding with config-base.toml if present
+def load_toml_config(file_path: str = CONFIG_FILE_PATH, base_path: str = CONFIG_BASE_FILE_PATH) -> dict[str, str | int | bool]:
+    config: dict[str, str | int | bool] = {}
+    if parse_toml_file(file_path, config):
+        print(f"Loaded config from '{file_path}'")
+    if parse_toml_file(base_path, config):
+        print(f"Loaded override config from '{base_path}'")
     return config
 
 
@@ -71,8 +83,7 @@ def connect_wifi(ssid: str, password: str) -> None:
 # Main TCP server execution loop
 def main() -> None:
     # Load configuration
-    print(f"Loading configuration from '{CONFIG_FILE_PATH}'...")
-    config = load_toml_config(CONFIG_FILE_PATH)
+    config = load_toml_config()
 
     hostname: str = str(config.get("hostname", "tcp-test"))
     wifi_ssid: str = str(config.get("wifi_ssid", ""))
