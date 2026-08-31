@@ -83,7 +83,6 @@ class StatusLed:
             try:
                 self.io = digitalio.DigitalInOut(PIN_LED)
                 self.io.direction = digitalio.Direction.OUTPUT
-                self.off()
                 print(f"Status LED initialized on board.LED (active_low={self.active_low})")
             except Exception as e:
                 print(f"Warning: Failed to initialize digitalio on board.LED: {e}")
@@ -92,6 +91,7 @@ class StatusLed:
 
         self.current_step: int = LedState.INITIALIZING
         self.step_start_time: float = time.monotonic()
+        self.update()
 
     def _set_raw(self, state: bool) -> None:
         if self.io is not None:
@@ -107,7 +107,7 @@ class StatusLed:
         if self.current_step != step:
             self.current_step = step
             self.step_start_time = time.monotonic()
-            self.update()
+        self.update()
 
     def update(self) -> None:
         if self.io is None:
@@ -525,8 +525,7 @@ class ControllerState:
         elif cmd == "lx":
             self.lx = arg
         elif cmd == "ly":
-            # Invert stick Y matching nsbackend convention
-            self.ly = -arg
+            self.ly = arg
         elif cmd == "lu":
             self.lx = 0.0
             self.ly = -1.0 if is_active else 0.0
@@ -556,7 +555,7 @@ class ControllerState:
         elif cmd == "rx":
             self.rx = arg
         elif cmd == "ry":
-            self.ry = -arg
+            self.ry = arg
         elif cmd == "ru":
             self.rx = 0.0
             self.ry = -1.0 if is_active else 0.0
@@ -621,12 +620,13 @@ def main() -> None:
     tcp_port: int = int(config.get("tcp_port", 10100))
     log_enabled: bool = bool(config.get("log", False))
     led_active_low: bool = bool(config.get("led_active_low", False))
+    enable_echo: bool = bool(config.get("enable_echo", False))
 
     # Initialize status LED indicator and turn ON during initialization
     led = StatusLed(active_low=led_active_low)
     led.set_step(LedState.INITIALIZING)
 
-    print(f"Loaded config: hostname='{hostname}', wifi_ssid='{wifi_ssid}', tcp_port={tcp_port}, log={log_enabled}, led_active_low={led_active_low}")
+    print(f"Loaded config: hostname='{hostname}', wifi_ssid='{wifi_ssid}', tcp_port={tcp_port}, log={log_enabled}, led_active_low={led_active_low}, enable_echo={enable_echo}")
 
     # Connect to Wi-Fi
     connect_wifi(wifi_ssid, wifi_password, led)
@@ -705,6 +705,11 @@ def main() -> None:
                         if line:
                             if log_enabled:
                                 print(line)
+                            if enable_echo:
+                                try:
+                                    client_socket.send((line + "\n").encode("utf-8"))
+                                except OSError:
+                                    pass
                             controller.execute_command(line)
 
                 except OSError as e:

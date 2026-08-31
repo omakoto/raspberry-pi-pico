@@ -4,3 +4,4 @@ wifi_password="PASSWORD"
 tcp_port=10100
 log=true
 led_active_low=false
+enable_echo=true
