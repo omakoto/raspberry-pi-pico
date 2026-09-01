@@ -105,9 +105,13 @@ git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp-i
 
 ### 3. Install ESP32-S3 Toolchain & Dependencies
 Run the ESP-IDF installer targeting the `esp32s3` chip:
+
+> [!NOTE]
+> Prepending `/usr/bin` to `PATH` ensures the system Python is used. ESP-IDF creates and manages its own isolated virtual environment under `~/.espressif/python_env/` and will fail (`ERROR: This script was called from a virtual environment`) if invoked from within an existing virtual environment or if a user virtualenv precedes `/usr/bin` in `$PATH`.
+
 ```bash
 cd ~/esp-idf
-./install.sh esp32s3
+PATH="/usr/bin:$PATH" ./install.sh esp32s3
 ```
 
 ### 4. Environment Activation
