@@ -81,7 +81,8 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 - [x] **Phase 6: Controller State Engine & TCP Command Server**
   - Implemented `ControllerState` handling all button/stick tokens, duration commands, auto-release queues, and thread-safe locking.
   - Implemented `TcpServer` socket server streaming inputs at port `10100`.
-- [x] **Phase 7: Compilation & Verification**
+- [x] **Phase 7: Compilation, Verification & Helper Scripts**
+  - Created `00-build.sh` and `01-install.sh`.
   - Verified clean build with ESP-IDF `v5.5.5` toolchain targeting `esp32s3`.
 
 ---
@@ -89,7 +90,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 ## 5. Building & Flashing
 
 ### 1. Configure Wi-Fi in `spiffs_data/config.toml`
-Edit `spiffs_data/config.toml` to specify your Wi-Fi network credentials:
+Edit `spiffs_data/config.toml` (or create `spiffs_data/config-override.toml`) to specify your Wi-Fi credentials:
 ```toml
 hostname = "nscon"
 tcp_port = 10100
@@ -97,11 +98,17 @@ wifi_ssid = "YOUR_WIFI_SSID"
 wifi_password = "YOUR_WIFI_PASSWORD"
 ```
 
-### 2. Build & Flash
-Activate the ESP-IDF environment and flash the firmware and SPIFFS partition to the board:
+### 2. Build the Firmware
+Run [`./00-build.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/00-build.sh):
 ```bash
-. /home/omakoto/esp-idf/export.sh
 cd ~/cbin/src/raspberry-pi-pico/nsbackend-esp32s3
-idf.py -p /dev/ttyACM0 flash monitor
+./00-build.sh
 ```
-*(Replace `/dev/ttyACM0` with your serial device port).*
+
+### 3. Flash to ESP32-S3
+Run [`./01-install.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/01-install.sh):
+```bash
+./01-install.sh
+# or specify the port explicitly:
+./01-install.sh /dev/ttyACM0
+```
