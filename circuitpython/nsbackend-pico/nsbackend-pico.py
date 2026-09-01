@@ -8,6 +8,14 @@
 # and runs a TCP server on port 10100 (advertised as nscon.local via mDNS).
 # Receives controller commands streamed from nsfrontend or interactive pipelines,
 # parsing inputs, directional sticks, and auto-releases, then updates HID reports.
+# Also supports physical hardware buttons wired to GPIO pins (active-low with pull-up):
+#   - D0 (GP0 / GPIO1): A button
+#   - D1 (GP1 / GPIO2): D-pad DOWN
+#   - D2 (GP2 / GPIO3): D-pad LEFT
+#   - D3 (GP3 / GPIO4): D-pad RIGHT
+#   - D4 (GP4 / GPIO5): D-pad UP
+#   - D5 (GP5 / GPIO6): B button
+#   - D6 (GP6 / GPIO43): L and R buttons simultaneously
 # Uses the onboard user LED to indicate progress:
 #   - Initialization (Wi-Fi + Server startup): LED constantly ON
 #   - Waiting for client: 3 blinks (0.2s on, 0.2s off x 3, 0.5s pause)
@@ -19,6 +27,7 @@ import time
 import board
 import digitalio
 import mdns
+import microcontroller
 import socketpool
 import usb_hid
 import wifi
@@ -381,20 +390,163 @@ class SwitchGamepad:
                 pass
 
 
+# Resolves a GPIO pin identifier across different board architectures (ESP32-S3, Pico, etc.)
+def resolve_pin(pin_id: int | str) -> board.Pin | None:
+    if isinstance(pin_id, str):
+        if hasattr(board, pin_id):
+            return getattr(board, pin_id)
+        if hasattr(microcontroller.pin, pin_id):
+            return getattr(microcontroller.pin, pin_id)
+        digits = "".join([c for c in pin_id if c.isdigit()])
+        if digits:
+            num = int(digits)
+        else:
+            return None
+    else:
+        num = int(pin_id)
+
+    # Candidate prefixes across board definitions (D0-D6 on XIAO, GP0-GP6 on Pico)
+    for prefix in ("D", "GP", "IO", "GPIO", "P"):
+        attr = f"{prefix}{num}"
+        if hasattr(board, attr):
+            return getattr(board, attr)
+
+    # Candidate prefixes in microcontroller.pin hardware layer
+    for prefix in ("GPIO", "GP", "IO"):
+        attr = f"{prefix}{num}"
+        if hasattr(microcontroller.pin, attr):
+            return getattr(microcontroller.pin, attr)
+
+    return None
+
+
+# Debounced physical GPIO button input with internal pull-up
+class GpioButton:
+
+    def __init__(self, pin: board.Pin, name: str, action: str, cmd_name: str, mask: int = 0) -> None:
+        self.io: digitalio.DigitalInOut = digitalio.DigitalInOut(pin)
+        self.io.direction = digitalio.Direction.INPUT
+        self.io.pull = digitalio.Pull.UP
+        self.name: str = name
+        self.action: str = action
+        self.cmd_name: str = cmd_name
+        self.mask: int = mask
+        # Active LOW (connecting pin to GND asserts active state)
+        self.is_active: bool = not self.io.value
+        self._last_raw: bool = self.io.value
+        self._last_change_time: float = time.monotonic()
+
+    def update(self, debounce_s: float = 0.015) -> bool:
+        # Returns True if debounced active state changed
+        raw = self.io.value
+        now = time.monotonic()
+        if raw != self._last_raw:
+            self._last_raw = raw
+            self._last_change_time = now
+
+        if (now - self._last_change_time) >= debounce_s:
+            active = not raw
+            if active != self.is_active:
+                self.is_active = active
+                if self.is_active:
+                    print(self.cmd_name)
+                return True
+        return False
+
+
+# Manages physical hardware buttons and maps them to controller inputs
+class GpioButtonManager:
+
+    def __init__(self, controller: "ControllerState") -> None:
+        self.controller: "ControllerState" = controller
+        self.buttons: list[GpioButton] = []
+
+        # Pin mapping definition using 0-based digital pin indices: (pin_id, action, mask, description, cmd_name)
+        pin_specs: list[tuple[int | str, str, int, str, str]] = [
+            (0, "button", BTN_A, "A button", "a"),
+            (1, "dpad_down", 0, "D-pad Down", "pd"),
+            (2, "dpad_left", 0, "D-pad Left", "pl"),
+            (3, "dpad_right", 0, "D-pad Right", "pr"),
+            (4, "dpad_up", 0, "D-pad Up", "pu"),
+            (5, "button", BTN_B, "B button", "b"),
+            (6, "button", BTN_L | BTN_R, "L and R buttons", "l1 r1"),
+        ]
+
+        for pin_id, action, mask, desc, cmd_name in pin_specs:
+            pin_obj = resolve_pin(pin_id)
+            if pin_obj is not None:
+                try:
+                    btn = GpioButton(pin_obj, f"D{pin_id}", action, cmd_name, mask)
+                    self.buttons.append(btn)
+                    print(f"GPIO button mapped: D{pin_id} ({pin_obj}) -> {desc} ({cmd_name})")
+                except Exception as e:
+                    print(f"Warning: Failed to initialize D{pin_id} for {desc}: {e}")
+            else:
+                print(f"Notice: D{pin_id} not available on this board (skipping {desc})")
+
+        # Apply initial physical switch state
+        self._apply_to_controller()
+
+    def update(self) -> None:
+        if not self.buttons:
+            return
+        state_changed = False
+        for btn in self.buttons:
+            if btn.update():
+                state_changed = True
+
+        if state_changed:
+            self._apply_to_controller()
+
+    def _apply_to_controller(self) -> None:
+        gpio_btn_mask = BTN_NONE
+        dpad_up = False
+        dpad_down = False
+        dpad_left = False
+        dpad_right = False
+
+        for btn in self.buttons:
+            if btn.is_active:
+                if btn.action == "button":
+                    gpio_btn_mask |= btn.mask
+                elif btn.action == "dpad_up":
+                    dpad_up = True
+                elif btn.action == "dpad_down":
+                    dpad_down = True
+                elif btn.action == "dpad_left":
+                    dpad_left = True
+                elif btn.action == "dpad_right":
+                    dpad_right = True
+
+        self.controller.gpio_buttons = gpio_btn_mask
+        self.controller.gpio_dpad_up = dpad_up
+        self.controller.gpio_dpad_down = dpad_down
+        self.controller.gpio_dpad_left = dpad_left
+        self.controller.gpio_dpad_right = dpad_right
+        self.controller.sync_report()
+
+
 # Represents full controller state and command execution
 class ControllerState:
 
     def __init__(self, gamepad: SwitchGamepad) -> None:
         self.gamepad: SwitchGamepad = gamepad
 
-        # Individual button states
+        # Individual button states from TCP commands
         self.buttons: int = BTN_NONE
 
-        # D-pad individual directions
+        # D-pad individual directions from TCP commands
         self.dpad_up: bool = False
         self.dpad_down: bool = False
         self.dpad_left: bool = False
         self.dpad_right: bool = False
+
+        # Physical GPIO input overlays
+        self.gpio_buttons: int = BTN_NONE
+        self.gpio_dpad_up: bool = False
+        self.gpio_dpad_down: bool = False
+        self.gpio_dpad_left: bool = False
+        self.gpio_dpad_right: bool = False
 
         # Analog stick values: float -1.0 .. +1.0
         self.lx: float = 0.0
@@ -420,11 +572,11 @@ class ControllerState:
         self.sync_report()
 
     def sync_report(self) -> None:
-        # Resolves hat direction with opposing cancellation
-        up = self.dpad_up
-        down = self.dpad_down
-        left = self.dpad_left
-        right = self.dpad_right
+        # Resolves hat direction with opposing cancellation (combining TCP and GPIO inputs)
+        up = self.dpad_up or self.gpio_dpad_up
+        down = self.dpad_down or self.gpio_dpad_down
+        left = self.dpad_left or self.gpio_dpad_left
+        right = self.dpad_right or self.gpio_dpad_right
 
         if up and down:
             up = down = False
@@ -466,7 +618,10 @@ class ControllerState:
         ry_byte = int(round(128.0 + (self.ry * 127.0)))
         ry_byte = max(0, min(255, ry_byte))
 
-        self.gamepad.send_state(self.buttons, hat, lx_byte, ly_byte, rx_byte, ry_byte)
+        # Merge button bitmasks from TCP commands and physical GPIO inputs
+        merged_buttons = self.buttons | self.gpio_buttons
+
+        self.gamepad.send_state(merged_buttons, hat, lx_byte, ly_byte, rx_byte, ry_byte)
 
     def set_button(self, mask: int, state: bool) -> None:
         if state:
@@ -730,6 +885,9 @@ def main() -> None:
     controller = ControllerState(gamepad)
     controller.reset_all()
 
+    # Initialize physical GPIO hardware button manager
+    gpio_manager = GpioButtonManager(controller)
+
     # Setup TCP Server socket
     pool, server_socket = create_server_socket(tcp_port, hostname)
 
@@ -740,6 +898,7 @@ def main() -> None:
 
     while True:
         led.update()
+        gpio_manager.update()
 
         # Check and maintain Wi-Fi connection
         if not wifi.radio.connected:
@@ -784,6 +943,7 @@ def main() -> None:
         try:
             while True:
                 led.update()
+                gpio_manager.update()
                 controller.check_scheduled()
 
                 try:
