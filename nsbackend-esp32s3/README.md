@@ -87,7 +87,47 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 
 ---
 
-## 5. Building & Flashing
+## 5. Development Environment Setup
+
+To set up the ESP-IDF build environment on Ubuntu / Debian:
+
+### 1. Install System Dependencies (apt)
+```bash
+sudo apt-get update
+sudo apt-get install -y git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+```
+
+### 2. Clone ESP-IDF (v5.5.5 LTS)
+Clone the repository to `~/esp-idf` with submodules:
+```bash
+git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
+```
+
+### 3. Install ESP32-S3 Toolchain & Dependencies
+Run the ESP-IDF installer targeting the `esp32s3` chip:
+```bash
+cd ~/esp-idf
+./install.sh esp32s3
+```
+
+### 4. Environment Activation
+[`./00-build.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/00-build.sh) and [`./01-install.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/01-install.sh) automatically detect and source `${IDF_PATH}/export.sh` or `~/esp-idf/export.sh`.
+
+If you prefer to run `idf.py` manually in your shell:
+```bash
+. ~/esp-idf/export.sh
+```
+
+### 5. Serial Port Permissions (Optional)
+Add your user to the `dialout` group to allow flashing over USB without root privileges:
+```bash
+sudo usermod -a -G dialout $USER
+```
+*(Log out and log back in for group changes to take effect)*
+
+---
+
+## 6. Building & Flashing
 
 ### 1. Configure Wi-Fi in `spiffs_data/config.toml`
 Edit `spiffs_data/config.toml` (or create `spiffs_data/config-override.toml`) to specify your Wi-Fi credentials:
