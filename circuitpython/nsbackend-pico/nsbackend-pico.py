@@ -28,7 +28,7 @@ PIN_LED: board.Pin | None = getattr(board, "LED", None)
 
 # Configuration file locations on the CircuitPython filesystem
 CONFIG_FILE_PATH: str = "config.toml"
-CONFIG_BASE_FILE_PATH: str = "config-base.toml"
+CONFIG_OVERRIDE_FILE_PATH: str = "config-override.toml"
 
 # Nintendo Switch HID Constants
 HID_USAGE_PAGE_GENERIC: int = 0x01
@@ -173,13 +173,13 @@ def parse_toml_file(file_path: str, config: dict[str, str | int | bool]) -> bool
         return False
 
 
-# Load TOML configuration, reading main config first and overriding with config-base.toml if present
-def load_toml_config(file_path: str = CONFIG_FILE_PATH, base_path: str = CONFIG_BASE_FILE_PATH) -> dict[str, str | int | bool]:
+# Load TOML configuration, reading main config first and overriding with config-override.toml if present
+def load_toml_config(file_path: str = CONFIG_FILE_PATH, override_path: str = CONFIG_OVERRIDE_FILE_PATH) -> dict[str, str | int | bool]:
     config: dict[str, str | int | bool] = {}
     if parse_toml_file(file_path, config):
         print(f"Loaded config from '{file_path}'")
-    if parse_toml_file(base_path, config):
-        print(f"Loaded override config from '{base_path}'")
+    if parse_toml_file(override_path, config):
+        print(f"Loaded override config from '{override_path}'")
     return config
 
 
@@ -374,14 +374,6 @@ class SwitchGamepad:
         # Pack 8-byte HID report
         report: bytes = struct.pack("<HBBBBBB", buttons, hat, lx, ly, rx, ry, 0x00)
         if report != self._last_report:
-            for _ in range(10):
-                try:
-                    self._device.send_report(report)
-                    self._last_report = report
-                    return
-                except OSError:
-                    time.sleep(0.002)
-
             try:
                 self._device.send_report(report)
                 self._last_report = report
