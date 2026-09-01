@@ -1,0 +1,25 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "config_manager.cpp"
+        "status_led.cpp"
+        "gamepad_hid.cpp"
+        "controller_state.cpp"
+        "gpio_buttons.cpp"
+        "wifi_manager.cpp"
+        "mdns_service.cpp"
+        "tcp_server.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_wifi
+        esp_event
+        esp_netif
+        esp_timer
+        nvs_flash
+        spiffs
+        driver
+        lwip
+        freertos
+        log
+)

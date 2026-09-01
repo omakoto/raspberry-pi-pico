@@ -1,0 +1,20 @@
+# ESP-IDF build output directory
+build/
+
+# Generated SDK configuration files (keep sdkconfig.defaults)
+sdkconfig
+sdkconfig.old
+sdkconfig.ci
+
+# Managed components downloaded automatically by IDF Component Manager
+managed_components/
+
+# Local configuration overrides (containing sensitive Wi-Fi credentials)
+spiffs_data/config-override.toml
+
+# IDE & Editor artifacts
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

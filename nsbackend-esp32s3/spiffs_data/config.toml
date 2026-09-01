@@ -1,0 +1,14 @@
+# nsbackend-esp32s3 Configuration
+hostname = "nscon"
+tcp_port = 10100
+log = true
+enable_echo = true
+led_active_low = true
+
+# Primary Wi-Fi Access Point (Index 0)
+wifi_ssid = "YOUR_WIFI_SSID"
+wifi_password = "YOUR_WIFI_PASSWORD"
+
+# Fallback Wi-Fi Access Points (Optional: indices 1 to 9)
+# wifi_ssid1 = "BackupHotspot"
+# wifi_password1 = "HotspotPass"
