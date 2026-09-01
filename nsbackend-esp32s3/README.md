@@ -8,12 +8,14 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 
 `nsbackend-esp32s3` allows an ESP32-S3 microcontroller to function as a Nintendo Switch controller backend:
 1. **USB HID Gamepad**: Emulates a HORI Pokken Nintendo Switch controller over native USB OTG (`VID: 0x0f0d`, `PID: 0x0092`), transmitting 8-byte HID reports to the Nintendo Switch.
-2. **Wi-Fi Multi-AP Manager**: Connects to configured Wi-Fi access points with automatic scan-based fallback and background reconnection.
-3. **mDNS Service**: Advertises the device hostname as `nscon.local` with service `_nscon._tcp` on port `10100`.
-4. **TCP Command Server**: Listens on port `10100` for streaming controller commands from frontend clients (`nsfrontend` or interactive pipelines), parsing directional sticks, button presses, and auto-release timers.
-5. **Physical GPIO Buttons**: Supports hardware buttons with internal pull-ups, debouncing, and opposing D-pad direction cancellation.
-6. **Status LED**: Indicates system lifecycle states via onboard user LED patterns.
-7. **SPIFFS Configuration**: Loads Wi-Fi credentials and runtime settings from `config.toml` and optional `config-override.toml`.
+2. **USB CDC ACM Serial Console**: Provides `/dev/ttyACM0` for real-time serial logging and debugging (`idf.py monitor` / `tio`).
+3. **USB MSC Flash Storage**: Exposes the internal Wear Levelling FATFS partition as a USB flash drive for easy drag-and-drop editing of `config.toml`.
+4. **Wi-Fi Multi-AP Manager**: Connects to configured Wi-Fi access points with automatic scan-based fallback and background reconnection.
+5. **mDNS Service**: Advertises the device hostname as `nscon.local` with service `_nscon._tcp` on port `10100`.
+6. **TCP Command Server**: Listens on port `10100` for streaming controller commands from frontend clients (`nsfrontend` or interactive pipelines), parsing directional sticks, button presses, and auto-release timers.
+7. **Physical GPIO Buttons**: Supports hardware buttons with internal pull-ups, debouncing, and opposing D-pad direction cancellation.
+8. **Status LED**: Indicates system lifecycle states via onboard user LED patterns.
+9. **FATFS Configuration**: Loads Wi-Fi credentials and runtime settings from `config.toml` and optional `config-override.toml` on the FATFS partition.
 
 ---
 
@@ -45,18 +47,21 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 |   TCP Client      |  (Wi-Fi)  |    nsbackend-esp32s3      |
 | (nsfrontend / CLI)| --------> |  - TCP Server (Port 10100)|
 +-------------------+           |  - Controller State Engine|
-                                |  - TinyUSB HID Gamepad    |
+                                |  - Composite TinyUSB:     |
++-------------------+           |    * HID Gamepad          |
+|  Physical Buttons | --------> |    * CDC Serial Console   |
+|   (D0 - D6)       |           |    * MSC Storage (FATFS)  |
 +-------------------+           |  - Wi-Fi Multi-AP & mDNS  |
-|  Physical Buttons | --------> |  - GPIO Button Manager    |
-|   (D0 - D6)       |           |  - SPIFFS Config Reader   |
-+-------------------+           +---------------------------+
+                                |  - GPIO Button Manager    |
+                                |  - FATFS Config Reader    |
+                                +---------------------------+
 ```
 
 ### Module Responsibilities
 - **`main/main.cpp`**: Application lifecycle orchestrator, initializes storage, Wi-Fi, USB, GPIO, and TCP services.
-- **`main/config_manager.hpp/.cpp`**: Mounts SPIFFS filesystem and parses `config.toml` / `config-override.toml`.
+- **`main/config_manager.hpp/.cpp`**: Mounts Wear Levelling FATFS filesystem and parses `config.toml` / `config-override.toml`.
 - **`main/status_led.hpp/.cpp`**: Manages LED state machine (`INITIALIZING`, `WAITING_CLIENT`, `CLIENT_CONNECTED`).
-- **`main/gamepad_hid.hpp/.cpp`**: Initializes TinyUSB device stack and handles 8-byte HORI Pokken HID report formatting.
+- **`main/gamepad_hid.hpp/.cpp`**: Initializes TinyUSB composite stack (HORI Pokken Gamepad HID + CDC Serial + MSC Flash Storage).
 - **`main/controller_state.hpp/.cpp`**: Maintains button bitmasks, analog stick coordinates, auto-release timers, and merges GPIO button state.
 - **`main/gpio_buttons.hpp/.cpp`**: Monitors physical GPIO pins with 15ms software debouncing and applies inputs to `ControllerState`.
 - **`main/wifi_manager.hpp/.cpp`**: Implements multi-AP candidate selection, Wi-Fi scanning, and reconnection logic.
@@ -133,14 +138,15 @@ sudo usermod -a -G dialout $USER
 
 ## 6. Building & Flashing
 
-### 1. Configure Wi-Fi in `spiffs_data/config.toml`
-Edit `spiffs_data/config.toml` (or create `spiffs_data/config-override.toml`) to specify your Wi-Fi credentials:
+### 1. Configure Wi-Fi in `fatfs_data/config.toml`
+Edit `fatfs_data/config.toml` (or create `fatfs_data/config-override.toml`) before building:
 ```toml
 hostname = "nscon"
 tcp_port = 10100
 wifi_ssid = "YOUR_WIFI_SSID"
 wifi_password = "YOUR_WIFI_PASSWORD"
 ```
+*(Alternatively, you can edit `config.toml` directly on the mounted USB flash drive on your PC after flashing.)*
 
 ### 2. Build the Firmware
 Run [`./00-build.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/00-build.sh):
@@ -150,9 +156,50 @@ cd ~/cbin/src/raspberry-pi-pico/nsbackend-esp32s3
 ```
 
 ### 3. Flash to ESP32-S3
-Run [`./01-install.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/01-install.sh):
+Put the board into Bootloader mode (Hold **B**, press & release **R**, release **B**) and run [`./01-install.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/01-install.sh):
 ```bash
 ./01-install.sh
 # or specify the port explicitly:
 ./01-install.sh /dev/ttyACM0
+```
+
+---
+
+## 7. Serial Console Monitoring
+
+Because Composite USB is enabled, the ESP32-S3 exposes `/dev/ttyACM0` for console output alongside the USB HID gamepad:
+
+```bash
+. ~/esp-idf/export.sh
+idf.py -p /dev/ttyACM0 monitor
+# Exit with Ctrl+]
+```
+Or use `tio` / `picocom`:
+```bash
+tio /dev/ttyACM0
+# Exit with Ctrl+t then q
+```
+
+---
+
+## 8. Running `nsfrontend` & Sending Commands
+
+Once the ESP32-S3 is connected to Wi-Fi, you can stream controller inputs from your PC to the device (`nscon.local:10100`):
+
+### 1. Streaming from a Physical Controller
+```bash
+# Using nsfrontend with a physical controller (via Bash /dev/tcp):
+nsfrontend -j /dev/input/js0 -o >(cat > /dev/tcp/nscon.local/10100)
+
+# Or piping directly via nc (netcat):
+nsfrontend -j /dev/input/js0 | nc nscon.local 10100
+```
+
+### 2. Sending One-Off Commands Directly Over TCP
+```bash
+# Press and auto-release button A:
+echo "a" | nc nscon.local 10100
+
+# Press and auto-release Home button:
+echo "home" | nc nscon.local 10100
 ```

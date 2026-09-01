@@ -5,45 +5,37 @@
 #include <fstream>
 #include <sstream>
 #include "esp_log.h"
-#include "esp_spiffs.h"
+#include "esp_vfs_fat.h"
+#include "wear_levelling.h"
 
 static const char* TAG = "ConfigManager";
 
-ConfigManager::ConfigManager() : initialized_(false) {}
+ConfigManager::ConfigManager() : base_path_(""), wl_handle_(WL_INVALID_HANDLE), initialized_(false) {}
 
 ConfigManager::~ConfigManager() {
-    if (initialized_) {
-        esp_vfs_spiffs_unregister("storage");
+    if (initialized_ && wl_handle_ != WL_INVALID_HANDLE) {
+        esp_vfs_fat_spiflash_unmount_rw_wl(base_path_.c_str(), wl_handle_);
     }
 }
 
 bool ConfigManager::init(const char* base_path, const char* partition_label) {
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = base_path,
-        .partition_label = partition_label,
+    const esp_vfs_fat_mount_config_t mount_config = {
+        .format_if_mount_failed = true,
         .max_files = 5,
-        .format_if_mount_failed = true
+        .allocation_unit_size = CONFIG_WL_SECTOR_SIZE,
+        .disk_status_check_enable = false
     };
 
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+    esp_err_t ret = esp_vfs_fat_spiflash_mount_rw_wl(base_path, partition_label, &mount_config, &wl_handle_);
     if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "Failed to mount or format filesystem");
-        } else if (ret == ESP_ERR_NOT_FOUND) {
-            ESP_LOGE(TAG, "Failed to find SPIFFS partition '%s'", partition_label);
-        } else {
-            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
-        }
+        ESP_LOGE(TAG, "Failed to mount FATFS partition '%s' at '%s' (%s)",
+                 partition_label, base_path, esp_err_to_name(ret));
         return false;
     }
 
-    size_t total = 0, used = 0;
-    ret = esp_spiffs_info(partition_label, &total, &used);
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "SPIFFS partition '%s' mounted: %u KB total, %u KB used",
-                 partition_label, (unsigned)(total / 1024), (unsigned)(used / 1024));
-    }
+    base_path_ = base_path;
     initialized_ = true;
+    ESP_LOGI(TAG, "FATFS partition '%s' mounted successfully at '%s'", partition_label, base_path);
     return true;
 }
 

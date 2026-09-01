@@ -3,7 +3,12 @@
 #include "esp_log.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
+#include "tinyusb_cdc_acm.h"
+#include "tinyusb_console.h"
+#include "tinyusb_msc.h"
 #include "class/hid/hid_device.h"
+#include "class/cdc/cdc_device.h"
+#include "class/msc/msc_device.h"
 
 static const char* TAG = "GamepadHid";
 
@@ -55,24 +60,32 @@ static const char* switch_string_descriptor[] = {
     "HORI CO.,LTD.",            // 1: Manufacturer
     "POKKEN CONTROLLER",        // 2: Product
     "000000000001",             // 3: Serial Number
-    "Switch Gamepad HID",       // 4: Interface
+    "Switch Gamepad HID",       // 4: Interface (HID)
+    "ESP32-S3 CDC Console",     // 5: Interface (CDC)
+    "ESP32-S3 MSC Storage",     // 6: Interface (MSC)
 };
 
-// Configuration Descriptor
-#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
+// Configuration Descriptor (Composite HID Gamepad + CDC ACM + MSC Storage)
+#define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN)
 static const uint8_t switch_configuration_descriptor[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN, 0, 500),
+    // Config number, interface count (4: 1 HID + 2 CDC + 1 MSC), string index, total length, attribute, power in mA
+    TUD_CONFIG_DESCRIPTOR(1, 4, 0, TUSB_DESC_TOTAL_LEN, 0, 500),
+    // Interface 0: HID Gamepad (EP 0x81 IN, 16 bytes, interval 5ms)
     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(switch_hid_report_descriptor), 0x81, 16, 5),
+    // Interface 1 & 2: CDC ACM Serial (Notif EP 0x82, Data OUT EP 0x03, Data IN EP 0x83)
+    TUD_CDC_DESCRIPTOR(1, 5, 0x82, 8, 0x03, 0x83, 64),
+    // Interface 3: MSC Storage (EP Out 0x04, EP In 0x84, EP Size 64)
+    TUD_MSC_DESCRIPTOR(3, 6, 0x04, 0x84, 64),
 };
 
-// Custom Device Descriptor for HORI Pokken Controller
+// Custom Device Descriptor for HORI Pokken Controller with IAD (Composite Device)
 static const tusb_desc_device_t switch_device_descriptor = {
     .bLength            = sizeof(tusb_desc_device_t),
     .bDescriptorType    = TUSB_DESC_DEVICE,
     .bcdUSB             = 0x0200,
-    .bDeviceClass       = 0x00,
-    .bDeviceSubClass    = 0x00,
-    .bDeviceProtocol    = 0x00,
+    .bDeviceClass       = TUSB_CLASS_MISC,
+    .bDeviceSubClass    = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol    = MISC_PROTOCOL_IAD,
     .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor           = 0x0F0D,
     .idProduct          = 0x0092,
@@ -121,8 +134,8 @@ GamepadHid::GamepadHid() : initialized_(false) {
 
 GamepadHid::~GamepadHid() {}
 
-bool GamepadHid::init() {
-    ESP_LOGI(TAG, "Initializing TinyUSB HID Switch Gamepad (VID: 0x0F0D, PID: 0x0092)...");
+bool GamepadHid::init(wl_handle_t wl_handle) {
+    ESP_LOGI(TAG, "Initializing TinyUSB Composite Device (Switch Gamepad HID + CDC Serial + MSC Storage)...");
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
     tusb_cfg.descriptor.device = &switch_device_descriptor;
@@ -140,8 +153,45 @@ bool GamepadHid::init() {
         return false;
     }
 
+    // Initialize CDC ACM and redirect standard console output to USB CDC
+    tinyusb_config_cdcacm_t acm_cfg = {
+        .cdc_port = TINYUSB_CDC_ACM_0,
+        .callback_rx = nullptr,
+        .callback_rx_wanted_char = nullptr,
+        .callback_line_state_changed = nullptr,
+        .callback_line_coding_changed = nullptr
+    };
+    esp_err_t cdc_ret = tinyusb_cdcacm_init(&acm_cfg);
+    if (cdc_ret == ESP_OK) {
+        tinyusb_console_init(TINYUSB_CDC_ACM_0);
+        ESP_LOGI(TAG, "TinyUSB CDC ACM console initialized");
+    } else {
+        ESP_LOGW(TAG, "Failed to initialize TinyUSB CDC ACM: %s", esp_err_to_name(cdc_ret));
+    }
+
+    // Initialize MSC Storage if valid Wear Levelling handle is provided
+    if (wl_handle != WL_INVALID_HANDLE) {
+        const tinyusb_msc_storage_config_t msc_cfg = {
+            .medium = {
+                .wl_handle = wl_handle
+            },
+            .fat_fs = {
+                .do_not_format = false,
+                .format_flags = 0
+            },
+            .mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP
+        };
+        tinyusb_msc_storage_handle_t msc_handle;
+        esp_err_t msc_ret = tinyusb_msc_new_storage_spiflash(&msc_cfg, &msc_handle);
+        if (msc_ret == ESP_OK) {
+            ESP_LOGI(TAG, "TinyUSB MSC Storage initialized for FATFS partition");
+        } else {
+            ESP_LOGW(TAG, "Failed to initialize TinyUSB MSC Storage: %s", esp_err_to_name(msc_ret));
+        }
+    }
+
     initialized_ = true;
-    ESP_LOGI(TAG, "TinyUSB HID Gamepad driver installed successfully");
+    ESP_LOGI(TAG, "TinyUSB Composite Gamepad + CDC + MSC driver installed successfully");
     return true;
 }
 

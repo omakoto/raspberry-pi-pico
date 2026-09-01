@@ -1,5 +1,5 @@
 #!/bin/bash
-# Flashes the compiled nsbackend-esp32s3 firmware, partition table, and SPIFFS image to the ESP32-S3.
+# Flashes the compiled nsbackend-esp32s3 firmware, partition table, and FATFS image to the ESP32-S3.
 
 set -euo pipefail
 

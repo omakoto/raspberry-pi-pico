@@ -17,7 +17,8 @@ idf_component_register(
         esp_netif
         esp_timer
         nvs_flash
-        spiffs
+        fatfs
+        wear_levelling
         driver
         lwip
         freertos

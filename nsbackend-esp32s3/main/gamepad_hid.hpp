@@ -46,12 +46,14 @@ struct SwitchReport {
 
 static_assert(sizeof(SwitchReport) == 8, "Switch HID report must be exactly 8 bytes");
 
+#include "wear_levelling.h"
+
 class GamepadHid {
 public:
     GamepadHid();
     ~GamepadHid();
 
-    bool init();
+    bool init(wl_handle_t wl_handle = WL_INVALID_HANDLE);
     bool is_mounted() const;
     void send_report(uint16_t buttons, uint8_t hat, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry);
 

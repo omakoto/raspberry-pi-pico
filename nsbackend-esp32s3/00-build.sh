@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the nsbackend-esp32s3 firmware and SPIFFS filesystem image for ESP32-S3 using ESP-IDF.
+# Builds the nsbackend-esp32s3 firmware and FATFS filesystem image for ESP32-S3 using ESP-IDF.
 
 set -euo pipefail
 

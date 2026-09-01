@@ -26,7 +26,7 @@ extern "C" void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // Initialize SPIFFS and load configuration
+    // Initialize FATFS and load configuration
     ConfigManager config;
     if (config.init()) {
         config.load();
@@ -43,10 +43,10 @@ extern "C" void app_main(void) {
     status_led.init();
     status_led.set_state(LedState::INITIALIZING);
 
-    // Initialize TinyUSB HID Gamepad Interface
+    // Initialize TinyUSB Composite Interface (HID Gamepad + CDC Console + MSC Storage)
     GamepadHid gamepad;
-    if (!gamepad.init()) {
-        ESP_LOGE(TAG, "Failed to initialize USB HID Gamepad interface");
+    if (!gamepad.init(config.get_wl_handle())) {
+        ESP_LOGE(TAG, "Failed to initialize USB Composite interface");
     }
 
     // Initialize Controller State Engine
