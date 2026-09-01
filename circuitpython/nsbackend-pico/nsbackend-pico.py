@@ -677,6 +677,28 @@ class ControllerState:
         self.scheduled_commands = remaining
 
 
+# Initialize and advertise mDNS hostname on the local network
+def setup_mdns(hostname: str, tcp_port: int) -> mdns.Server:
+    print(f"Advertising mDNS hostname: {hostname}.local...")
+    mdns_server = mdns.Server(wifi.radio)
+    mdns_server.hostname = hostname
+    mdns_server.advertise_service(service_type="_custom", protocol="_tcp", port=tcp_port)
+    print(f"mDNS active: {hostname}.local -> {wifi.radio.ipv4_address}")
+    return mdns_server
+
+
+# Create and bind non-blocking TCP server listener socket
+def create_server_socket(tcp_port: int, hostname: str) -> tuple[socketpool.SocketPool, any]:
+    print("Starting TCP server...")
+    pool = socketpool.SocketPool(wifi.radio)
+    server_socket = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
+    server_socket.bind(("0.0.0.0", tcp_port))
+    server_socket.listen(1)
+    server_socket.settimeout(0.05)
+    print(f"TCP server listening on {wifi.radio.ipv4_address}:{tcp_port} ({hostname}.local:{tcp_port})")
+    return pool, server_socket
+
+
 # Main execution entry point
 def main() -> None:
     print("Starting Nintendo Switch Controller TCP Backend (nsbackend-pico)...")
@@ -700,11 +722,7 @@ def main() -> None:
     wifi_manager.connect(led)
 
     # Initialize mDNS hostname advertisement
-    print(f"Advertising mDNS hostname: {hostname}.local...")
-    mdns_server = mdns.Server(wifi.radio)
-    mdns_server.hostname = hostname
-    mdns_server.advertise_service(service_type="_custom", protocol="_tcp", port=tcp_port)
-    print(f"mDNS active: {hostname}.local -> {wifi.radio.ipv4_address}")
+    mdns_server = setup_mdns(hostname, tcp_port)
 
     # Initialize Switch Gamepad HID interface
     print(f"Initializing the USB HID Switch Gamepad interface...")
@@ -713,14 +731,7 @@ def main() -> None:
     controller.reset_all()
 
     # Setup TCP Server socket
-    print(f"Starting TCP sever...")
-    pool = socketpool.SocketPool(wifi.radio)
-    server_socket = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
-    server_socket.bind(("0.0.0.0", tcp_port))
-    server_socket.listen(1)
-    server_socket.settimeout(0.05)
-
-    print(f"TCP server listening on {wifi.radio.ipv4_address}:{tcp_port} ({hostname}.local:{tcp_port})")
+    pool, server_socket = create_server_socket(tcp_port, hostname)
 
     # Transition to waiting for client
     led.set_step(LedState.WAITING_CLIENT)
@@ -735,6 +746,23 @@ def main() -> None:
             print("Wi-Fi disconnected. Reconnecting...")
             led.set_step(LedState.INITIALIZING)
             wifi_manager.connect(led)
+
+            # Close stale server socket and recreate network services with new IP
+            try:
+                server_socket.close()
+            except Exception:
+                pass
+
+            try:
+                mdns_server = setup_mdns(hostname, tcp_port)
+            except Exception as e:
+                print(f"Warning: Failed to re-announce mDNS: {e}")
+
+            try:
+                pool, server_socket = create_server_socket(tcp_port, hostname)
+            except Exception as e:
+                print(f"Warning: Failed to recreate TCP server socket: {e}")
+
             led.set_step(LedState.WAITING_CLIENT)
 
         controller.check_scheduled()
