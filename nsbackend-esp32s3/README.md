@@ -36,7 +36,20 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 
 ---
 
-## 3. Architecture
+## 3. Progress LED Patterns
+
+| State | Lifecycle Phase | LED Pattern |
+| :--- | :--- | :--- |
+| **Boot / Hardware Init** | Power-on, flash mount, TinyUSB init | **Solid ON** |
+| **Wi-Fi Connecting** | Scanning and associating with Wi-Fi AP | **0.1s ON, 1.0s OFF** (1 short blink) |
+| **Setting up TCP** | Wi-Fi connected, starting mDNS & TCP server | **0.1s ON, 0.1s OFF, 0.1s ON, 1.0s OFF** (2 short blinks) |
+| **Waiting for Client** | TCP server listening on port 10100 | **0.5s ON, 0.5s OFF** (Slow blink) |
+| **Client Connected** | Client connected & streaming commands | **1.0s ON, 1.0s OFF** (Heartbeat) |
+| **Wi-Fi Error / Reconnecting** | Wi-Fi unconfigured / failed / reconnecting | **0.1s ON, 0.1s OFF** (Rapid strobe) |
+
+---
+
+## 4. Architecture
 
 ```
                                 +---------------------------+
@@ -70,7 +83,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 
 ---
 
-## 4. Implementation Status
+## 5. Implementation Status
 
 - [x] **Phase 1: Project Skeleton & Build Setup**
   - CMake build system, custom `partitions.csv` (8MB Flash with SPIFFS), `sdkconfig.defaults` (TinyUSB, FreeRTOS 1kHz tick rate, LwIP).
@@ -87,12 +100,12 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
   - Implemented `ControllerState` handling all button/stick tokens, duration commands, auto-release queues, and thread-safe locking.
   - Implemented `TcpServer` socket server streaming inputs at port `10100`.
 - [x] **Phase 7: Compilation, Verification & Helper Scripts**
-  - Created `00-build.sh` and `01-install.sh`.
+  - Created `00-build.sh`, `01-install.sh`, and `02-monitor.sh`.
   - Verified clean build with ESP-IDF `v5.5.5` toolchain targeting `esp32s3`.
 
 ---
 
-## 5. Development Environment Setup
+## 6. Development Environment Setup
 
 To set up the ESP-IDF build environment on Ubuntu / Debian:
 
@@ -136,7 +149,7 @@ sudo usermod -a -G dialout $USER
 
 ---
 
-## 6. Building & Flashing
+## 7. Building & Flashing
 
 ### 1. Configure Wi-Fi in `fatfs_data/config.toml`
 Edit `fatfs_data/config.toml` (or create `fatfs_data/config-override.toml`) before building:
@@ -165,15 +178,18 @@ Put the board into Bootloader mode (Hold **B**, press & release **R**, release *
 
 ---
 
-## 7. Serial Console Monitoring
+## 8. Serial Console Monitoring
 
-Because Composite USB is enabled, the ESP32-S3 exposes `/dev/ttyACM0` for console output alongside the USB HID gamepad:
+Because Composite USB is enabled, the ESP32-S3 exposes `/dev/ttyACM0` for console output alongside the USB HID gamepad.
 
+Run [`./02-monitor.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/02-monitor.sh):
 ```bash
-. ~/esp-idf/export.sh
-idf.py -p /dev/ttyACM0 monitor
+./02-monitor.sh
+# or specify the port explicitly:
+./02-monitor.sh /dev/ttyACM0
 # Exit with Ctrl+]
 ```
+
 Or use `tio` / `picocom`:
 ```bash
 tio /dev/ttyACM0
@@ -182,7 +198,7 @@ tio /dev/ttyACM0
 
 ---
 
-## 8. Running `nsfrontend` & Sending Commands
+## 9. Running `nsfrontend` & Sending Commands
 
 Once the ESP32-S3 is connected to Wi-Fi, you can stream controller inputs from your PC to the device (`nscon.local:10100`):
 

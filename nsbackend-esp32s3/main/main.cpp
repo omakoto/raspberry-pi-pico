@@ -65,7 +65,14 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Connecting to Wi-Fi...");
     wifi.connect(&status_led);
 
-    // Initialize mDNS Service
+    // If initial connection was not established (e.g. no SSIDs or not visible), maintain rapid strobe
+    while (!wifi.is_connected()) {
+        status_led.set_state(LedState::WIFI_RECONNECTING);
+        wifi.connect(&status_led);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    status_led.set_state(LedState::SETTING_UP_TCP);
     MdnsService mdns;
     mdns.init(hostname, tcp_port);
 
@@ -73,15 +80,20 @@ extern "C" void app_main(void) {
     TcpServer tcp_server(tcp_port, controller, status_led, log_enabled, enable_echo);
     tcp_server.start();
 
+    status_led.set_state(LedState::WAITING_CLIENT);
     ESP_LOGI(TAG, "nsbackend-esp32s3 running. Hostname: %s.local:%d", hostname.c_str(), tcp_port);
 
     // Main supervisor loop: monitors Wi-Fi connection
     while (true) {
         if (!wifi.is_connected()) {
             ESP_LOGW(TAG, "Wi-Fi disconnected. Reconnecting...");
-            status_led.set_state(LedState::INITIALIZING);
+            status_led.set_state(LedState::WIFI_RECONNECTING);
             wifi.connect(&status_led);
-            mdns.init(hostname, tcp_port);
+            if (wifi.is_connected()) {
+                status_led.set_state(LedState::SETTING_UP_TCP);
+                mdns.init(hostname, tcp_port);
+                status_led.set_state(LedState::WAITING_CLIENT);
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

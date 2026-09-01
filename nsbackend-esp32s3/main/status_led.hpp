@@ -6,9 +6,12 @@
 #include "freertos/task.h"
 
 enum class LedState : int {
-    INITIALIZING = 1,     // Startup: Constantly ON
-    WAITING_CLIENT = 2,   // 3 blinks (0.2s on/off x 3, 0.5s pause)
-    CLIENT_CONNECTED = 3  // Heartbeat (1.0s on, 1.0s off)
+    INITIALIZING = 1,        // Startup / Hardware init: Solid ON
+    WIFI_CONNECTING = 2,     // Wi-Fi connecting: 0.1s ON, 1.0s OFF
+    SETTING_UP_TCP = 3,      // Wi-Fi connected, setting up TCP: 0.1s ON, 0.1s OFF, 0.1s ON, 1.0s OFF
+    WAITING_CLIENT = 4,      // Waiting for client: 0.5s ON, 0.5s OFF
+    CLIENT_CONNECTED = 5,    // Client connected: 1.0s ON, 1.0s OFF
+    WIFI_RECONNECTING = 6,   // Wi-Fi failed / reconnecting: Rapid strobe (0.1s ON, 0.1s OFF)
 };
 
 class StatusLed {

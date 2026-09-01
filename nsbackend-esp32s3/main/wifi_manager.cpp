@@ -198,12 +198,15 @@ void WifiManager::connect(StatusLed* led) {
 
     if (ap_list_.empty()) {
         ESP_LOGW(TAG, "No Wi-Fi SSIDs configured.");
+        if (led != nullptr) {
+            led->set_state(LedState::WIFI_RECONNECTING);
+        }
         vTaskDelay(pdMS_TO_TICKS(5000));
         return;
     }
 
     if (led != nullptr) {
-        led->set_state(LedState::INITIALIZING);
+        led->set_state(LedState::WIFI_CONNECTING);
     }
 
     // Step 1: Fast direct attempt on primary AP
@@ -227,18 +230,27 @@ void WifiManager::connect(StatusLed* led) {
 
         if (candidates.empty()) {
             ESP_LOGW(TAG, "No configured Wi-Fi APs visible in scan. Retrying in 3 seconds...");
+            if (led != nullptr) {
+                led->set_state(LedState::WIFI_RECONNECTING);
+            }
             vTaskDelay(pdMS_TO_TICKS(3000));
             continue;
         }
 
         for (size_t idx : candidates) {
             last_tried_idx = idx;
+            if (led != nullptr) {
+                led->set_state(LedState::WIFI_CONNECTING);
+            }
             if (attempt_connect(ap_list_[idx].first, ap_list_[idx].second)) {
                 return;
             }
         }
 
         ESP_LOGW(TAG, "All visible Wi-Fi candidates failed. Retrying scan in 3 seconds...");
+        if (led != nullptr) {
+            led->set_state(LedState::WIFI_RECONNECTING);
+        }
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }

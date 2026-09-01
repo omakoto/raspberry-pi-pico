@@ -83,8 +83,6 @@ void TcpServer::run_server() {
     ESP_LOGI(TAG, "TCP Server listening on port %d...", port_);
 
     while (running_) {
-        led_.set_state(LedState::WAITING_CLIENT);
-
         struct sockaddr_in source_addr = {};
         socklen_t addr_len = sizeof(source_addr);
 
@@ -112,6 +110,7 @@ void TcpServer::run_server() {
 
         ESP_LOGI(TAG, "Client disconnected, resetting controller state");
         controller_.reset_all();
+        led_.set_state(LedState::WAITING_CLIENT);
     }
 
     close(listen_sock);

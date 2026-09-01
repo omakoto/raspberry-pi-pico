@@ -84,22 +84,24 @@ void StatusLed::run_task() {
                 set_raw(true);
                 break;
 
+            case LedState::WIFI_CONNECTING: {
+                // 0.1s ON, 1.0s OFF (Cycle: 1.1s)
+                double cycle = std::fmod(elapsed_s, 1.1);
+                set_raw(cycle < 0.1);
+                break;
+            }
+
+            case LedState::SETTING_UP_TCP: {
+                // 0.1s ON, 0.1s OFF, 0.1s ON, 1.0s OFF (Cycle: 1.3s)
+                double cycle = std::fmod(elapsed_s, 1.3);
+                set_raw(cycle < 0.1 || (cycle >= 0.2 && cycle < 0.3));
+                break;
+            }
+
             case LedState::WAITING_CLIENT: {
-                // 3 blinks (0.2s ON, 0.2s OFF, 0.2s ON, 0.2s OFF, 0.2s ON) - 0.5s pause (Cycle: 1.5s)
-                double cycle = std::fmod(elapsed_s, 1.5);
-                if (cycle < 0.2) {
-                    set_raw(true);
-                } else if (cycle < 0.4) {
-                    set_raw(false);
-                } else if (cycle < 0.6) {
-                    set_raw(true);
-                } else if (cycle < 0.8) {
-                    set_raw(false);
-                } else if (cycle < 1.0) {
-                    set_raw(true);
-                } else {
-                    set_raw(false);
-                }
+                // 0.5s ON, 0.5s OFF (Cycle: 1.0s)
+                double cycle = std::fmod(elapsed_s, 1.0);
+                set_raw(cycle < 0.5);
                 break;
             }
 
@@ -107,6 +109,13 @@ void StatusLed::run_task() {
                 // Heartbeat: 1.0s ON, 1.0s OFF (Cycle: 2.0s)
                 double cycle = std::fmod(elapsed_s, 2.0);
                 set_raw(cycle < 1.0);
+                break;
+            }
+
+            case LedState::WIFI_RECONNECTING: {
+                // Rapid strobe: 0.1s ON, 0.1s OFF (Cycle: 0.2s)
+                double cycle = std::fmod(elapsed_s, 0.2);
+                set_raw(cycle < 0.1);
                 break;
             }
         }
