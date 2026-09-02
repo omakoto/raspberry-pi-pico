@@ -15,7 +15,7 @@
 #   - D3 (GP3 / GPIO4): D-pad RIGHT
 #   - D4 (GP4 / GPIO5): D-pad UP
 #   - D5 (GP5 / GPIO6): B button
-#   - D6 (GP6 / GPIO43): L and R buttons simultaneously
+#   - D10 (GP10 / GPIO9): L and R buttons simultaneously
 # Uses the onboard user LED to indicate progress:
 #   - Initialization (Wi-Fi + Server startup): LED constantly ON
 #   - Waiting for client: 3 blinks (0.2s on, 0.2s off x 3, 0.5s pause)
@@ -405,7 +405,7 @@ def resolve_pin(pin_id: int | str) -> board.Pin | None:
     else:
         num = int(pin_id)
 
-    # Candidate prefixes across board definitions (D0-D6 on XIAO, GP0-GP6 on Pico)
+    # Candidate prefixes across board definitions (D0-D5, D10 on XIAO, GP0-GP5, GP10 on Pico)
     for prefix in ("D", "GP", "IO", "GPIO", "P"):
         attr = f"{prefix}{num}"
         if hasattr(board, attr):
@@ -469,7 +469,7 @@ class GpioButtonManager:
             (3, "dpad_right", 0, "D-pad Right", "pr"),
             (4, "dpad_up", 0, "D-pad Up", "pu"),
             (5, "button", BTN_B, "B button", "b"),
-            (6, "button", BTN_L | BTN_R, "L and R buttons", "l1 r1"),
+            (10, "button", BTN_L | BTN_R, "L and R buttons", "l1 r1"),
         ]
 
         for pin_id, action, mask, desc, cmd_name in pin_specs:

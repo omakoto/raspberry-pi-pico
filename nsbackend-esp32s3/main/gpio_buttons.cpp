@@ -18,8 +18,8 @@ GpioButtonManager::GpioButtonManager(ControllerState& controller)
         {GPIO_NUM_3,  "D2", ButtonAction::DPAD_LEFT,  "pl",    0,                 false, true, 0},
         {GPIO_NUM_4,  "D3", ButtonAction::DPAD_RIGHT, "pr",    0,                 false, true, 0},
         {GPIO_NUM_5,  "D4", ButtonAction::DPAD_UP,    "pu",    0,                 false, true, 0},
-        {GPIO_NUM_6,  "D5", ButtonAction::BUTTON,     "b",     BTN_B,             false, true, 0},
-        {GPIO_NUM_43, "D6", ButtonAction::BUTTON,     "l1 r1", BTN_L | BTN_R,    false, true, 0},
+        {GPIO_NUM_6,  "D5",  ButtonAction::BUTTON,     "b",     BTN_B,             false, true, 0},
+        {GPIO_NUM_9,  "D10", ButtonAction::BUTTON,     "l1 r1", BTN_L | BTN_R,    false, true, 0},
     };
 }
 

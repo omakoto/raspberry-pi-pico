@@ -29,7 +29,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 | **D3** | `GPIO4` | D-pad RIGHT | Active-low, internal pull-up |
 | **D4** | `GPIO5` | D-pad UP | Active-low, internal pull-up |
 | **D5** | `GPIO6` | Button B | Active-low, internal pull-up |
-| **D6** | `GPIO43` | Buttons L + R | Simultaneous L and R buttons |
+| **D10** | `GPIO9` | Buttons L + R | Simultaneous L and R buttons |
 | **LED** | `GPIO21` | Status LED | Active-low yellow onboard user LED |
 | **USB D-** | `GPIO19` | USB OTG D- | Native USB OTG data negative |
 | **USB D+** | `GPIO20` | USB OTG D+ | Native USB OTG data positive |
@@ -63,7 +63,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
                                 |  - Composite TinyUSB:     |
 +-------------------+           |    * HID Gamepad          |
 |  Physical Buttons | --------> |    * CDC Serial Console   |
-|   (D0 - D6)       |           |    * MSC Storage (FATFS)  |
+|   (D0-D5, D10)    |           |    * MSC Storage (FATFS)  |
 +-------------------+           |  - Wi-Fi Multi-AP & mDNS  |
                                 |  - GPIO Button Manager    |
                                 |  - FATFS Config Reader    |
@@ -91,7 +91,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
   - Implemented `ConfigManager` reading `config.toml` and optional `config-override.toml` from SPIFFS partition.
 - [x] **Phase 3: Status LED & GPIO Hardware Buttons**
   - Implemented `StatusLed` FreeRTOS task with 3-state blinking patterns.
-  - Implemented `GpioButtonManager` with 15ms debouncing and active-low input handling for D0–D6.
+  - Implemented `GpioButtonManager` with 15ms debouncing and active-low input handling for D0–D5, D10.
 - [x] **Phase 4: TinyUSB HID Gamepad Driver**
   - Configured TinyUSB HORI Pokken Controller (`VID: 0x0f0d`, `PID: 0x0092`) 8-byte report descriptor and atomic report dispatching.
 - [x] **Phase 5: Wi-Fi Multi-AP Manager & mDNS**
