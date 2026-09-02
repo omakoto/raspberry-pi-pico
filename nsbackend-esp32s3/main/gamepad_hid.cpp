@@ -174,10 +174,18 @@ bool GamepadHid::init(wl_handle_t wl_handle) {
                 .wl_handle = wl_handle
             },
             .fat_fs = {
-                .do_not_format = false,
+                .base_path = nullptr,
+                .config = {
+                    .format_if_mount_failed = false,
+                    .max_files = 2,
+                    .allocation_unit_size = CONFIG_WL_SECTOR_SIZE,
+                    .disk_status_check_enable = false,
+                    .use_one_fat = false
+                },
+                .do_not_format = true,
                 .format_flags = 0
             },
-            .mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP
+            .mount_point = TINYUSB_MSC_STORAGE_MOUNT_USB
         };
         tinyusb_msc_storage_handle_t msc_handle;
         esp_err_t msc_ret = tinyusb_msc_new_storage_spiflash(&msc_cfg, &msc_handle);

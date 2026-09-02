@@ -20,10 +20,11 @@ ConfigManager::~ConfigManager() {
 
 bool ConfigManager::init(const char* base_path, const char* partition_label) {
     const esp_vfs_fat_mount_config_t mount_config = {
-        .format_if_mount_failed = true,
+        .format_if_mount_failed = false,
         .max_files = 5,
         .allocation_unit_size = CONFIG_WL_SECTOR_SIZE,
-        .disk_status_check_enable = false
+        .disk_status_check_enable = false,
+        .use_one_fat = false
     };
 
     esp_err_t ret = esp_vfs_fat_spiflash_mount_rw_wl(base_path, partition_label, &mount_config, &wl_handle_);
@@ -52,13 +53,15 @@ std::string ConfigManager::trim(const std::string& s) {
 }
 
 bool ConfigManager::parse_file(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
+    FILE* file = fopen(path.c_str(), "r");
+    if (!file) {
+        ESP_LOGD(TAG, "Cannot open file '%s'", path.c_str());
         return false;
     }
 
-    std::string line;
-    while (std::getline(file, line)) {
+    char buf[256];
+    while (fgets(buf, sizeof(buf), file) != nullptr) {
+        std::string line(buf);
         line = trim(line);
         if (line.empty() || line[0] == '#') {
             continue;
@@ -88,6 +91,7 @@ bool ConfigManager::parse_file(const std::string& path) {
             config_map_[key] = val;
         }
     }
+    fclose(file);
     return true;
 }
 

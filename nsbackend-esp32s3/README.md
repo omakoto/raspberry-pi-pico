@@ -155,14 +155,14 @@ sudo usermod -a -G dialout $USER
 ## 7. Building & Flashing
 
 ### 1. Configure Wi-Fi in `fatfs_data/config.toml`
-Edit `fatfs_data/config.toml` (or create `fatfs_data/config-override.toml`) before building:
+Edit `fatfs_data/config.toml` (or set `$ESP32_CONFIG_TOML` to an external `config-override.toml` path) before building:
 ```toml
 hostname = "nscon"
 tcp_port = 10100
 wifi_ssid = "YOUR_WIFI_SSID"
 wifi_password = "YOUR_WIFI_PASSWORD"
 ```
-*(Alternatively, you can edit `config.toml` directly on the mounted USB flash drive on your PC after flashing.)*
+*(Alternatively, you can export `ESP32_CONFIG_TOML=/path/to/config-override.toml` to automatically bundle credentials without committing them to git, or edit `config.toml` directly on the mounted USB flash drive on your PC after flashing.)*
 
 ### 2. Build the Firmware
 Run [`./00-build.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/nsbackend-esp32s3/00-build.sh):

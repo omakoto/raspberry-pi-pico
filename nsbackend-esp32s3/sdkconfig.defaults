@@ -21,6 +21,7 @@ CONFIG_TINYUSB_MSC_BUFSIZE=4096
 
 # FATFS & Wear Levelling Configuration
 CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_SECTOR_512=y
 CONFIG_WL_SECTOR_SIZE_512=y
 
 # Networking & Stack sizing
