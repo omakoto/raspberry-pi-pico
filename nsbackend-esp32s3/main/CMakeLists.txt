@@ -9,6 +9,8 @@ idf_component_register(
         "wifi_manager.cpp"
         "mdns_service.cpp"
         "tcp_server.cpp"
+        "dual_logger.cpp"
+        "serial_command_server.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES

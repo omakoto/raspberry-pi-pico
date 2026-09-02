@@ -16,6 +16,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 7. **Physical GPIO Buttons**: Supports hardware buttons with internal pull-ups, debouncing, and opposing D-pad direction cancellation.
 8. **Status LED**: Indicates system lifecycle states via onboard user LED patterns.
 9. **FATFS Configuration**: Loads Wi-Fi credentials and runtime settings from `config.toml` and optional `config-override.toml` on the FATFS partition.
+10. **Dual Serial Command Server**: Accepts controller commands on hardware UART0 (D6 TX / D7 RX at 115,200 baud) and USB CDC serial immediately from boot, while broadcasting logs to both ports.
 
 ---
 
@@ -29,6 +30,8 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 | **D3** | `GPIO4` | D-pad RIGHT | Active-low, internal pull-up |
 | **D4** | `GPIO5` | D-pad UP | Active-low, internal pull-up |
 | **D5** | `GPIO6` | Button B | Active-low, internal pull-up |
+| **D6** | `GPIO43` | UART TX | Hardware UART0 TX (115,200 baud) / Dual serial log |
+| **D7** | `GPIO44` | UART RX | Hardware UART0 RX (115,200 baud) / Serial command input |
 | **D10** | `GPIO9` | Buttons L + R | Simultaneous L and R buttons |
 | **LED** | `GPIO21` | Status LED | Active-low yellow onboard user LED |
 | **USB D-** | `GPIO19` | USB OTG D- | Native USB OTG data negative |

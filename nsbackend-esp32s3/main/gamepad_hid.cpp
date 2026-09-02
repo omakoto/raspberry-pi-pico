@@ -4,7 +4,6 @@
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_cdc_acm.h"
-#include "tinyusb_console.h"
 #include "tinyusb_msc.h"
 #include "class/hid/hid_device.h"
 #include "class/cdc/cdc_device.h"
@@ -153,7 +152,7 @@ bool GamepadHid::init(wl_handle_t wl_handle) {
         return false;
     }
 
-    // Initialize CDC ACM and redirect standard console output to USB CDC
+    // Initialize CDC ACM for serial console output
     tinyusb_config_cdcacm_t acm_cfg = {
         .cdc_port = TINYUSB_CDC_ACM_0,
         .callback_rx = nullptr,
@@ -163,8 +162,7 @@ bool GamepadHid::init(wl_handle_t wl_handle) {
     };
     esp_err_t cdc_ret = tinyusb_cdcacm_init(&acm_cfg);
     if (cdc_ret == ESP_OK) {
-        tinyusb_console_init(TINYUSB_CDC_ACM_0);
-        ESP_LOGI(TAG, "TinyUSB CDC ACM console initialized");
+        ESP_LOGI(TAG, "TinyUSB CDC ACM serial interface initialized");
     } else {
         ESP_LOGW(TAG, "Failed to initialize TinyUSB CDC ACM: %s", esp_err_to_name(cdc_ret));
     }

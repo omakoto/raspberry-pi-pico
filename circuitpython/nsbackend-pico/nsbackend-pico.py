@@ -16,6 +16,7 @@
 #   - D4 (GP4 / GPIO5): D-pad UP
 #   - D5 (GP5 / GPIO6): B button
 #   - D10 (GP10 / GPIO9): L and R buttons simultaneously
+# Accepts streaming serial commands on hardware UART (TX/RX @ 115200 baud) and USB CDC console.
 # Uses the onboard user LED to indicate progress:
 #   - Initialization (Wi-Fi + Server startup): LED constantly ON
 #   - Waiting for client: 3 blinks (0.2s on, 0.2s off x 3, 0.5s pause)
@@ -31,6 +32,12 @@ import microcontroller
 import socketpool
 import usb_hid
 import wifi
+import busio
+
+try:
+    import usb_cdc
+except ImportError:
+    usb_cdc = None
 
 # Pin Configuration Constants
 PIN_LED: board.Pin | None = getattr(board, "LED", None)
@@ -854,6 +861,108 @@ def create_server_socket(tcp_port: int, hostname: str) -> tuple[socketpool.Socke
     return pool, server_socket
 
 
+# Manages bidirectional streaming serial commands from UART and USB CDC
+class SerialCommandManager:
+
+    def __init__(self, controller: ControllerState, log_enabled: bool = True, enable_echo: bool = True) -> None:
+        self.controller: ControllerState = controller
+        self.log_enabled: bool = log_enabled
+        self.enable_echo: bool = enable_echo
+        self.uart: busio.UART | None = None
+        self.uart_accum: str = ""
+        self.cdc_accum: str = ""
+
+        # Attempt to initialize hardware UART (D6 TX / D7 RX on XIAO, GP0 TX / GP1 RX on Pico)
+        uart_tx = getattr(board, "TX", None) or resolve_pin("TX") or resolve_pin("D6") or resolve_pin("GP0")
+        uart_rx = getattr(board, "RX", None) or resolve_pin("RX") or resolve_pin("D7") or resolve_pin("GP1")
+        if uart_tx is not None and uart_rx is not None:
+            try:
+                self.uart = busio.UART(tx=uart_tx, rx=uart_rx, baudrate=115200, timeout=0.0)
+                print(f"Hardware UART command listener active on TX={uart_tx}, RX={uart_rx} (115200 baud)")
+            except Exception as e:
+                print(f"Notice: Hardware UART not initialized: {e}")
+
+    def update(self) -> None:
+        # Read available bytes from Hardware UART
+        if self.uart is not None:
+            try:
+                in_waiting = self.uart.in_waiting
+                if in_waiting > 0:
+                    raw = self.uart.read(in_waiting)
+                    if raw:
+                        chunk = raw.decode("utf-8", "ignore")
+                        self._process_stream(chunk, is_cdc=False)
+            except Exception:
+                pass
+
+        # Read available bytes from USB CDC Console
+        if usb_cdc is not None and hasattr(usb_cdc, "console") and usb_cdc.console is not None:
+            try:
+                in_waiting = usb_cdc.console.in_waiting
+                if in_waiting > 0:
+                    raw = usb_cdc.console.read(in_waiting)
+                    if raw:
+                        chunk = raw.decode("utf-8", "ignore")
+                        self._process_stream(chunk, is_cdc=True)
+            except Exception:
+                pass
+
+    def _process_stream(self, chunk: str, is_cdc: bool) -> None:
+        accum = (self.cdc_accum if is_cdc else self.uart_accum) + chunk
+
+        while accum:
+            idx_r = accum.find("\r")
+            idx_n = accum.find("\n")
+            if idx_r == -1 and idx_n == -1:
+                break
+
+            if idx_r != -1 and (idx_n == -1 or idx_r < idx_n):
+                delim_pos = idx_r
+            else:
+                delim_pos = idx_n
+
+            line = accum[:delim_pos]
+            if delim_pos + 1 < len(accum) and (
+                (accum[delim_pos] == "\r" and accum[delim_pos + 1] == "\n") or
+                (accum[delim_pos] == "\n" and accum[delim_pos + 1] == "\r")
+            ):
+                accum = accum[delim_pos + 2:]
+            else:
+                accum = accum[delim_pos + 1:]
+
+            line = line.strip()
+            if line:
+                if self.log_enabled:
+                    self.dual_print(line)
+
+                if self.enable_echo:
+                    if is_cdc and usb_cdc is not None and getattr(usb_cdc, "console", None) is not None:
+                        try:
+                            usb_cdc.console.write((line + "\n").encode("utf-8"))
+                        except Exception:
+                            pass
+                    elif not is_cdc and self.uart is not None:
+                        try:
+                            self.uart.write((line + "\r\n").encode("utf-8"))
+                        except Exception:
+                            pass
+
+                self.controller.execute_command(line)
+
+        if is_cdc:
+            self.cdc_accum = accum
+        else:
+            self.uart_accum = accum
+
+    def dual_print(self, msg: str) -> None:
+        print(msg)
+        if self.uart is not None:
+            try:
+                self.uart.write((str(msg) + "\r\n").encode("utf-8"))
+            except Exception:
+                pass
+
+
 # Main execution entry point
 def main() -> None:
     print("Starting Nintendo Switch Controller TCP Backend (nsbackend-pico)...")
@@ -888,6 +997,9 @@ def main() -> None:
     # Initialize physical GPIO hardware button manager
     gpio_manager = GpioButtonManager(controller)
 
+    # Initialize Serial command manager (Hardware UART D6/D7 + USB CDC)
+    serial_manager = SerialCommandManager(controller, log_enabled=log_enabled, enable_echo=enable_echo)
+
     # Setup TCP Server socket
     pool, server_socket = create_server_socket(tcp_port, hostname)
 
@@ -899,6 +1011,7 @@ def main() -> None:
     while True:
         led.update()
         gpio_manager.update()
+        serial_manager.update()
 
         # Check and maintain Wi-Fi connection
         if not wifi.radio.connected:
@@ -944,6 +1057,7 @@ def main() -> None:
             while True:
                 led.update()
                 gpio_manager.update()
+                serial_manager.update()
                 controller.check_scheduled()
 
                 try:
@@ -955,12 +1069,30 @@ def main() -> None:
                     chunk = rx_buffer[:bytes_received].decode("utf-8", "ignore")
                     stream_accum += chunk
 
-                    while "\n" in stream_accum:
-                        line, stream_accum = stream_accum.split("\n", 1)
+                    while stream_accum:
+                        idx_r = stream_accum.find("\r")
+                        idx_n = stream_accum.find("\n")
+                        if idx_r == -1 and idx_n == -1:
+                            break
+
+                        if idx_r != -1 and (idx_n == -1 or idx_r < idx_n):
+                            delim_pos = idx_r
+                        else:
+                            delim_pos = idx_n
+
+                        line = stream_accum[:delim_pos]
+                        if delim_pos + 1 < len(stream_accum) and (
+                            (stream_accum[delim_pos] == "\r" and stream_accum[delim_pos + 1] == "\n") or
+                            (stream_accum[delim_pos] == "\n" and stream_accum[delim_pos + 1] == "\r")
+                        ):
+                            stream_accum = stream_accum[delim_pos + 2:]
+                        else:
+                            stream_accum = stream_accum[delim_pos + 1:]
+
                         line = line.strip()
                         if line:
                             if log_enabled:
-                                print(line)
+                                serial_manager.dual_print(line)
                             if enable_echo:
                                 try:
                                     client_socket.send((line + "\n").encode("utf-8"))

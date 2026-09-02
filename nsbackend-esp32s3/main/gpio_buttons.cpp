@@ -2,6 +2,7 @@
 #include <cstdio>
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "dual_logger.hpp"
 
 static const char* TAG = "GpioButtons";
 static constexpr int64_t DEBOUNCE_US = 15000; // 15ms debounce
@@ -94,8 +95,7 @@ void GpioButtonManager::update_inputs() {
             if (active != btn.is_active) {
                 btn.is_active = active;
                 if (btn.is_active) {
-                    std::printf("%s\n", btn.cmd_name.c_str());
-                    std::fflush(stdout);
+                    dual_println(btn.cmd_name);
                 }
                 state_changed = true;
             }

@@ -12,10 +12,15 @@
 #include "wifi_manager.hpp"
 #include "mdns_service.hpp"
 #include "tcp_server.hpp"
+#include "dual_logger.hpp"
+#include "serial_command_server.hpp"
 
 static const char* TAG = "Main";
 
 extern "C" void app_main(void) {
+    // Initialize dual logging (UART0 + TinyUSB CDC)
+    dual_logger_init();
+
     ESP_LOGI(TAG, "Starting Nintendo Switch Controller TCP Backend (nsbackend-esp32s3)...");
 
     // Initialize NVS (required for Wi-Fi stack)
@@ -56,6 +61,10 @@ extern "C" void app_main(void) {
     // Initialize Physical GPIO Buttons
     GpioButtonManager gpio_buttons(controller);
     gpio_buttons.init();
+
+    // Start Serial Command Server (accepts commands on UART0 D6/D7 and USB CDC immediately)
+    SerialCommandServer serial_server(controller, log_enabled, enable_echo);
+    serial_server.start();
 
     // Initialize Wi-Fi Manager
     auto ap_list = config.get_wifi_ap_list();

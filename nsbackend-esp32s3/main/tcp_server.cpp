@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
+#include "dual_logger.hpp"
 
 static const char* TAG = "TcpServer";
 
@@ -148,20 +149,26 @@ void TcpServer::handle_client(int client_sock) {
         rx_buf[len] = '\0';
         stream_accum.append(rx_buf, len);
 
-        size_t newline_pos;
-        while ((newline_pos = stream_accum.find('\n')) != std::string::npos) {
-            std::string line = stream_accum.substr(0, newline_pos);
-            stream_accum.erase(0, newline_pos + 1);
+        while (!stream_accum.empty()) {
+            size_t delim_pos = stream_accum.find_first_of("\r\n");
+            if (delim_pos == std::string::npos) {
+                break;
+            }
 
-            // Strip trailing carriage return if present
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
+            std::string line = stream_accum.substr(0, delim_pos);
+
+            // Consume both characters if part of a CRLF (\r\n) or LFCR (\n\r) sequence
+            if (delim_pos + 1 < stream_accum.size() &&
+                ((stream_accum[delim_pos] == '\r' && stream_accum[delim_pos + 1] == '\n') ||
+                 (stream_accum[delim_pos] == '\n' && stream_accum[delim_pos + 1] == '\r'))) {
+                stream_accum.erase(0, delim_pos + 2);
+            } else {
+                stream_accum.erase(0, delim_pos + 1);
             }
 
             if (!line.empty()) {
                 if (log_enabled_) {
-                    std::printf("%s\n", line.c_str());
-                    std::fflush(stdout);
+                    dual_println(line);
                 }
 
                 if (enable_echo_) {
