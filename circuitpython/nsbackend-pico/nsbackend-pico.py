@@ -839,14 +839,36 @@ class ControllerState:
         self.scheduled_commands = remaining
 
 
+_global_mdns_server: mdns.Server | None = None
+
+
 # Initialize and advertise mDNS hostname on the local network
-def setup_mdns(hostname: str, tcp_port: int) -> mdns.Server:
+def setup_mdns(hostname: str, tcp_port: int) -> mdns.Server | None:
+    global _global_mdns_server
     print(f"Advertising mDNS hostname: {hostname}.local...")
-    mdns_server = mdns.Server(wifi.radio)
-    mdns_server.hostname = hostname
-    mdns_server.advertise_service(service_type="_custom", protocol="_tcp", port=tcp_port)
-    print(f"mDNS active: {hostname}.local -> {wifi.radio.ipv4_address}")
-    return mdns_server
+    try:
+        if _global_mdns_server is not None:
+            try:
+                _global_mdns_server.deinit()
+            except Exception:
+                pass
+            _global_mdns_server = None
+
+        mdns_server = mdns.Server(wifi.radio)
+        try:
+            mdns_server.hostname = hostname
+        except Exception as e:
+            print(f"Notice: Could not set mDNS hostname '{hostname}': {e}")
+        try:
+            mdns_server.advertise_service(service_type="_custom", protocol="_tcp", port=tcp_port)
+        except Exception as e:
+            print(f"Notice: Could not advertise mDNS service on port {tcp_port}: {e}")
+        print(f"mDNS active: {hostname}.local -> {wifi.radio.ipv4_address}")
+        _global_mdns_server = mdns_server
+        return mdns_server
+    except Exception as e:
+        print(f"Warning: Failed to setup mDNS ({e}). Direct IP access remains active: {wifi.radio.ipv4_address}:{tcp_port}")
+        return None
 
 
 # Create and bind non-blocking TCP server listener socket
