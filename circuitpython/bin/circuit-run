@@ -61,11 +61,17 @@ while IFS= read -r line; do
     if [[ -f "$tagged_src_path" ]]; then
       echo "Copying tagged file '$tagged_file' to '$tagged_dest_path'..."
       ee cp "$tagged_src_path" "$tagged_dest_path"
+    elif [[ -d "$tagged_src_path" ]]; then
+      echo "Copying tagged directory '$tagged_file' to '$tagged_dest_path'..."
+      ee rm -rf "$tagged_dest_path"
+      ee cp -r "$tagged_src_path" "$tagged_dest_path"
     else
       echo "Warning: Tagged file '$tagged_src_path' not found. Skipping." >&2
     fi
   fi
 done < "$src_file"
+
+ee sync
 
 if [[ -z "$MOCK_CIRCUIT_DIR" && -c /dev/ttyACM0 ]]; then
   # Send soft reboot sequence (Ctrl-C then Ctrl-D) to trigger immediate execution of new code.py

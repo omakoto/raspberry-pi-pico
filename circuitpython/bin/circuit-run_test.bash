@@ -98,4 +98,27 @@ if [[ "$extra_content" != "data" ]]; then
   exit 1
 fi
 
+# Test 6: Copy tagged directories using #file: comments
+SRC_FILE_TAGGED_DIR="$TEMP_DIR/test_script_dir.py"
+EXTRA_DIR="$TEMP_DIR/extra_dir"
+mkdir -p "$EXTRA_DIR"
+echo "module_data" > "$EXTRA_DIR/module.py"
+
+echo "print('Hello Dir')" > "$SRC_FILE_TAGGED_DIR"
+echo "#file:extra_dir" >> "$SRC_FILE_TAGGED_DIR"
+
+"$BIN_DIR/circuit-run" "$SRC_FILE_TAGGED_DIR"
+
+# Verify extra_dir was copied
+EXTRA_DEST_DIR="$MOCK_MOUNT/extra_dir"
+if [[ ! -d "$EXTRA_DEST_DIR" ]]; then
+  echo "FAIL: Extra directory $EXTRA_DEST_DIR was not copied"
+  exit 1
+fi
+
+if [[ ! -f "$EXTRA_DEST_DIR/module.py" ]]; then
+  echo "FAIL: File inside extra directory not copied"
+  exit 1
+fi
+
 echo "All tests passed!"

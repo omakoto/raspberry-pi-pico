@@ -1,0 +1,9 @@
+hostname="w5500-test"
+tcp_port=10110
+
+# Optional hardware SPI0 pin overrides (defaults match recommended Pico SPI0 pinout)
+# spi_sck=18
+# spi_mosi=19
+# spi_miso=16
+# spi_cs=17
+# spi_reset=20
