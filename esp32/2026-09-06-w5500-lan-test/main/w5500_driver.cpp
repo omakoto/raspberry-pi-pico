@@ -76,7 +76,7 @@ bool W5500Driver::init(const W5500Config& config, StatusLed* status_led, IpCallb
         status_led_->set_state(LedState::INITIALIZING);
     }
 
-    // 1. Hardware Reset
+    // 1. Hardware Reset (if reset pin configured >= 0)
     reset_hardware();
 
     // 2. Initialize SPI Bus (SPI2_HOST / FSPI)
@@ -100,7 +100,7 @@ bool W5500Driver::init(const W5500Config& config, StatusLed* status_led, IpCallb
     // 3. Configure SPI Device Interface
     spi_device_interface_config_t devcfg = {};
     devcfg.mode = 0;
-    devcfg.clock_speed_hz = 20 * 1000 * 1000; // 20 MHz
+    devcfg.clock_speed_hz = 14 * 1000 * 1000; // 14 MHz
     devcfg.spics_io_num = config_.cs_pin;
     devcfg.queue_size = 20;
 

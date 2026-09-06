@@ -6,14 +6,14 @@ mac = "DE:AD:BE:EF:FE:ED"
 # Hardware SPI Pin Configuration
 # -------------------------------------------------------------
 # Default Pinout (Universal / XIAO ESP32-S3 & DevKitC-1 compatible):
-#   spi_sck   = 7    # XIAO: D8 (Pin 9)  | DevKitC-1: Row B, silk '7' (Pin 7)
-#   spi_mosi  = 9    # XIAO: D10 (Pin 11)| DevKitC-1: Row B, silk '9' (Pin 15)
-#   spi_miso  = 8    # XIAO: D9 (Pin 10) | DevKitC-1: Row B, silk '8' (Pin 12)
-#   spi_cs    = 4    # XIAO: D3 (Pin 4)  | DevKitC-1: Row B, silk '4' (Pin 4)
-#   spi_reset = 3    # XIAO: D2 (Pin 3)  | DevKitC-1: Row B, silk '3' (Pin 13)
-#   spi_int   = 2    # XIAO: D1 (Pin 2)  | DevKitC-1: Row A, silk '2' (Pin 5)
-#   poll_period_ms = 0 # 0 for interrupt mode, > 0 (e.g. 5) if spi_int = -1
-#
+spi_sck   = 7    # XIAO: D8 (Pin 9)  | DevKitC-1: Row B, silk '7' (Pin 7)
+spi_mosi  = 9    # XIAO: D10 (Pin 11)| DevKitC-1: Row B, silk '9' (Pin 15)
+spi_miso  = 8    # XIAO: D9 (Pin 10) | DevKitC-1: Row B, silk '8' (Pin 12)
+spi_cs    = 4    # XIAO: D3 (Pin 4)  | DevKitC-1: Row B, silk '4' (Pin 4)
+spi_reset = -1   # -1 if RSTn is unconnected (or 3 for DevKitC-1 Row B silk '3')
+spi_int   = -1   # -1 for polling mode (recommended); set to 2 for interrupt mode
+poll_period_ms = 5 # Polling interval in ms when spi_int = -1
+
 # Alternative DevKitC-1 Dedicated FSPI Pinout (uncomment to use):
 # spi_sck   = 12   # DevKitC-1: Row B, silk '12' (Pin 18)
 # spi_mosi  = 11   # DevKitC-1: Row B, silk '11' (Pin 17)

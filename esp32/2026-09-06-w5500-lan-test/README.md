@@ -66,8 +66,8 @@ This project is a high-performance C++ re-implementation of `circuitpython/2026-
 ### 2.2 ESP32-S3-DevKitC-1 (Dual USB-C) Wiring
 
 The **ESP32-S3-DevKitC-1** (and compatible 44-pin boards such as **YD-ESP32-S3** and **NodeMCU-S3**) features two 22-pin headers:
-- **Row A (Top Header)**: Near the native USB OTG port and RESET button.
-- **Row B (Bottom Header)**: Near the CP2102N USB-UART bridge port and BOOT button.
+- **Row A (Top Header)**: Near the CP2102N USB-UART bridge port and RESET button.
+- **Row B (Bottom Header)**: Near the native USB OTG port and BOOT button.
 
 Reference document: [`ref/esp32-s3-devkitc-1.md`](file:///home/omakoto/cbin/src/raspberry-pi-pico/ref/esp32-s3-devkitc-1.md).
 
@@ -104,37 +104,36 @@ If you prefer using the consecutive FSPI block on **Row B**, configure the pins 
 
 ---
 
-#### ASCII Connection Diagram (ESP32-S3-DevKitC-1 - Universal Option A)
+##### ASCII Connection Diagram (ESP32-S3-DevKitC-1 - Universal Option A)
 
 ```text
-                                 ESP32-S3-DevKitC-1
-        +-------------------------------------------------------------------+
-[Row A] | (G) (TX)(RX)(1) [2] (42)(41)(40)(39)(38)(37)(36)(35)(0)(45)(48)  |
-        |                  |                                                |
-        |                  +--------------------------+                     |
-        |                                             |                     |
-        |  [PCB ANT]      +------------------+        |       [Native USB ] |
-        |                 |  ESP32-S3-WROOM  |        |       [USB-C:USB  ] |
-        |                 +------------------+        |                     |
-        |                                             |       [UART Bridge] |
-        |                                             |       [USB-C:UART ] |
-        |  [3V3]     [4]        [7] [8] [3]     [9]   |  (G)                |
-[Row B] |  (1/2)     (4)        (7) (12)(13)    (15)  |  (22)               |
-        +----+--------+----------+---+---+-------+----+---+-----------------+
-             |        |          |   |   |       |    |   |
-             |        |          |   |   |       |    |   |
-             |        |          |   |   |       |    +---|-- INTn (J1-6)
-             |        |          |   |   |       +--------|-- MOSI (J1-3)
-             |        |          |   |   +----------------|-- RSTn (J2-5)
-             |        |          |   +--------------------|-- MISO (J2-6)
-             |        |          +------------------------|-- SCLK (J1-4)
-             |        +-----------------------------------|-- SCSn (J1-5)
-             +--------------------------------------------|-- 3.3V (J2-2)
-             +--------------------------------------------|-- GND  (J1-1 / J2-1)
-                                                       +--------------------+
-                                                       | USR-ES1 (W5500)    |
-                                                       | [ RJ45 ETHERNET ]  |
-                                                       +--------------------+
+                                     ESP32-S3-DevKitC-1
+            +-------------------------------------------------------------------------+
+[Row A: Top]| (G) (TX)(RX)(1) [2] (42)...                                    (G)  (G) |
+            |                  | (Pin 5 / GPIO2)                                      |
+            |                  +------------------------------------------------+     |
+            |                                                                   |     |
+            |  [PCB ANT]      +------------------+              [UART Bridge]   |     |
+            |                 |  ESP32-S3-WROOM  |              [USB-C:UART ]   |     |
+            |                 +------------------+                              |     |
+            |                                                   [Native USB ]   |     |
+            |                                                   [USB-C:USB  ]   |     |
+            |  [3V3]     [4]        [7]            [8] [3]       [9]        (G) |     |
+[Row B: Btm]|  (1/2)     (4)        (7)            (12)(13)      (15)       (22)|     |
+            +----+--------+----------+--------------+---+---------+----------+--+-----+
+                 |        |          |              |   |         |          |  |
+                 |        |          |              |   |         |          |  +-- [INTn]  J1-6 (GPIO2)
+                 |        |          |              |   |         |          +----- [GND]   J1-1 / J2-1
+                 |        |          |              |   |         +---------------- [MOSI]  J1-3 (GPIO9)
+                 |        |          |              |   +-------------------------- [RSTn]  J2-5 (GPIO3)
+                 |        |          |              +------------------------------ [MISO]  J2-6 (GPIO8)
+                 |        |          +--------------------------------------------- [SCLK]  J1-4 (GPIO7)
+                 |        +-------------------------------------------------------- [SCSn]  J1-5 (GPIO4)
+                 +----------------------------------------------------------------- [3.3V]  J2-2 / J2-3
+                                                                              +--------------------+
+                                                                              | USR-ES1 (W5500)    |
+                                                                              | [ RJ45 ETHERNET ]  |
+                                                                              +--------------------+
 ```
 
 ---
@@ -235,6 +234,13 @@ Run [`./02-monitor.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/20
 ./02-monitor.sh /dev/ttyUSB0
 # Exit monitor with: Ctrl + ]
 ```
+
+### 4. USB Mass Storage (MSC) & Dual Console Logging
+
+Like [`esp32/nsbackend-esp32s3`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/nsbackend-esp32s3), this firmware integrates a TinyUSB composite device providing both **USB Mass Storage (MSC)** and **CDC ACM Serial**:
+
+- **USB Flash Drive**: When plugged into the **Native USB port** (`USB-C:USB` on DevKitC-1, or the single USB-C port on XIAO), the wear-levelling FATFS `/spiflash` partition enumerates on your PC as a removable USB storage drive. You can directly inspect and modify `config.toml` from your computer; changes take effect upon the next reboot.
+- **Dual Console Logging**: Serial logs (`ESP_LOG*`) are mirrored in real time to **both** the hardware UART bridge (`USB-C:UART`) and the TinyUSB CDC ACM serial port (`USB-C:USB`). You can run `./02-monitor.sh` on whichever port you plug in.
 
 ---
 

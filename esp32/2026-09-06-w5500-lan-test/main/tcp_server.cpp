@@ -48,7 +48,7 @@ bool TcpServer::start(int port, StatusLed* status_led) {
     status_led_ = status_led;
     running_ = true;
 
-    BaseType_t ret = xTaskCreate(task_entry, "tcp_server", 4096, this, 5, &task_handle_);
+    BaseType_t ret = xTaskCreate(task_entry, "tcp_server", 8192, this, 5, &task_handle_);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create TCP server task");
         running_ = false;

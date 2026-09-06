@@ -8,6 +8,8 @@
 
 #include "status_led.hpp"
 #include "config_manager.hpp"
+#include "usb_msc.hpp"
+#include "dual_logger.hpp"
 #include "w5500_driver.hpp"
 #include "tcp_server.hpp"
 #include "mdns_service.hpp"
@@ -60,6 +62,7 @@ static const char* TAG = "Main";
 
 static StatusLed s_status_led(static_cast<gpio_num_t>(CONFIG_W5500_STATUS_LED_GPIO));
 static ConfigManager s_config_mgr;
+static UsbMsc s_usb_msc;
 static W5500Driver s_w5500_driver;
 static TcpServer s_tcp_server;
 static MdnsService s_mdns_service;
@@ -86,9 +89,12 @@ static void on_ip_acquired(const esp_netif_ip_info_t& ip_info) {
 }
 
 extern "C" void app_main(void) {
+    // 1. Initialize Dual Logger (routes logs to both UART0 and TinyUSB CDC ACM)
+    dual_logger_init();
+
     ESP_LOGI(TAG, "Starting W5500 LAN TCP Server on Seeed Studio XIAO ESP32-S3...");
 
-    // 1. Initialize NVS
+    // 2. Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -96,11 +102,13 @@ extern "C" void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // 2. Initialize Status LED
+    // 3. Initialize Status LED
     s_status_led.init();
 
-    // 3. Mount Wear Levelling FATFS and parse configuration files
+    // 4. Mount Wear Levelling FATFS and expose via TinyUSB MSC
     if (s_config_mgr.init("/spiflash", "storage")) {
+        // Expose FATFS wear-levelling partition as USB Mass Storage on Native USB OTG port
+        s_usb_msc.init(s_config_mgr.get_wl_handle());
         s_config_mgr.load("/spiflash/config.toml", "/spiflash/config-override.toml");
     } else {
         ESP_LOGW(TAG, "FATFS mount skipped or failed; using default configuration");

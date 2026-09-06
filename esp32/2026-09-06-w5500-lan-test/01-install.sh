@@ -35,12 +35,27 @@ fi
 
 # Auto-detect serial port if not explicitly set
 if [[ -z "$PORT" ]]; then
-    for candidate in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyUSB0 /dev/ttyUSB1; do
-        if [[ -e "$candidate" ]]; then
-            PORT="$candidate"
-            break
-        fi
-    done
+    # First, prefer dedicated hardware UART bridges (CH34x, CP210x, FTDI) over TinyUSB CDC
+    if [[ -d /dev/serial/by-id ]]; then
+        for id_pattern in "*1a86*" "*CP210*" "*FTDI*" "*ch34*"; do
+            for id_link in /dev/serial/by-id/$id_pattern; do
+                if [[ -e "$id_link" ]]; then
+                    PORT="$(readlink -f "$id_link")"
+                    break 2
+                fi
+            done
+        done
+    fi
+
+    # Fallback to standard device nodes if not resolved via by-id
+    if [[ -z "$PORT" ]]; then
+        for candidate in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyUSB0 /dev/ttyUSB1; do
+            if [[ -e "$candidate" ]]; then
+                PORT="$candidate"
+                break
+            fi
+        done
+    fi
 fi
 
 if [[ -n "$PORT" ]]; then

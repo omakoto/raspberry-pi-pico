@@ -90,7 +90,7 @@ To provide private credentials (Wi-Fi passwords, private keys, static IP configu
 - During `app_main`, the application initializes `ConfigManager` which mounts the partition at `/spiflash` via `esp_vfs_fat_spiflash_mount_rw_wl`.
 - `ConfigManager::load()` parses `/spiflash/config.toml` first, then loads `/spiflash/config-override.toml` on top, overriding any matching keys.
 - Type-safe accessors (`get_string`, `get_int`, `get_bool`) read configuration values without relying on C++ exceptions (`-fno-exceptions` friendly).
-- On projects featuring USB Mass Storage (such as `nsbackend-esp32s3`), `/spiflash` is also exposed directly to your PC as a USB drive for drag-and-drop configuration editing.
+- On projects featuring USB Mass Storage (such as `nsbackend-esp32s3` and `2026-09-06-w5500-lan-test`), `/spiflash` is also exposed directly to your PC via TinyUSB MSC as a USB flash drive for drag-and-drop configuration editing.
 
 ---
 
@@ -109,10 +109,12 @@ To maximize portability between the compact Seeed Studio XIAO ESP32-S3 and the 4
 | **Hardware Interrupt** | `GPIO2` | `D1` (Pin 2) | Row A, silk `2` (Pin 5) |
 | **Status LED** | `GPIO21` | Onboard Yellow LED | Row A, silk `21` (Pin 18) |
 
-### Dual USB Port Handling
-- **`USB` Port (Native USB OTG)**: Located on the **Row A** side (near `RESET` button). Connects directly to internal ESP32-S3 USB PHY on `GPIO19` (D-) and `GPIO20` (D+). Enumerates as `/dev/ttyACM*`.
-- **`UART` Port (USB-UART Bridge)**: Located on the **Row B** side (near `BOOT` button). Uses CP2102N or CH343 chip connected to `GPIO43` (TX) and `GPIO44` (RX). Enumerates as `/dev/ttyUSB*` (or `/dev/ttyACM*`).
-- `sdkconfig.defaults` enables secondary USB Serial/JTAG console (`CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y`), allowing serial logs and debugging to function simultaneously across both ports.
+### Dual USB Port & Console Handling
+- **`UART` Port (USB-UART Bridge)**: Located on the **Row A** side (near `RESET` button). Uses CP2102N or CH343 chip connected to `GPIO43` (TX) and `GPIO44` (RX). Enumerates as `/dev/ttyUSB*` (or `/dev/ttyACM*`).
+- **`USB` Port (Native USB OTG)**: Located on the **Row B** side (near `BOOT` button). Connects directly to internal ESP32-S3 USB PHY on `GPIO19` (D-) and `GPIO20` (D+). In projects utilizing TinyUSB (`nsbackend-esp32s3`, `2026-09-06-w5500-lan-test`), this port exposes a composite USB device featuring:
+  - **USB Mass Storage Class (MSC)**: The internal Wear Levelling `/spiflash` FATFS partition mounts on your PC as a removable drive, enabling direct editing of `config.toml`.
+  - **USB CDC ACM Serial**: Enumerates as `/dev/ttyACM*` for serial monitoring and console interaction.
+- **Dual Console Logging**: Firmware uses `dual_logger` to duplicate `ESP_LOG*` console output across both UART0 (`USB-C:UART`) and TinyUSB CDC ACM (`USB-C:USB`), ensuring `./02-monitor.sh` works seamlessly on whichever port you plug into.
 
 ---
 
@@ -121,4 +123,4 @@ To maximize portability between the compact Seeed Studio XIAO ESP32-S3 and the 4
 | Project | Description |
 | :--- | :--- |
 | [`nsbackend-esp32s3`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/nsbackend-esp32s3) | High-performance Nintendo Switch USB HID Gamepad controller backend (`VID: 0x0f0d`, `PID: 0x0092`), composite TinyUSB stack (Gamepad + CDC Serial + MSC Flash Storage), multi-AP Wi-Fi manager, mDNS (`nscon.local`), streaming TCP command server on port `10100`, and physical debounced GPIO buttons. |
-| [`2026-09-06-w5500-lan-test`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/2026-09-06-w5500-lan-test) | Hardwired TCP echo server over Ethernet using the USR-ES1 (WIZnet W5500) SPI module, featuring 160 ms hardware reset sequencing, automatic DHCP client, mDNS responder (`w5500-test.local` on port `10110`), periodic switch ARP priming, status LED patterns, and FATFS configuration. |
+| [`2026-09-06-w5500-lan-test`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/2026-09-06-w5500-lan-test) | Hardwired TCP echo server over Ethernet using the USR-ES1 (WIZnet W5500) SPI module, composite TinyUSB stack (CDC ACM Serial + MSC Flash Storage), 160 ms hardware reset sequencing, automatic DHCP client, mDNS responder (`w5500-test.local` on port `10110`), periodic switch ARP priming, status LED patterns, and FATFS configuration. |

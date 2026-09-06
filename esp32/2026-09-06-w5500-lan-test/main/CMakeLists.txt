@@ -3,6 +3,8 @@ idf_component_register(
         "main.cpp"
         "config_manager.cpp"
         "status_led.cpp"
+        "usb_msc.cpp"
+        "dual_logger.cpp"
         "w5500_driver.cpp"
         "tcp_server.cpp"
         "mdns_service.cpp"
