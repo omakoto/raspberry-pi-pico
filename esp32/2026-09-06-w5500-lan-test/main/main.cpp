@@ -130,6 +130,7 @@ extern "C" void app_main(void) {
     cfg.rst_pin = static_cast<gpio_num_t>(s_config_mgr.get_int("spi_reset", CONFIG_W5500_RST_GPIO));
     cfg.int_pin = static_cast<gpio_num_t>(s_config_mgr.get_int("spi_int", CONFIG_W5500_INT_GPIO));
     cfg.poll_period_ms = s_config_mgr.get_int("poll_period_ms", CONFIG_W5500_POLL_MS);
+    cfg.spi_speed_mhz = s_config_mgr.get_int("spi_speed_mhz", 25);
     cfg.hostname = s_active_hostname;
     cfg.mac_address = s_config_mgr.get_string("mac", CONFIG_W5500_MAC_ADDR);
 

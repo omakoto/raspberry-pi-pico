@@ -98,9 +98,11 @@ bool W5500Driver::init(const W5500Config& config, StatusLed* status_led, IpCallb
     }
 
     // 3. Configure SPI Device Interface
+    int speed_mhz = (config_.spi_speed_mhz > 0) ? config_.spi_speed_mhz : 25;
+    ESP_LOGI(TAG, "Setting SPI clock speed: %d MHz", speed_mhz);
     spi_device_interface_config_t devcfg = {};
     devcfg.mode = 0;
-    devcfg.clock_speed_hz = 14 * 1000 * 1000; // 14 MHz
+    devcfg.clock_speed_hz = speed_mhz * 1000 * 1000;
     devcfg.spics_io_num = config_.cs_pin;
     devcfg.queue_size = 20;
 
