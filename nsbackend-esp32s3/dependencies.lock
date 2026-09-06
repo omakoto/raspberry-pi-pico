@@ -48,7 +48,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.5.5
+    version: 5.3.5
 direct_dependencies:
 - espressif/esp_tinyusb
 - espressif/mdns
