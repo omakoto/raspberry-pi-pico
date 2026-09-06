@@ -1,0 +1,207 @@
+# nsbackend-pico
+
+A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family** (**Pico**, **Pico 2**, **Pico W**, **Pico 2 W**), built on the **Raspberry Pi Pico SDK** and **FreeRTOS SMP**.
+
+---
+
+## 1. Overview
+
+`nsbackend-pico` enables a Raspberry Pi Pico or Pico 2 microcontroller to operate as a high-performance Nintendo Switch controller backend:
+1. **USB HID Gamepad**: Emulates a HORI Pokken Nintendo Switch controller over native USB (`VID: 0x0f0d`, `PID: 0x0092`), transmitting 8-byte HID reports to the Nintendo Switch.
+2. **USB CDC ACM Serial Console**: Exposes a virtual serial console (`/dev/ttyACM0`) for real-time logging, status monitoring, and controller command input.
+3. **USB MSC Flash Storage**: Exposes the internal 1MB FAT12 partition as a standard USB flash drive, allowing configuration editing of `config.toml` directly from your PC without re-flashing.
+4. **Physical GPIO Buttons**: Active-low physical pushbuttons with internal pull-ups, 15ms debouncing, and opposing D-pad direction cancellation.
+5. **Dual Serial Command Server**: Concurrently accepts controller commands on hardware UART0 (GP12 TX / GP13 RX at 115,200 baud) and USB CDC ACM serial, while echoing logs to both channels.
+6. **Status LED State Machine**: Visual status indicators via onboard LED (GP25 on Pico/Pico 2, CYW43 wireless GPIO on Pico W/Pico 2 W).
+7. **Wireless Networking (Pico W / Pico 2 W only)**:
+   - **Multi-AP Wi-Fi Manager**: Automatic connection to configured access points with background scanning and seamless auto-reconnect.
+   - **lwIP mDNS Service**: Advertises `nscon.local` with service `_nscon._tcp` on port `10100`.
+   - **TCP Command Server**: High-throughput BSD socket server on port `10100` for streaming controller commands from frontend clients (`nsfrontend` or scripts).
+
+---
+
+## 2. Hardware Pinout
+
+| Function | Pin Name | Default GPIO | Details |
+| :--- | :--- | :--- | :--- |
+| **Button A** | GP0 | `GPIO0` | Active-low, internal pull-up |
+| **D-pad DOWN** | GP1 | `GPIO1` | Active-low, internal pull-up |
+| **D-pad LEFT** | GP2 | `GPIO2` | Active-low, internal pull-up |
+| **D-pad RIGHT** | GP3 | `GPIO3` | Active-low, internal pull-up |
+| **D-pad UP** | GP4 | `GPIO4` | Active-low, internal pull-up |
+| **Button B** | GP5 | `GPIO5` | Active-low, internal pull-up |
+| **Buttons L + R** | GP10 | `GPIO10` | Active-low, triggers L and R simultaneously |
+| **UART0 TX** | GP12 | `GPIO12` | 115,200 baud, 8N1 / Serial log output |
+| **UART0 RX** | GP13 | `GPIO13` | 115,200 baud, 8N1 / Serial command input |
+| **Status LED** | GP25 / CYW43 | Board LED | GP25 on Pico / Pico 2; CYW43 WL GPIO on Pico W / Pico 2 W |
+| **USB** | D+ / D- | Native USB | Standard micro-USB (Pico) or USB-C connector |
+
+---
+
+## 3. Status LED Patterns
+
+| State | Lifecycle Phase | LED Blink Pattern |
+| :--- | :--- | :--- |
+| **Initializing** | Power-on, flash mount, TinyUSB init | **Solid ON** |
+| **Wi-Fi Connecting** *(W boards)* | Scanning and associating with Wi-Fi AP | **0.1s ON, 1.0s OFF** (1 short blink) |
+| **Setting up TCP** *(W boards)* | Wi-Fi connected, starting mDNS & TCP | **0.1s ON, 0.1s OFF, 0.1s ON, 1.0s OFF** (2 short blinks) |
+| **Waiting for Client** | Ready / TCP listening on port 10100 | **0.5s ON, 0.5s OFF** (Slow pulse) |
+| **Client Connected** *(W boards)* | TCP client connected & streaming | **1.0s ON, 1.0s OFF** (Heartbeat) |
+| **Wi-Fi Error / Reconnecting** | Wi-Fi failed / auto-reconnecting | **0.1s ON, 0.1s OFF** (Rapid strobe) |
+
+---
+
+## 4. Architecture
+
+```
+                                 +---------------------------+
+                                 |      Nintendo Switch      |
+                                 +-------------^-------------+
+                                               | (USB HID Gamepad)
++-------------------+           +-------------v-------------+
+|    TCP Client     |  (Wi-Fi)  |      nsbackend-pico       |
+| (nsfrontend / CLI)| --------> |  - TCP Server (Port 10100)|
++-------------------+           |  - Controller State Engine|
+                                |  - Composite TinyUSB:     |
++-------------------+           |    * HORI Gamepad HID     |
+|   UART0 / USB CDC | --------> |    * CDC Serial Console   |
+|   Serial Console  |           |    * MSC Storage (FATFS)  |
++-------------------+           |  - Dual Logger (UART/CDC) |
+                                |  - GPIO Button Debouncer  |
++-------------------+           |  - CYW43 Wi-Fi & lwIP mDNS|
+|  Physical Buttons | --------> |  - FreeRTOS SMP (Dual Core|
+|   (GP0-GP5, GP10) |           |  - 1MB Flash FAT12 DiskIO |
++-------------------+           +---------------------------+
+```
+
+---
+
+## 5. Supported Boards
+
+| Board Target | MCU Architecture | Wireless Support | Default Build Command |
+| :--- | :--- | :--- | :--- |
+| **`pico_w`** *(default)* | RP2040 (Dual ARM Cortex-M0+) | CYW43439 (Wi-Fi 4 + BLE) | `./00-build.sh -b pico_w` |
+| **`pico2_w`** | RP2350 (Dual ARM Cortex-M33) | CYW43439 (Wi-Fi 4 + BLE) | `./00-build.sh -b pico2_w` |
+| **`pico`** | RP2040 (Dual ARM Cortex-M0+) | None (Serial/USB control) | `./00-build.sh -b pico` |
+| **`pico2`** | RP2350 (Dual ARM Cortex-M33) | None (Serial/USB control) | `./00-build.sh -b pico2` |
+
+---
+
+## 6. Building & Installation
+
+### Prerequisites
+- Raspberry Pi Pico SDK (`v2.1.1` or later)
+- ARM GNU Embedded Toolchain (`arm-none-eabi-gcc` / `g++`)
+- FreeRTOS Kernel (`FreeRTOS-Kernel`)
+- CMake (`>= 3.13`) and Ninja / Make
+
+### 1. Build Firmware & Storage Image
+```bash
+cd ~/cbin/src/raspberry-pi-pico/pico/nsbackend-pico
+
+# Build for Pico W (default):
+./00-build.sh
+
+# Or build for Pico 2 W:
+./00-build.sh -b pico2_w
+
+# Or build clean for non-wireless Pico:
+./00-build.sh -b pico -c
+```
+
+The build produces two artifacts in `build/`:
+- `nsbackend-pico.uf2`: Main application firmware (loaded at `0x10000000`).
+- `storage.uf2`: 1MB FAT12 configuration partition (loaded at `0x10100000`).
+
+### 2. Flashing
+Hold down the **BOOTSEL** button on your Pico while plugging it into your computer's USB port (the board mounts as a drive named `RPI-RP2` or `RP2350`).
+
+Run:
+```bash
+./01-install.sh
+```
+Or manually copy `build/storage.uf2` followed by `build/nsbackend-pico.uf2` into the mounted drive.
+
+---
+
+## 7. Configuration (`config.toml`)
+
+When plugged into a PC via USB, the Pico exposes a standard USB flash drive with `config.toml`. You can open and edit this file directly in any text editor.
+
+Sample `config.toml`:
+```toml
+hostname = "nscon"
+tcp_port = 10100
+enable_echo = true
+
+[[ap]]
+ssid = "MyHomeNetwork"
+password = "SecretPassword123"
+
+[[ap]]
+ssid = "MobileHotspot"
+password = "BackupPassword456"
+```
+
+---
+
+## 8. Serial Console Monitoring
+
+Run the monitor script to view debug logs over USB CDC:
+```bash
+./02-monitor.sh
+# or specify a specific device:
+./02-monitor.sh /dev/ttyACM0
+```
+
+---
+
+## 9. Controller Command Protocol
+
+Commands can be transmitted over TCP (port 10100) or over serial (UART0 / USB CDC).
+
+### Button Commands
+```text
+a              # Press and auto-release button A
+b              # Press and auto-release button B
+x              # Press and auto-release button X
+y              # Press and auto-release button Y
+l1             # Left bumper (L)
+r1             # Right bumper (R)
+l2             # Left trigger (ZL)
+r2             # Right trigger (ZR)
+plus           # Plus / Start button
+minus          # Minus / Select button
+home           # Home button
+capture        # Capture / Screenshot button
+pu             # D-pad UP
+pd             # D-pad DOWN
+pl             # D-pad LEFT
+pr             # D-pad RIGHT
+```
+
+### Analog Stick Commands
+Coordinates range from `-1.0` to `1.0`:
+```text
+lx 0.75        # Left stick X axis
+ly -0.50       # Left stick Y axis
+rx -1.00       # Right stick X axis
+ry 1.00        # Right stick Y axis
+```
+
+### Duration Commands
+Append duration in seconds to hold the input before auto-releasing:
+```text
+a 0.20         # Hold button A for 200 milliseconds
+pu 0.15        # Hold D-pad UP for 150 milliseconds
+```
+
+---
+
+## 10. Latency Benchmarking
+
+To benchmark network round-trip latency over Wi-Fi:
+```bash
+./measure-latency.py --host nscon.local --count 100 --stream-samples 200
+```
+*(Ensure `enable_echo = true` is set in `config.toml`)*

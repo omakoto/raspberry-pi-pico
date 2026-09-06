@@ -1,0 +1,16 @@
+# Pico SDK build output directory
+build/
+
+# Local configuration overrides (containing sensitive Wi-Fi credentials)
+fatfs_data/config-override.toml
+
+# Python cache artifacts
+__pycache__/
+*.pyc
+
+# IDE & Editor artifacts
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
