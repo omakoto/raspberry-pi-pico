@@ -1,0 +1,79 @@
+menu "W5500 LAN Configuration"
+
+    config W5500_HOSTNAME
+        string "mDNS / DHCP Hostname"
+        default "w5500-test"
+        help
+            Network hostname for DHCP client and mDNS service (.local).
+
+    config W5500_TCP_PORT
+        int "TCP Echo Server Port"
+        range 1 65535
+        default 10110
+        help
+            TCP port on which the echo server listens.
+
+    config W5500_MAC_ADDR
+        string "Static MAC Address"
+        default "DE:AD:BE:EF:FE:ED"
+        help
+            Hex-formatted MAC address (XX:XX:XX:XX:XX:XX) to assign to the W5500.
+
+    config W5500_SPI_SCLK_GPIO
+        int "SPI SCLK GPIO"
+        range 0 48
+        default 7
+        help
+            GPIO connected to USR-ES1 J1-4 (SCLK). XIAO ESP32-S3 silk D8 is GPIO7.
+
+    config W5500_SPI_MOSI_GPIO
+        int "SPI MOSI GPIO"
+        range 0 48
+        default 9
+        help
+            GPIO connected to USR-ES1 J1-3 (MOSI). XIAO ESP32-S3 silk D10 is GPIO9.
+
+    config W5500_SPI_MISO_GPIO
+        int "SPI MISO GPIO"
+        range 0 48
+        default 8
+        help
+            GPIO connected to USR-ES1 J2-6 (MISO). XIAO ESP32-S3 silk D9 is GPIO8.
+
+    config W5500_SPI_CS_GPIO
+        int "SPI CS (SCSn) GPIO"
+        range 0 48
+        default 4
+        help
+            GPIO connected to USR-ES1 J1-5 (SCSn). XIAO ESP32-S3 silk D3 is GPIO4.
+
+    config W5500_RST_GPIO
+        int "Hardware Reset (RSTn) GPIO"
+        range -1 48
+        default 3
+        help
+            GPIO connected to USR-ES1 J2-5 (RSTn). XIAO ESP32-S3 silk D2 is GPIO3. Set -1 to disable.
+
+    config W5500_INT_GPIO
+        int "Interrupt (INTn) GPIO"
+        range -1 48
+        default 2
+        help
+            GPIO connected to USR-ES1 J1-6 (INTn). XIAO ESP32-S3 silk D1 is GPIO2. Set -1 for polling mode.
+
+    config W5500_POLL_MS
+        int "Polling period (ms)"
+        range 0 1000
+        default 0
+        help
+            Polling period in milliseconds if INTn is not used (-1). Set to 0 if INTn is configured.
+            When INT GPIO is -1, this must be > 0 (e.g. 5 ms).
+
+    config W5500_STATUS_LED_GPIO
+        int "Status LED GPIO"
+        range -1 48
+        default 21
+        help
+            GPIO connected to onboard status LED (active LOW). XIAO ESP32-S3 onboard LED is GPIO21. Set -1 to disable.
+
+endmenu

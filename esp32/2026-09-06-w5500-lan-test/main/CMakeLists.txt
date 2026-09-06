@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "config_manager.cpp"
+        "status_led.cpp"
+        "w5500_driver.cpp"
+        "tcp_server.cpp"
+        "mdns_service.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_eth
+        esp_netif
+        esp_event
+        esp_timer
+        driver
+        lwip
+        freertos
+        log
+        nvs_flash
+        fatfs
+        wear_levelling
+)
