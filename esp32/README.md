@@ -110,8 +110,8 @@ To maximize portability between the compact Seeed Studio XIAO ESP32-S3 and the 4
 | **Status LED** | `GPIO21` | Onboard Yellow LED | Row A, silk `21` (Pin 18) |
 
 ### Dual USB Port Handling
-- **`UART` Port (USB-UART Bridge)**: Uses CP2102N or CH343 chip connected to `GPIO43` (TX) and `GPIO44` (RX). Enumerates as `/dev/ttyUSB*`.
-- **`USB` Port (Native USB OTG)**: Connects directly to internal ESP32-S3 USB PHY on `GPIO19` (D-) and `GPIO20` (D+). Enumerates as `/dev/ttyACM*`.
+- **`USB` Port (Native USB OTG)**: Located on the **Row A** side (near `RESET` button). Connects directly to internal ESP32-S3 USB PHY on `GPIO19` (D-) and `GPIO20` (D+). Enumerates as `/dev/ttyACM*`.
+- **`UART` Port (USB-UART Bridge)**: Located on the **Row B** side (near `BOOT` button). Uses CP2102N or CH343 chip connected to `GPIO43` (TX) and `GPIO44` (RX). Enumerates as `/dev/ttyUSB*` (or `/dev/ttyACM*`).
 - `sdkconfig.defaults` enables secondary USB Serial/JTAG console (`CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y`), allowing serial logs and debugging to function simultaneously across both ports.
 
 ---

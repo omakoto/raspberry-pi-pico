@@ -66,8 +66,8 @@ This project is a high-performance C++ re-implementation of `circuitpython/2026-
 ### 2.2 ESP32-S3-DevKitC-1 (Dual USB-C) Wiring
 
 The **ESP32-S3-DevKitC-1** (and compatible 44-pin boards such as **YD-ESP32-S3** and **NodeMCU-S3**) features two 22-pin headers:
-- **Row A (Top Header)**: Near the CP2102N USB-UART bridge port and RESET button.
-- **Row B (Bottom Header)**: Near the native USB OTG port and BOOT button.
+- **Row A (Top Header)**: Near the native USB OTG port and RESET button.
+- **Row B (Bottom Header)**: Near the CP2102N USB-UART bridge port and BOOT button.
 
 Reference document: [`ref/esp32-s3-devkitc-1.md`](file:///home/omakoto/cbin/src/raspberry-pi-pico/ref/esp32-s3-devkitc-1.md).
 
@@ -113,11 +113,11 @@ If you prefer using the consecutive FSPI block on **Row B**, configure the pins 
         |                  |                                                |
         |                  +--------------------------+                     |
         |                                             |                     |
-        |  [PCB ANT]      +------------------+        |       [UART Bridge] |
-        |                 |  ESP32-S3-WROOM  |        |       [USB-C:UART ] |
+        |  [PCB ANT]      +------------------+        |       [Native USB ] |
+        |                 |  ESP32-S3-WROOM  |        |       [USB-C:USB  ] |
         |                 +------------------+        |                     |
-        |                                             |       [Native USB ] |
-        |                                             |       [USB-C:USB  ] |
+        |                                             |       [UART Bridge] |
+        |                                             |       [USB-C:UART ] |
         |  [3V3]     [4]        [7] [8] [3]     [9]   |  (G)                |
 [Row B] |  (1/2)     (4)        (7) (12)(13)    (15)  |  (22)               |
         +----+--------+----------+---+---+-------+----+---+-----------------+

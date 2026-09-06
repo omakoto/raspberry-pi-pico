@@ -10,28 +10,22 @@ Features a dual-core 32-bit Xtensa LX7 processor (up to 240 MHz), vector instruc
 
 ### 1. Horizontal View (Matching Physical Board & [Adafruit Photo](https://cdn-shop.adafruit.com/970x728/5364-03.jpg))
 
-> [!NOTE]
-> **USB Port Differences from Reference Photo**:
-> In the [Adafruit reference photo](https://cdn-shop.adafruit.com/970x728/5364-03.jpg) (official Espressif DevKitC-1), the top port is labeled `USB` and the bottom is `UART`.
-> In the diagrams below, the USB port labels are **flipped** (top is `UART`, bottom is `USB`) to match this board variant (common on third-party boards such as YD-ESP32-S3 and NodeMCU-S3). Always check the silkscreen printed on your specific board.
-
-
 ```text
        +---------------------------------------------------------------------------------------------------------+
-       | [Row A: Top Header - Near UART / RESET]                                                                 |
+       | [Row A: Top Header - Near USB / RESET]                                                                  |
        |  G  TX  RX   1   2  42  41  40  39  38  37  36  35   0  45  48  47  21  20  19   G   G                     |
        | [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•]                    |
 +------+                                                                                    +------------------+ |
-|      |  +--------------------+         +--------+                                         | [RESET]  [ UART] | |
-|      |  |                    |         |  LDO   |                     +---------+         | Button   (Bridge)| |
+|      |  +--------------------+         +--------+                                         | [RESET]  [ USB ] | |
+|      |  |                    |         |  LDO   |                     +---------+         | Button   (Native)| |
 | PCB  |  |  ESP32-S3-WROOM    |         | 3.3V   |   [RGB LED]         | CP2102N |         +------------------+ |
 | ANT  |  |  (Wi-Fi + BLE)     |         +--------+  (IO48/IO38)        | Bridge  |         +------------------+ |
-|      |  |                    |                                        +---------+         | [ BOOT]  [ USB ] | |
-|      |  +--------------------+                                                            | Button   (Native)| |
+|      |  |                    |                                        +---------+         | [ BOOT]  [ UART] | |
+|      |  +--------------------+                                                            | Button   (Bridge)| |
 +------+                                                                                    +------------------+ |
        | [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•] [•]                    |
        | 3V3 3V3 RST  4   5   6   7  15  16  17  18   8   3  46   9  10  11  12  13  14  5V   G                     |
-       | [Row B: Bottom Header - Near USB / BOOT]                                                                |
+       | [Row B: Bottom Header - Near UART / BOOT]                                                               |
        +---------------------------------------------------------------------------------------------------------+
 ```
 
@@ -41,8 +35,8 @@ Features a dual-core 32-bit Xtensa LX7 processor (up to 240 MHz), vector instruc
 
 ```text
                                +-----------------------------+
-                               |  [ USB-C:UART ] [ USB-C:USB ]|
-                               |  (Bridge COM)   (Native OTG)|
+                               |  [ USB-C:USB ] [ USB-C:UART ]|
+                               |  (Native OTG)   (Bridge COM)|
             [RESET / EN] ( )   |                             |   ( ) [BOOT / IO0]
             Button             |     [ CP2102N Bridge ]      |   Button
                                |                             |
@@ -84,7 +78,7 @@ Features a dual-core 32-bit Xtensa LX7 processor (up to 240 MHz), vector instruc
 
 ## Pin Mapping Tables
 
-### Row A: Top Header (Near `UART` & `RESET` Buttons)
+### Row A: Top Header (Near `USB` & `RESET` Buttons)
 *Schematic Header J3. Listed from Left (Antenna end) to Right (USB end).*
 
 | Pos (Antenna $\to$ USB) | Silk Label | ESP32-S3 GPIO | CircuitPython (`board.*`) | Analog / ADC | Default Functions / Peripherals | Notes |
@@ -110,11 +104,11 @@ Features a dual-core 32-bit Xtensa LX7 processor (up to 240 MHz), vector instruc
 | **19**| **20** | `GPIO20` | `board.IO20` | `ADC2_CH9` | **USB D+** / UART1 CTS | Connected to Native USB-C connector |
 | **20**| **19** | `GPIO19` | `board.IO19` | `ADC2_CH8` | **USB D-** / UART1 RTS | Connected to Native USB-C connector |
 | **21**| **G** | — | — | — | Common Ground | System ground |
-| **22** (Far Right)| **G** | — | — | — | Common Ground | System ground (near `RESET` / `UART`) |
+| **22** (Far Right)| **G** | — | — | — | Common Ground | System ground (near `RESET` / `USB`) |
 
 ---
 
-### Row B: Bottom Header (Near `USB` & `BOOT` Buttons)
+### Row B: Bottom Header (Near `UART` & `BOOT` Buttons)
 *Schematic Header J1. Listed from Left (Antenna end) to Right (USB end).*
 
 | Pos (Antenna $\to$ USB) | Silk Label | ESP32-S3 GPIO | CircuitPython (`board.*`) | Analog / ADC | Default Functions / Peripherals | Notes |
@@ -140,31 +134,27 @@ Features a dual-core 32-bit Xtensa LX7 processor (up to 240 MHz), vector instruc
 | **19**| **13** | `GPIO13` | `board.IO13` | `ADC2_CH2` | Touch 13 / **FSPI MISO** | Standard Hardware SPI MISO |
 | **20**| **14** | `GPIO14` | `board.IO14` | `ADC2_CH3` | Touch 14 / FSPIWP | Standard Hardware SPI WP |
 | **21**| **5V** | — | — | — | 5V Power Input / VBUS | Direct connection to USB 5V rail |
-| **22** (Far Right)| **G** | — | — | — | Common Ground | System ground (near `BOOT` / `USB`) |
+| **22** (Far Right)| **G** | — | — | — | Common Ground | System ground (near `BOOT` / `UART`) |
 
 ---
 
 ## On-Board Components & Dual USB-C Ports
 
-> [!NOTE]
-> **USB Port Labeling on Board Variants**:
-> On official Espressif DevKitC-1 v1.0/v1.1 boards ([photo](https://cdn-shop.adafruit.com/970x728/5364-03.jpg)), the Row A port is labeled `USB` and Row B is `UART`. On many third-party boards (e.g., YD-ESP32-S3, NodeMCU-S3), the silkscreen labels are flipped: Row A is labeled `UART` (Bridge) and Row B is labeled `USB` (Native). Always check the silkscreen labels printed beside each port on your board.
-
 ### Dual USB-C Functions
-1. **`UART` Port (USB-to-UART Bridge)**:
+1. **`USB` Port (Native USB OTG)**:
    - Located on the **Row A** side (near `RESET` button).
-   - Connected via an onboard CP2102N / CH343 / CH340 bridge chip to **`GPIO43` (TX)** and **`GPIO44` (RX)**.
-   - Primary port for firmware flashing and serial monitoring (`idf.py monitor`).
-2. **`USB` Port (Native USB OTG)**:
-   - Located on the **Row B** side (near `BOOT` button).
    - Wired directly to the internal ESP32-S3 USB PHY via **`GPIO19` (D-)** and **`GPIO20` (D+)**.
    - Supports native USB HID (gamepad, keyboard, mouse), USB CDC (serial console), USB MSC (disk drive), and USB-Serial-JTAG debugging.
+2. **`UART` Port (USB-to-UART Bridge)**:
+   - Located on the **Row B** side (near `BOOT` button).
+   - Connected via an onboard CP2102N / CH343 / CH340 bridge chip to **`GPIO43` (TX)** and **`GPIO44` (RX)**.
+   - Primary port for firmware flashing and serial monitoring (`idf.py monitor`).
 
 ### Buttons & Status LEDs
 | Component | Physical Position | Connected To | Description |
 | :--- | :--- | :--- | :--- |
-| **RESET Button** | Near `UART` port (Row A) | `EN` / `CHIP_PU` | Hardware reset line. Press to reboot the microcontroller. |
-| **BOOT Button** | Near `USB` port (Row B) | `GPIO0` | Active LOW. Hold while resetting to enter ROM bootloader mode. |
+| **RESET Button** | Near `USB` port (Row A) | `EN` / `CHIP_PU` | Hardware reset line. Press to reboot the microcontroller. |
+| **BOOT Button** | Near `UART` port (Row B) | `GPIO0` | Active LOW. Hold while resetting to enter ROM bootloader mode. |
 | **Power LED** | Center PCB | 3.3V Rail | Red LED indicates 3.3V power is present. |
 | **Addressable RGB LED** | Center PCB | `GPIO48` (v1.0) or `GPIO38` (v1.1) | WS2812B NeoPixel (`RGB@IO48` silkscreen on v1.0). |
 
