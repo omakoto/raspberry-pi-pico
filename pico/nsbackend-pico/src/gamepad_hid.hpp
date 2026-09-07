@@ -66,3 +66,6 @@ private:
     SwitchReport last_report_;
     bool initialized_;
 };
+
+// Requests an orderly disconnect and reboot into USB BOOTSEL mode
+void reboot_to_bootsel();

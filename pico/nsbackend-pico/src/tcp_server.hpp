@@ -20,6 +20,8 @@ public:
 
     bool start();
     void stop();
+    bool is_listening() const { return listening_.load(); }
+    int get_port() const { return port_; }
 
 private:
     static void task_entry(void* arg);
@@ -33,6 +35,8 @@ private:
     bool enable_echo_;
     TaskHandle_t task_handle_;
     std::atomic<bool> running_;
+    std::atomic<bool> listening_;
+    std::atomic<int> listen_sock_;
 };
 
 #endif // NSBACKEND_HAS_WIFI

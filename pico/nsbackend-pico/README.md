@@ -145,9 +145,9 @@ cd ~/cbin/src/raspberry-pi-pico/pico/nsbackend-pico
 ./00-build.sh -b pico -c
 ```
 
-The build produces two artifacts in `build/`:
-- `nsbackend-pico.uf2`: Main application firmware (loaded at `0x10000000`).
-- `storage.uf2`: 1MB FAT12 configuration partition (loaded at `0x10100000`).
+The build produces a single combined UF2 image in `build/`:
+- `nsbackend-pico.uf2`: Combined UF2 containing both the firmware binary (at `0x10000000`) and the 1MB FAT12 storage partition (at `0x10100000`) pre-populated with `config.toml` and `config-override.toml`.
+- `storage.bin` / `storage.uf2`: Standalone FAT filesystem image and UF2 partition.
 
 ### 2. Flashing
 Hold down the **BOOTSEL** button on your Pico while plugging it into your computer's USB port (the board mounts as a drive named `RPI-RP2` or `RP2350`).
@@ -156,7 +156,10 @@ Run:
 ```bash
 ./01-install.sh
 ```
-Or manually copy `build/storage.uf2` followed by `build/nsbackend-pico.uf2` into the mounted drive.
+Or simply copy `build/nsbackend-pico.uf2` directly into the mounted drive.
+
+> [!NOTE]
+> Even if flash memory is completely erased or unformatted, the firmware automatically formats the 1MB partition as FAT12 and restores default `config.toml` and `config-override.toml` on first boot.
 
 ---
 

@@ -26,6 +26,9 @@ public:
     std::vector<std::string> get_configured_ssids() const;
     std::set<std::string> scan_networks();
 
+    static const char* error_to_string(int err);
+    static const char* link_status_to_string(int status);
+
 private:
     bool attempt_connect(const std::string& ssid, const std::string& password);
     static int scan_result_cb(void* env, const struct _cyw43_ev_scan_result_t* result);

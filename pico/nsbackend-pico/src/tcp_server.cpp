@@ -24,7 +24,9 @@ TcpServer::TcpServer(int port, ControllerState& controller, StatusLed& led, bool
       log_enabled_(log_enabled),
       enable_echo_(enable_echo),
       task_handle_(nullptr),
-      running_(false) {}
+      running_(false),
+      listening_(false),
+      listen_sock_(-1) {}
 
 TcpServer::~TcpServer() {
     stop();
@@ -33,10 +35,12 @@ TcpServer::~TcpServer() {
 bool TcpServer::start() {
     stop();
     running_ = true;
+    listening_ = false;
 
-    BaseType_t res = xTaskCreate(task_entry, "tcp_server_task", 4096, this, tskIDLE_PRIORITY + 3, &task_handle_);
+    BaseType_t res = xTaskCreate(task_entry, "tcp_server_task", 2048, this, tskIDLE_PRIORITY + 3, &task_handle_);
     if (res != pdPASS) {
-        LOG_E(TAG, "Failed to create TCP server task");
+        LOG_E(TAG, "Failed to create TCP server task (res=%d, free_heap=%u)",
+              static_cast<int>(res), static_cast<unsigned>(xPortGetFreeHeapSize()));
         return false;
     }
 
@@ -46,6 +50,11 @@ bool TcpServer::start() {
 
 void TcpServer::stop() {
     running_ = false;
+    listening_ = false;
+    int sock = listen_sock_.exchange(-1);
+    if (sock >= 0) {
+        closesocket(sock);
+    }
     if (task_handle_ != nullptr) {
         vTaskDelete(task_handle_);
         task_handle_ = nullptr;
@@ -57,30 +66,34 @@ void TcpServer::task_entry(void* arg) {
 }
 
 void TcpServer::run_server() {
+    LOG_I(TAG, "run_server: initializing TCP socket...");
     struct sockaddr_in dest_addr = {};
-    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr.sin_len = sizeof(dest_addr);
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(port_);
+    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    int listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sock < 0) {
         LOG_E(TAG, "Unable to create socket: errno %d", errno);
         vTaskDelete(nullptr);
         return;
     }
+    LOG_I(TAG, "run_server: socket %d created, binding to port %d...", listen_sock, port_);
 
     int opt = 1;
     setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     int err = bind(listen_sock, reinterpret_cast<struct sockaddr*>(&dest_addr), sizeof(dest_addr));
     if (err != 0) {
-        LOG_E(TAG, "Socket unable to bind: errno %d", errno);
+        LOG_E(TAG, "Socket unable to bind to port %d: errno %d", port_, errno);
         closesocket(listen_sock);
         vTaskDelete(nullptr);
         return;
     }
+    LOG_I(TAG, "run_server: bound to port %d, listening...", port_);
 
-    err = listen(listen_sock, 1);
+    err = listen(listen_sock, 2);
     if (err != 0) {
         LOG_E(TAG, "Error occurred during listen: errno %d", errno);
         closesocket(listen_sock);
@@ -88,20 +101,20 @@ void TcpServer::run_server() {
         return;
     }
 
+    listen_sock_.store(listen_sock);
+    listening_ = true;
     LOG_I(TAG, "TCP Server listening on port %d...", port_);
 
     while (running_) {
         struct sockaddr_in source_addr = {};
         socklen_t addr_len = sizeof(source_addr);
 
-        // Set listen socket timeout for periodic auto-release checking
-        struct timeval tv = { .tv_sec = 0, .tv_usec = 50000 };
-        setsockopt(listen_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
         int client_sock = accept(listen_sock, reinterpret_cast<struct sockaddr*>(&source_addr), &addr_len);
         if (client_sock < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT) {
-                controller_.check_scheduled();
+            if (!running_) {
+                break;
+            }
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
             LOG_W(TAG, "Unable to accept connection: errno %d", errno);
@@ -121,7 +134,11 @@ void TcpServer::run_server() {
         led_.set_state(LedState::WAITING_CLIENT);
     }
 
-    closesocket(listen_sock);
+    int sock = listen_sock_.exchange(-1);
+    if (sock >= 0) {
+        closesocket(sock);
+    }
+    listening_ = false;
     vTaskDelete(nullptr);
 }
 

@@ -4,9 +4,11 @@
  */
 
 #include <cstdio>
+#include <cstring>
 #include "pico/stdlib.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "tusb.h"
 
 #include "config_manager.hpp"
 #include "status_led.hpp"
@@ -101,8 +103,11 @@ static void supervisor_task(void* param) {
     mdns.init(hostname, tcp_port);
 
     // 8. Start TCP Command Server
+    LOG_I(TAG, "Initializing TCP Server on port %d...", tcp_port);
     TcpServer tcp_server(tcp_port, controller, status_led, log_enabled, enable_echo);
-    tcp_server.start();
+    if (!tcp_server.start()) {
+        LOG_E(TAG, "Failed to start TCP command server on port %d!", tcp_port);
+    }
 
     status_led.set_state(LedState::WAITING_CLIENT);
     LOG_I(TAG, "nsbackend-pico running. Hostname: %s.local:%d", hostname.c_str(), tcp_port);
@@ -116,6 +121,9 @@ static void supervisor_task(void* param) {
             if (wifi.is_connected()) {
                 status_led.set_state(LedState::SETTING_UP_TCP);
                 mdns.init(hostname, tcp_port);
+                if (!tcp_server.is_listening()) {
+                    tcp_server.start();
+                }
                 status_led.set_state(LedState::WAITING_CLIENT);
             }
         }
@@ -128,6 +136,34 @@ static void supervisor_task(void* param) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 #endif
+}
+
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
+    (void)xTask;
+    std::printf("\n[E][FreeRTOS] Stack overflow in task: %s\n", pcTaskName ? pcTaskName : "unknown");
+    if (tud_mounted()) {
+        tud_cdc_n_write(0, "\r\n[E][FreeRTOS] Stack overflow in task: ", 40);
+        if (pcTaskName != nullptr) {
+            tud_cdc_n_write(0, pcTaskName, static_cast<uint32_t>(std::strlen(pcTaskName)));
+        }
+        tud_cdc_n_write(0, "\r\n", 2);
+        tud_cdc_n_write_flush(0);
+    }
+    while (true) {
+        tight_loop_contents();
+    }
+}
+
+extern "C" void vApplicationMallocFailedHook(void) {
+    std::printf("\n[E][FreeRTOS] Heap allocation failed! Free heap: %u bytes\n",
+                static_cast<unsigned>(xPortGetFreeHeapSize()));
+    if (tud_mounted()) {
+        tud_cdc_n_write(0, "\r\n[E][FreeRTOS] Heap allocation failed!\r\n", 41);
+        tud_cdc_n_write_flush(0);
+    }
+    while (true) {
+        tight_loop_contents();
+    }
 }
 
 int main() {

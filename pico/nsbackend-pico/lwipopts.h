@@ -16,9 +16,16 @@
 #define TCPIP_THREAD_PRIO               (configMAX_PRIORITIES - 2)
 #define TCPIP_THREAD_STACKSIZE          2048
 #define DEFAULT_THREAD_STACKSIZE        1024
+#define LWIP_FREERTOS_THREAD_STACKSIZE_IS_STACKWORDS 1
+
+// Mailbox Queue Sizes for OS sockets and netconn
 #define DEFAULT_RAW_RECVMBOX_SIZE       8
-#define TCPIP_MBOX_SIZE                 8
+#define DEFAULT_UDP_RECVMBOX_SIZE       8
+#define DEFAULT_TCP_RECVMBOX_SIZE       8
+#define DEFAULT_ACCEPTMBOX_SIZE         8
+#define TCPIP_MBOX_SIZE                 32
 #define LWIP_TIMEVAL_PRIVATE            0
+#define LWIP_ERRNO_STDINCLUDE           1
 
 // Socket Options
 #define LWIP_SO_RCVTIMEO                1
@@ -38,10 +45,10 @@
 #define MEMP_NUM_SYS_TIMEOUT            16
 #define MEMP_NUM_NETBUF                 8
 #define MEMP_NUM_NETCONN                8
-#define MEMP_NUM_TCPIP_MSG_API          8
-#define MEMP_NUM_TCPIP_MSG_INPKT        8
+#define MEMP_NUM_TCPIP_MSG_API          16
+#define MEMP_NUM_TCPIP_MSG_INPKT        32
 
-#define PBUF_POOL_SIZE                  24
+#define PBUF_POOL_SIZE                  32
 #define PBUF_POOL_BUFSIZE               1536
 
 // Protocols

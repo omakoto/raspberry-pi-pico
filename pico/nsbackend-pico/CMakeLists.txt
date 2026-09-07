@@ -49,6 +49,15 @@ else()
     message(STATUS "Building nsbackend-pico without Wi-Fi support for board: ${PICO_BOARD}")
 endif()
 
+# Setup FatFs with custom configuration
+set(FATFS_DIR "${CMAKE_CURRENT_BINARY_DIR}/fatfs")
+file(MAKE_DIRECTORY "${FATFS_DIR}")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/ffconf.h" "${FATFS_DIR}/ffconf.h" COPYONLY)
+configure_file("${PICO_SDK_PATH}/lib/tinyusb/lib/fatfs/source/ff.c" "${FATFS_DIR}/ff.c" COPYONLY)
+configure_file("${PICO_SDK_PATH}/lib/tinyusb/lib/fatfs/source/ff.h" "${FATFS_DIR}/ff.h" COPYONLY)
+configure_file("${PICO_SDK_PATH}/lib/tinyusb/lib/fatfs/source/ffunicode.c" "${FATFS_DIR}/ffunicode.c" COPYONLY)
+configure_file("${PICO_SDK_PATH}/lib/tinyusb/lib/fatfs/source/diskio.h" "${FATFS_DIR}/diskio.h" COPYONLY)
+
 set(APP_SOURCES
     src/main.cpp
     src/flash_fatfs.cpp
@@ -60,8 +69,8 @@ set(APP_SOURCES
     src/status_led.cpp
     src/dual_logger.cpp
     src/serial_command_server.cpp
-    ${PICO_SDK_PATH}/lib/tinyusb/lib/fatfs/source/ff.c
-    ${PICO_SDK_PATH}/lib/tinyusb/lib/fatfs/source/ffunicode.c
+    ${FATFS_DIR}/ff.c
+    ${FATFS_DIR}/ffunicode.c
 )
 
 if(NSBACKEND_HAS_WIFI)
@@ -81,10 +90,20 @@ target_compile_definitions(nsbackend-pico PRIVATE
     NSBACKEND_HAS_WIFI=${NSBACKEND_HAS_WIFI}
 )
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_fat_image.py
+        --input_dir ${CMAKE_CURRENT_SOURCE_DIR}/fatfs_data
+        --header_file ${CMAKE_CURRENT_BINARY_DIR}/generated/default_configs.hpp
+    RESULT_VARIABLE CONFIG_GEN_RES
+)
+
 target_include_directories(nsbackend-pico PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${PICO_SDK_PATH}/lib/tinyusb/lib/fatfs/source
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+    ${FATFS_DIR}
 )
 
 target_link_libraries(nsbackend-pico PRIVATE
@@ -113,15 +132,26 @@ pico_enable_stdio_usb(nsbackend-pico 0)
 pico_add_extra_outputs(nsbackend-pico)
 
 # Target to generate storage.bin and storage.uf2
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_custom_target(storage
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_fat_image.py
         --input_dir ${CMAKE_CURRENT_SOURCE_DIR}/fatfs_data
         --output_file ${CMAKE_BINARY_DIR}/storage.bin
         --uf2_file ${CMAKE_BINARY_DIR}/storage.uf2
         --uf2_offset 0x10100000
-    COMMENT "Generating 1MB FAT partition image storage.bin and storage.uf2"
+        --header_file ${CMAKE_CURRENT_BINARY_DIR}/generated/default_configs.hpp
+    COMMENT "Generating 1MB FAT partition image storage.bin, storage.uf2, and default_configs.hpp"
     VERBATIM
 )
 
 add_dependencies(nsbackend-pico storage)
+
+# Merge firmware UF2 and FAT storage UF2 into single combined nsbackend-pico.uf2
+add_custom_command(TARGET nsbackend-pico POST_BUILD
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_fat_image.py
+        --combine_uf2
+        --firmware_uf2 ${CMAKE_BINARY_DIR}/nsbackend-pico.uf2
+        --storage_uf2 ${CMAKE_BINARY_DIR}/storage.uf2
+        --output_uf2 ${CMAKE_BINARY_DIR}/nsbackend-pico.uf2
+    COMMENT "Combining firmware and FAT storage partition into single nsbackend-pico.uf2"
+    VERBATIM
+)

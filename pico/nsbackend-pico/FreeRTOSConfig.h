@@ -30,13 +30,19 @@
 
 #define configSUPPORT_STATIC_ALLOCATION         0
 #define configSUPPORT_DYNAMIC_ALLOCATION        1
-#define configTOTAL_HEAP_SIZE                   ((size_t)(128 * 1024))
+#if defined(PICO_RP2350) && PICO_RP2350
+// RP2350 provides 520KB SRAM; 320KB provides ample memory for network buffers and tasks
+#define configTOTAL_HEAP_SIZE                   ((size_t)(320 * 1024))
+#else
+// RP2040 provides 264KB SRAM; allocate 160KB for FreeRTOS tasks and network buffers
+#define configTOTAL_HEAP_SIZE                   ((size_t)(160 * 1024))
+#endif
 #define configAPPLICATION_ALLOCATED_HEAP        0
 
 #define configUSE_IDLE_HOOK                     0
 #define configUSE_TICK_HOOK                     0
-#define configCHECK_FOR_STACK_OVERFLOW          0
-#define configUSE_MALLOC_FAILED_HOOK            0
+#define configCHECK_FOR_STACK_OVERFLOW          2
+#define configUSE_MALLOC_FAILED_HOOK            1
 #define configUSE_DAEMON_TASK_STARTUP_HOOK      0
 
 #define configUSE_TIMERS                        1
@@ -46,6 +52,7 @@
 
 // SMP / RP2040 / RP2350 specific
 #define configNUMBER_OF_CORES                   2
+#define configTICK_CORE                         0
 #define configUSE_CORE_AFFINITY                 1
 #define configUSE_PASSIVE_IDLE_HOOK             0
 #define portTICK_RATE_MS                        portTICK_PERIOD_MS

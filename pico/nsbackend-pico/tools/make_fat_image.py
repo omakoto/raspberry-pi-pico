@@ -199,14 +199,26 @@ def generate_fat_fallback(
     return True
 
 
+def find_picotool() -> Optional[str]:
+    """Finds picotool executable in PATH or build directories."""
+    picotool_bin: Optional[str] = shutil.which("picotool")
+    if picotool_bin:
+        return picotool_bin
+
+    home_local: str = os.path.expanduser("~/.local/bin/picotool")
+    if os.path.isfile(home_local) and os.access(home_local, os.X_OK):
+        return home_local
+
+    build_picotool: str = os.path.abspath("build/_deps/picotool-build/picotool")
+    if os.path.isfile(build_picotool) and os.access(build_picotool, os.X_OK):
+        return build_picotool
+
+    return None
+
+
 def convert_to_uf2(bin_path: str, uf2_path: str, offset: str = "0x10100000") -> bool:
     """Converts a raw binary image to UF2 format using picotool."""
-    picotool_bin: Optional[str] = shutil.which("picotool")
-    if not picotool_bin:
-        home_local: str = os.path.expanduser("~/.local/bin/picotool")
-        if os.path.isfile(home_local):
-            picotool_bin = home_local
-
+    picotool_bin: Optional[str] = find_picotool()
     if not picotool_bin:
         print("Warning: picotool not found. Cannot convert to UF2.", file=sys.stderr)
         return False
@@ -217,16 +229,126 @@ def convert_to_uf2(bin_path: str, uf2_path: str, offset: str = "0x10100000") -> 
     return res.returncode == 0
 
 
+def generate_header(input_dir: str, header_file: str) -> bool:
+    """Generates a C++ header containing default config strings."""
+    config_path: str = os.path.join(input_dir, "config.toml")
+    override_path: str = os.path.join(input_dir, "config-override.toml")
+
+    config_content: str = ""
+    if os.path.isfile(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_content = f.read()
+
+    override_content: str = ""
+    if os.path.isfile(override_path):
+        with open(override_path, "r", encoding="utf-8") as f:
+            override_content = f.read()
+
+    os.makedirs(os.path.dirname(os.path.abspath(header_file)), exist_ok=True)
+    with open(header_file, "w", encoding="utf-8") as f:
+        f.write("/*\n * Automatically generated default configuration header.\n */\n\n")
+        f.write("#pragma once\n\n")
+        f.write("#include <string_view>\n\n")
+        f.write("namespace DefaultConfig {\n")
+        f.write('constexpr std::string_view CONFIG_TOML = R"DEFAULT_CONFIG(' + "\n")
+        f.write(config_content)
+        if not config_content.endswith("\n"):
+            f.write("\n")
+        f.write(')DEFAULT_CONFIG";\n\n')
+        f.write('constexpr std::string_view CONFIG_OVERRIDE_TOML = R"DEFAULT_OVERRIDE(' + "\n")
+        f.write(override_content)
+        if not override_content.endswith("\n"):
+            f.write("\n")
+        f.write(')DEFAULT_OVERRIDE";\n')
+        f.write("} // namespace DefaultConfig\n")
+    print(f"Generated default configs header: {header_file}")
+    return True
+
+
+def combine_uf2_files(firmware_uf2: str, storage_uf2: str, output_uf2: str) -> bool:
+    """Combines firmware UF2 and storage UF2 into a single combined UF2 file."""
+    picotool_bin: Optional[str] = find_picotool()
+    if picotool_bin:
+        temp_out: str = output_uf2 + ".tmp.uf2"
+        cmd: List[str] = [picotool_bin, "uf2", "combine", firmware_uf2, storage_uf2, temp_out]
+        print(f"Combining UF2 files using picotool: {' '.join(cmd)}")
+        res = subprocess.run(cmd, check=False)
+        if res.returncode == 0:
+            shutil.move(temp_out, output_uf2)
+            print(f"Combined UF2 generated: {output_uf2} ({os.path.getsize(output_uf2)} bytes)")
+            return True
+
+    # Fallback pure-Python UF2 combiner
+    print("Using Python fallback UF2 combiner...")
+    try:
+        with open(firmware_uf2, "rb") as f1, open(storage_uf2, "rb") as f2:
+            blocks1: List[bytes] = [f1.read(512) for _ in range(os.path.getsize(firmware_uf2) // 512)]
+            blocks2: List[bytes] = [f2.read(512) for _ in range(os.path.getsize(storage_uf2) // 512)]
+
+        total_blocks: int = len(blocks1) + len(blocks2)
+        all_blocks: List[bytes] = []
+
+        family_id: int = 0
+        if blocks1 and len(blocks1[0]) == 512:
+            flags: int = struct.unpack_from("<I", blocks1[0], 8)[0]
+            if flags & 0x2000:
+                family_id = struct.unpack_from("<I", blocks1[0], 28)[0]
+
+        for idx, block in enumerate(blocks1):
+            b = bytearray(block)
+            struct.pack_into("<I", b, 20, idx)
+            struct.pack_into("<I", b, 24, total_blocks)
+            all_blocks.append(bytes(b))
+
+        for idx, block in enumerate(blocks2):
+            b = bytearray(block)
+            struct.pack_into("<I", b, 20, len(blocks1) + idx)
+            struct.pack_into("<I", b, 24, total_blocks)
+            if family_id != 0:
+                flags = struct.unpack_from("<I", b, 8)[0] | 0x2000
+                struct.pack_into("<I", b, 8, flags)
+                struct.pack_into("<I", b, 28, family_id)
+            all_blocks.append(bytes(b))
+
+        temp_out = output_uf2 + ".combined.tmp"
+        with open(temp_out, "wb") as f_out:
+            for blk in all_blocks:
+                f_out.write(blk)
+        shutil.move(temp_out, output_uf2)
+        print(f"Combined UF2 generated (fallback): {output_uf2} ({os.path.getsize(output_uf2)} bytes)")
+        return True
+    except Exception as e:
+        print(f"Failed to combine UF2 files: {e}", file=sys.stderr)
+        return False
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Create FAT filesystem binary and UF2 image.")
-    parser.add_argument("--input_dir", type=str, required=True, help="Input directory containing files")
-    parser.add_argument("--output_file", type=str, required=True, help="Output FAT binary image file")
+    parser = argparse.ArgumentParser(description="Create FAT filesystem binary, header, and UF2 image.")
+    parser.add_argument("--input_dir", type=str, default="", help="Input directory containing files")
+    parser.add_argument("--output_file", type=str, default="", help="Output FAT binary image file")
     parser.add_argument("--partition_size", type=int, default=1048576, help="Partition size in bytes (default: 1MB)")
     parser.add_argument("--sector_size", type=int, default=512, help="Sector size in bytes (default: 512)")
     parser.add_argument("--uf2_file", type=str, default="", help="Optional output UF2 file")
     parser.add_argument("--uf2_offset", type=str, default="0x10100000", help="Load offset for UF2 (default: 0x10100000)")
+    parser.add_argument("--header_file", type=str, default="", help="Optional C++ header file for default configs")
+    parser.add_argument("--combine_uf2", action="store_true", help="Combine firmware UF2 and storage UF2")
+    parser.add_argument("--firmware_uf2", type=str, default="", help="Firmware UF2 input path")
+    parser.add_argument("--storage_uf2", type=str, default="", help="Storage UF2 input path")
+    parser.add_argument("--output_uf2", type=str, default="", help="Combined UF2 output path")
 
     args = parser.parse_args()
+
+    if args.combine_uf2:
+        if not args.firmware_uf2 or not args.storage_uf2 or not args.output_uf2:
+            print("Error: --combine_uf2 requires --firmware_uf2, --storage_uf2, and --output_uf2", file=sys.stderr)
+            return 1
+        return 0 if combine_uf2_files(args.firmware_uf2, args.storage_uf2, args.output_uf2) else 1
+
+    if args.header_file and args.input_dir:
+        generate_header(args.input_dir, args.header_file)
+
+    if not args.output_file:
+        return 0
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output_file)), exist_ok=True)
 
@@ -234,12 +356,12 @@ def main() -> int:
     fatfsgen_path: Optional[str] = find_fatfsgen_script()
 
     success: bool = False
-    if py_bin and fatfsgen_path:
+    if py_bin and fatfsgen_path and args.input_dir:
         success = generate_fat_via_fatfsgen(
             py_bin, fatfsgen_path, args.input_dir, args.output_file, args.partition_size, args.sector_size
         )
 
-    if not success:
+    if not success and args.input_dir:
         print("Using fallback FAT generator...")
         success = generate_fat_fallback(args.input_dir, args.output_file, args.partition_size)
 

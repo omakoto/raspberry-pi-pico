@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include "pico/stdlib.h"
+#include "pico/error.h"
 #include "pico/cyw43_arch.h"
 #include "cyw43.h"
 #include "cyw43_ll.h"
@@ -46,7 +47,6 @@ int WifiManager::scan_result_cb(void* env, const struct _cyw43_ev_scan_result_t*
         auto* found_set = static_cast<std::set<std::string>*>(env);
         if (result->ssid_len > 0) {
             std::string ssid(reinterpret_cast<const char*>(result->ssid), result->ssid_len);
-            LOG_I(TAG, "  [AP] SSID: '%s', RSSI: %d dBm, Ch: %u", ssid.c_str(), result->rssi, result->channel);
             found_set->insert(ssid);
         }
     }
@@ -92,11 +92,64 @@ std::vector<std::string> WifiManager::get_configured_ssids() const {
     return ssids;
 }
 
+const char* WifiManager::error_to_string(int err) {
+    switch (err) {
+        case PICO_OK:
+            return "Success";
+        case PICO_ERROR_GENERIC:
+            return "Generic error";
+        case PICO_ERROR_TIMEOUT:
+            return "Timed out waiting for AP";
+        case PICO_ERROR_NO_DATA:
+            return "No data";
+        case PICO_ERROR_NOT_PERMITTED:
+            return "Operation not permitted";
+        case PICO_ERROR_INVALID_ARG:
+            return "Invalid argument";
+        case PICO_ERROR_IO:
+            return "Hardware I/O error";
+        case PICO_ERROR_BADAUTH:
+            return "Authentication failed (incorrect password or credentials)";
+        case PICO_ERROR_CONNECT_FAILED:
+            return "Connection failed (handshake failed or rejected by AP)";
+        case PICO_ERROR_INSUFFICIENT_RESOURCES:
+            return "Insufficient resources (out of memory)";
+        case PICO_ERROR_INVALID_STATE:
+            return "Invalid state";
+        case PICO_ERROR_NOT_FOUND:
+            return "Network / SSID not found";
+        default:
+            return "Unknown error";
+    }
+}
+
+const char* WifiManager::link_status_to_string(int status) {
+    switch (status) {
+        case CYW43_LINK_DOWN:
+            return "Link down";
+        case CYW43_LINK_JOIN:
+            return "Joined Wi-Fi";
+        case CYW43_LINK_NOIP:
+            return "Connected, waiting for IP";
+        case CYW43_LINK_UP:
+            return "Link up";
+        case CYW43_LINK_FAIL:
+            return "Connection failed";
+        case CYW43_LINK_NONET:
+            return "SSID not found";
+        case CYW43_LINK_BADAUTH:
+            return "Authentication failed";
+        default:
+            return "Unknown status";
+    }
+}
+
 bool WifiManager::attempt_connect(const std::string& ssid, const std::string& password) {
     LOG_I(TAG, "Connecting to Wi-Fi SSID: '%s' (password length: %u)...", ssid.c_str(), static_cast<unsigned>(password.length()));
 
-    uint32_t auth = password.empty() ? CYW43_AUTH_OPEN : CYW43_AUTH_WPA2_AES_PSK;
-    int ret = cyw43_arch_wifi_connect_timeout_ms(ssid.c_str(), password.c_str(), auth, 10000);
+    // Use mixed WPA2/WPA mode for password networks to maximize AP compatibility
+    uint32_t auth = password.empty() ? CYW43_AUTH_OPEN : CYW43_AUTH_WPA2_MIXED_PSK;
+    int ret = cyw43_arch_wifi_connect_timeout_ms(ssid.c_str(), password.c_str(), auth, 20000);
 
     if (ret == 0) {
         const ip4_addr_t* addr = netif_ip4_addr(&cyw43_state.netif[CYW43_ITF_STA]);
@@ -104,11 +157,15 @@ bool WifiManager::attempt_connect(const std::string& ssid, const std::string& pa
         ip4addr_ntoa_r(addr, ip_str, sizeof(ip_str));
         ip_address_ = ip_str;
         connected_.store(true, std::memory_order_relaxed);
-        LOG_I(TAG, "Connected to Wi-Fi successfully! IP: %s", ip_address_.c_str());
+        // Disable Wi-Fi power saving mode completely to eliminate latency and packet loss
+        cyw43_wifi_pm(&cyw43_state, CYW43_NONE_PM);
+        LOG_I(TAG, "Connected to Wi-Fi successfully! IP: %s (no-power-save PM active)", ip_address_.c_str());
         return true;
     }
 
-    LOG_W(TAG, "Wi-Fi connection to '%s' failed (error %d)", ssid.c_str(), ret);
+    int link_status = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+    LOG_W(TAG, "Wi-Fi connection to '%s' failed: %s (error %d, link: %s)",
+          ssid.c_str(), error_to_string(ret), ret, link_status_to_string(link_status));
     connected_.store(false, std::memory_order_relaxed);
     return false;
 }

@@ -11,6 +11,7 @@
 #include "ff.h"
 #include "flash_fatfs.hpp"
 #include "dual_logger.hpp"
+#include "default_configs.hpp"
 
 static const char* TAG = "Config";
 static FATFS s_fs;
@@ -22,11 +23,71 @@ ConfigManager::~ConfigManager() {}
 bool ConfigManager::init() {
     FRESULT res = f_mount(&s_fs, "0:", 1);
     if (res != FR_OK) {
-        LOG_W(TAG, "Failed to mount FATFS volume (error %d)", res);
-        return false;
+        LOG_W(TAG, "Failed to mount FATFS volume (error %d). Formatting partition...", res);
+        if (!format_and_populate()) {
+            LOG_E(TAG, "Failed to format and initialize FATFS storage partition");
+            return false;
+        }
     }
+
+    // Ensure 0:/config.toml exists on the mounted partition
+    FIL fil;
+    if (f_open(&fil, "0:/config.toml", FA_READ) != FR_OK) {
+        LOG_W(TAG, "0:/config.toml not found on volume. Populating defaults...");
+        if (!populate_default_files()) {
+            LOG_E(TAG, "Failed to write default configuration files");
+            return false;
+        }
+    } else {
+        f_close(&fil);
+    }
+
     initialized_ = true;
     LOG_I(TAG, "FATFS volume mounted successfully on 0:");
+    return true;
+}
+
+bool ConfigManager::format_and_populate() {
+    uint8_t work_buf[512];
+    FRESULT res = f_mkfs("0:", nullptr, work_buf, sizeof(work_buf));
+    if (res != FR_OK) {
+        LOG_E(TAG, "f_mkfs failed on volume 0: (error %d)", res);
+        return false;
+    }
+    res = f_mount(&s_fs, "0:", 1);
+    if (res != FR_OK) {
+        LOG_E(TAG, "f_mount failed after formatting (error %d)", res);
+        return false;
+    }
+    return populate_default_files();
+}
+
+bool ConfigManager::populate_default_files() {
+    FIL fil;
+    UINT bw = 0;
+
+    if (!DefaultConfig::CONFIG_TOML.empty()) {
+        FRESULT res = f_open(&fil, "0:/config.toml", FA_CREATE_ALWAYS | FA_WRITE);
+        if (res == FR_OK) {
+            f_write(&fil, DefaultConfig::CONFIG_TOML.data(), DefaultConfig::CONFIG_TOML.size(), &bw);
+            f_close(&fil);
+            LOG_I(TAG, "Created default 0:/config.toml (%u bytes)", bw);
+        } else {
+            LOG_E(TAG, "Failed to create 0:/config.toml (error %d)", res);
+            return false;
+        }
+    }
+
+    if (!DefaultConfig::CONFIG_OVERRIDE_TOML.empty()) {
+        FRESULT res = f_open(&fil, "0:/config-override.toml", FA_CREATE_ALWAYS | FA_WRITE);
+        if (res == FR_OK) {
+            f_write(&fil, DefaultConfig::CONFIG_OVERRIDE_TOML.data(), DefaultConfig::CONFIG_OVERRIDE_TOML.size(), &bw);
+            f_close(&fil);
+            LOG_I(TAG, "Created default 0:/config-override.toml (%u bytes)", bw);
+        }
+    }
+
+    flash_fatfs_sync();
     return true;
 }
 

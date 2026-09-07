@@ -26,6 +26,9 @@ public:
 
     std::vector<std::pair<std::string, std::string>> get_wifi_ap_list() const;
 
+    bool format_and_populate();
+    bool populate_default_files();
+
 private:
     bool parse_file(const std::string& path);
     static std::string trim(const std::string& s);

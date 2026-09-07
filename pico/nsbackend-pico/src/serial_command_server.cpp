@@ -11,6 +11,13 @@
 #include "hardware/gpio.h"
 #include "tusb.h"
 #include "dual_logger.hpp"
+#include "gamepad_hid.hpp"
+#if defined(NSBACKEND_HAS_WIFI) && NSBACKEND_HAS_WIFI
+#include "pico/cyw43_arch.h"
+#include "cyw43.h"
+#include "lwip/ip4_addr.h"
+#include "wifi_manager.hpp"
+#endif
 
 static const char* TAG = "SerialCmd";
 
@@ -122,12 +129,42 @@ void SerialCommandServer::process_stream(std::string& accum, const char* data, s
             if (enable_echo_) {
                 if (is_cdc && tud_mounted()) {
                     tud_cdc_n_write(0, line.c_str(), static_cast<uint32_t>(line.length()));
-                    tud_cdc_n_write_char(0, '\n');
+                    tud_cdc_n_write(0, "\r\n", 2);
                     tud_cdc_n_write_flush(0);
                 } else if (!is_cdc) {
                     std::printf("%s\n", line.c_str());
                     std::fflush(stdout);
                 }
+            }
+
+            if (line == "reboot bootloader" || line == "bootloader" || line == "bootsel") {
+                dual_println("Rebooting to USB bootloader...");
+                reboot_to_bootsel();
+                continue;
+            }
+
+            if (line == "status" || line == "info" || line == "netstat") {
+#if defined(NSBACKEND_HAS_WIFI) && NSBACKEND_HAS_WIFI
+                const ip4_addr_t* addr = netif_ip4_addr(&cyw43_state.netif[CYW43_ITF_STA]);
+                const ip4_addr_t* mask = netif_ip4_netmask(&cyw43_state.netif[CYW43_ITF_STA]);
+                const ip4_addr_t* gw = netif_ip4_gw(&cyw43_state.netif[CYW43_ITF_STA]);
+                int link = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+                char ip_buf[16] = "0.0.0.0", mask_buf[16] = "0.0.0.0", gw_buf[16] = "0.0.0.0";
+                if (addr) ip4addr_ntoa_r(addr, ip_buf, sizeof(ip_buf));
+                if (mask) ip4addr_ntoa_r(mask, mask_buf, sizeof(mask_buf));
+                if (gw) ip4addr_ntoa_r(gw, gw_buf, sizeof(gw_buf));
+                dual_printf("Wi-Fi: %s (link code %d)\n", WifiManager::link_status_to_string(link), link);
+                dual_printf("IPv4: %s  Mask: %s  GW: %s\n", ip_buf, mask_buf, gw_buf);
+#endif
+                dual_printf("FreeRTOS Heap: %u bytes free (min ever: %u bytes)\n",
+                            static_cast<unsigned>(xPortGetFreeHeapSize()),
+                            static_cast<unsigned>(xPortGetMinimumEverFreeHeapSize()));
+                continue;
+            }
+
+            if (line == "help" || line == "?") {
+                dual_println("Commands: status, info, netstat, bootloader, help, or controller input (e.g. a, b, x, y, h)");
+                continue;
             }
 
             controller_.execute_command(line);

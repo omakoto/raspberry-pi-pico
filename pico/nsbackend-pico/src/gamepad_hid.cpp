@@ -9,6 +9,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "tusb.h"
+#include "pico/bootrom.h"
 #include "dual_logger.hpp"
 
 static const char* TAG = "GamepadHid";
@@ -153,7 +154,19 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     (void)instance; (void)report_id; (void)report_type; (void)buffer; (void)bufsize;
 }
 
+void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* p_line_coding) {
+    if (itf == 0 && p_line_coding->bit_rate == 1200) {
+        reboot_to_bootsel();
+    }
+}
+
 } // extern "C"
+
+static volatile bool s_bootsel_reboot_requested = false;
+
+void reboot_to_bootsel() {
+    s_bootsel_reboot_requested = true;
+}
 
 // ---------------------------------------------------------------------------
 // GamepadHid Class Implementation
@@ -177,6 +190,16 @@ void GamepadHid::usb_task_entry(void* param) {
 void GamepadHid::run_usb_task() {
     while (true) {
         tud_task();
+
+        if (s_bootsel_reboot_requested) {
+            // Allow in-flight USB transactions (such as control ACK or serial echo) to complete
+            vTaskDelay(pdMS_TO_TICKS(50));
+            // Explicitly disconnect USB PHY to inform host before jumping to bootrom
+            tud_disconnect();
+            vTaskDelay(pdMS_TO_TICKS(150));
+            reset_usb_boot(0, 0);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
