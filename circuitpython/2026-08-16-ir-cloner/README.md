@@ -4,13 +4,13 @@ A CircuitPython project that records any infrared remote control signal (NEC, So
 
 ## Hardware Wiring
 
-| Component | Pico Pin | Physical Pin | Description |
-| :--- | :--- | :--- | :--- |
-| **IR Receiver DATA / OUT** | **GP19** | **Pin 25** | Receives & captures incoming IR signals |
-| **IR Blaster DATA / IN** | **GP20** | **Pin 26** | Modulates carrier wave and transmits IR LED pulses |
-| **Trigger Push Button** | **GP17** | **Pin 22** | Press to blast the active cloned signal (Active LOW, internal pull-up) |
-| **Ground Common** | **GND** | **Pin 23 / 28** | Connected to GND of receiver, blaster, and button |
-| **Power Supply** | **3V3 OUT** | **Pin 36** | Power for receiver and blaster (or 5V VBUS on Pin 40 for higher range) |
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **IR Receiver DATA / OUT** | GP19 | `GPIO19` | Pin 25 | Receives & captures incoming IR signals |
+| **IR Blaster DATA / IN** | GP20 | `GPIO20` | Pin 26 | Modulates carrier wave and transmits IR LED pulses |
+| **Trigger Push Button** | GP17 | `GPIO17` | Pin 22 | Active-low, internal pull-up; press to blast the active cloned signal |
+| **3.3V Power** | 3V3(OUT) | `3V3` | Pin 36 | Power for receiver and blaster (or 5V VBUS on Pin 40 for higher range) |
+| **Ground** | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Connected to GND of receiver, blaster, and button |
 
 ---
 

@@ -27,18 +27,18 @@ This project is a high-performance C++ re-implementation of `circuitpython/2026-
 
 #### Pin Connection Table
 
-| USR-ES1 Pin | USR-ES1 Silk | XIAO ESP32-S3 Silk | ESP32-S3 GPIO | Signal Type | Description |
-| :---: | :---: | :---: | :---: | :---: | :--- |
-| **J2-2 / J2-3** | **3.3V / VIN** | **3V3** (Pin 12) | — | Power Input | **+3.3V Power** (requires $\ge 200\text{ mA}$) |
-| **J1-1 / J2-1** | **GND** | **GND** (Pin 13) | — | Power Ground | **Common System Ground** |
-| **J1-4** | **SCLK** | **D8** (Pin 9) | `GPIO7` | SPI Clock | SPI Clock driven by ESP32-S3 (20 MHz) |
-| **J2-6** | **MISO** | **D9** (Pin 10) | `GPIO8` | SPI Data Out | SPI Master In / Slave Out |
-| **J1-3** | **MOSI** | **D10** (Pin 11) | `GPIO9` | SPI Data In | SPI Master Out / Slave In |
-| **J1-5** | **SCSn** | **D3** (Pin 4) | `GPIO4` | SPI Chip Select| Active-LOW SPI Chip Select (CS) |
-| **J2-5** | **RSTn** | **D2** (Pin 3) | `GPIO3` | Control Input | Active-LOW Hardware Reset |
-| **J1-6** | **INTn** | **D1** (Pin 2) | `GPIO2` | Interrupt Out | Active-LOW Hardware Interrupt (or Polling) |
-| **J2-4** | **NC / PWDN**| — | — | Control Input | Leave floating or connect to GND |
-| — | — | **LED** (Onboard) | `GPIO21` | Status Output | Active-LOW Yellow User LED |
+| USR-ES1 Pin | USR-ES1 Silk | Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
+| :---: | :---: | :--- | :---: | :---: | :---: | :--- |
+| **J2-2 / J2-3** | **3.3V / VIN** | **3.3V Power** | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | **+3.3V Power** (requires $\ge 200\text{ mA}$) |
+| **J1-1 / J2-1** | **GND** | **Ground** | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | **Common System Ground** |
+| **J1-4** | **SCLK** | **SPI Clock** | `GPIO7` | Row B, Pin 7 (silk `7`) | `D8` (Pin 9) | SPI Clock driven by ESP32-S3 (20 MHz) |
+| **J2-6** | **MISO** | **SPI Data Out** | `GPIO8` | Row B, Pin 12 (silk `8`) | `D9` (Pin 10) | SPI Master In / Slave Out |
+| **J1-3** | **MOSI** | **SPI Data In** | `GPIO9` | Row B, Pin 15 (silk `9`) | `D10` (Pin 11) | SPI Master Out / Slave In |
+| **J1-5** | **SCSn** | **SPI Chip Select** | `GPIO4` | Row B, Pin 4 (silk `4`) | `D3` (Pin 4) | Active-LOW SPI Chip Select (CS) |
+| **J2-5** | **RSTn** | **Control Input** | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-LOW Hardware Reset |
+| **J1-6** | **INTn** | **Interrupt Out** | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Active-LOW Hardware Interrupt (or Polling) |
+| **J2-4** | **NC / PWDN**| **Control Input** | — | — | — | Leave floating or connect to GND |
+| — | — | **Status LED** | `GPIO21` | Row A, Pin 18 (silk `21`) | Onboard Yellow LED | Active-LOW Yellow User LED |
 
 > [!CAUTION]
 > The USR-ES1 module **does NOT have an onboard 5V regulator**. Connect its power pins (`J2-2` / `J2-3`) strictly to the **3.3V (3V3)** pin of the XIAO ESP32-S3. Never connect 5V or USB VBUS to the module.
@@ -76,32 +76,32 @@ Reference document: [`ref/esp32-s3-devkitc-1.md`](file:///home/omakoto/cbin/src/
 
 This wiring uses GPIO pins that directly match the project's default configuration, so **no changes to `config.toml` are required**:
 
-| USR-ES1 Pin | USR-ES1 Silk | DevKitC-1 Header | Header Pin # | Silk Label | ESP32-S3 GPIO | Description |
-| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **J2-2 / J2-3** | **3.3V** | **Row B** | Pin 1 or 2 | `3V3` | — | 3.3V Power Rail (from onboard LDO) |
-| **J1-1 / J2-1** | **GND** | **Row A / B** | Row B Pin 22 (or Row A Pin 1/21/22) | `G` | — | Common System Ground |
-| **J1-4** | **SCLK** | **Row B** | Pin 7 | `7` | `GPIO7` | SPI Clock (20 MHz) |
-| **J2-6** | **MISO** | **Row B** | Pin 12 | `8` | `GPIO8` | SPI Master In / Slave Out |
-| **J1-3** | **MOSI** | **Row B** | Pin 15 | `9` | `GPIO9` | SPI Master Out / Slave In |
-| **J1-5** | **SCSn** | **Row B** | Pin 4 | `4` | `GPIO4` | Active-LOW SPI Chip Select (CS) |
-| **J2-5** | **RSTn** | **Row B** | Pin 13 | `3` | `GPIO3` | Active-LOW Hardware Reset |
-| **J1-6** | **INTn** | **Row A** | Pin 5 | `2` | `GPIO2` | Active-LOW Hardware Interrupt |
-| **J2-4** | **PWDN** | — | — | — | — | Leave floating or tied to GND |
+| USR-ES1 Pin | USR-ES1 Silk | Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
+| :---: | :---: | :--- | :---: | :---: | :---: | :--- |
+| **J2-2 / J2-3** | **3.3V** | **3.3V Power** | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | 3.3V Power Rail (from onboard LDO) |
+| **J1-1 / J2-1** | **GND** | **Ground** | `GND` | Row B, Pin 22 (or Row A, Pin 1/21/22) (silk `G`) | `GND` (Pin 13) | Common System Ground |
+| **J1-4** | **SCLK** | **SPI Clock** | `GPIO7` | Row B, Pin 7 (silk `7`) | `D8` (Pin 9) | SPI Clock (20 MHz) |
+| **J2-6** | **MISO** | **SPI Data Out** | `GPIO8` | Row B, Pin 12 (silk `8`) | `D9` (Pin 10) | SPI Master In / Slave Out |
+| **J1-3** | **MOSI** | **SPI Data In** | `GPIO9` | Row B, Pin 15 (silk `9`) | `D10` (Pin 11) | SPI Master Out / Slave In |
+| **J1-5** | **SCSn** | **SPI Chip Select** | `GPIO4` | Row B, Pin 4 (silk `4`) | `D3` (Pin 4) | Active-LOW SPI Chip Select (CS) |
+| **J2-5** | **RSTn** | **Control Input** | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-LOW Hardware Reset |
+| **J1-6** | **INTn** | **Interrupt Out** | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Active-LOW Hardware Interrupt |
+| **J2-4** | **PWDN** | **Control Input** | — | — | — | Leave floating or tied to GND |
 
 #### Option B: Dedicated Hardware FSPI Block Pinout
 
 If you prefer using the consecutive FSPI block on **Row B**, configure the pins in `fatfs_data/config.toml`:
 
-| USR-ES1 Pin | Signal | DevKitC-1 Header | Header Pin # | Silk Label | ESP32-S3 GPIO | Notes in `config.toml` |
-| :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **J1-4** | **SCLK** | **Row B** | Pin 18 | `12` | `GPIO12` | `spi_sck = 12` |
-| **J2-6** | **MISO** | **Row B** | Pin 19 | `13` | `GPIO13` | `spi_miso = 13` |
-| **J1-3** | **MOSI** | **Row B** | Pin 17 | `11` | `GPIO11` | `spi_mosi = 11` |
-| **J1-5** | **SCSn** | **Row B** | Pin 16 | `10` | `GPIO10` | `spi_cs = 10` |
-| **J2-5** | **RSTn** | **Row B** | Pin 15 | `9` | `GPIO9` | `spi_reset = 9` |
-| **J1-6** | **INTn** | **Row B** | Pin 13 | `3` | `GPIO3` | `spi_int = 3` |
-| **J2-2 / J2-3** | **3.3V** | **Row B** | Pin 1 or 2 | `3V3` | — | Direct 3.3V supply |
-| **J1-1 / J2-1** | **GND** | **Row B** | Pin 22 | `G` | — | System ground |
+| USR-ES1 Pin | Signal | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Notes in `config.toml` |
+| :---: | :---: | :---: | :---: | :---: | :--- |
+| **J1-4** | **SCLK** | `GPIO12` | Row B, Pin 18 (silk `12`) | — (not on XIAO header) | `spi_sck = 12` |
+| **J2-6** | **MISO** | `GPIO13` | Row B, Pin 19 (silk `13`) | — (not on XIAO header) | `spi_miso = 13` |
+| **J1-3** | **MOSI** | `GPIO11` | Row B, Pin 17 (silk `11`) | — (not on XIAO header) | `spi_mosi = 11` |
+| **J1-5** | **SCSn** | `GPIO10` | Row B, Pin 16 (silk `10`) | — (not on XIAO header) | `spi_cs = 10` |
+| **J2-5** | **RSTn** | `GPIO9` | Row B, Pin 15 (silk `9`) | `D10` (Pin 11) | `spi_reset = 9` |
+| **J1-6** | **INTn** | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | `spi_int = 3` |
+| **J2-2 / J2-3** | **3.3V** | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | Direct 3.3V supply |
+| **J1-1 / J2-1** | **GND** | `GND` | Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | System ground |
 
 ---
 

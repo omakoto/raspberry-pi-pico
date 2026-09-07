@@ -6,12 +6,23 @@ A CircuitPython script to read ambient temperature (°C and °F) and relative hu
 
 ## Hardware Wiring
 
-| Sensor Pin | Function | Raspberry Pi Pico | Seeed Studio XIAO ESP32-S3 | Description |
+### Raspberry Pi Pico (Pico / Pico W / Pico 2 / Pico 2 W)
+
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **VIN / VCC** | Power | **3V3 (Out)** (Pin 36) | **3V3** | 3.3V Power supply |
-| **GND** | Ground | **GND** (Pin 38 / 23) | **GND** | Common ground reference |
-| **SCL** | I2C Clock | **GP11** (Pin 15) | **D5 / IO6** (Pin 6) | I2C SCL line |
-| **SDA** | I2C Data | **GP10** (Pin 14) | **D4 / IO5** (Pin 5) | I2C SDA line |
+| **I2C SCL** (sensor `SCL`) | GP11 | `GPIO11` | Pin 15 | I2C1 clock line |
+| **I2C SDA** (sensor `SDA`) | GP10 | `GPIO10` | Pin 14 | I2C1 data line |
+| **3.3V Power** (sensor `VIN` / `VCC`) | 3V3(OUT) | `3V3` | Pin 36 | 3.3V DC power supply |
+| **Ground** (sensor `GND`) | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common ground reference |
+
+### ESP32-S3
+
+| Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
+| :--- | :---: | :---: | :---: | :--- |
+| **I2C SCL** (sensor `SCL`) | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | Hardware I2C clock line |
+| **I2C SDA** (sensor `SDA`) | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | Hardware I2C data line |
+| **3.3V Power** (sensor `VIN` / `VCC`) | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | 3.3V DC power supply |
+| **Ground** (sensor `GND`) | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | Common ground reference |
 
 > *Note: SHT31 breakout boards typically include built-in 10kΩ pull-up resistors on SDA and SCL.*
 

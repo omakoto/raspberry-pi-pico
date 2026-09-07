@@ -36,12 +36,12 @@ This library provides:
 
 Default I2C pin mapping on Raspberry Pi Pico:
 
-| SSD1306 Pin | Pico Pin | Description |
-| :--- | :--- | :--- |
-| **SCL** | **GP3** (Pin 5) | I2C0 SCL Clock line |
-| **SDA** | **GP2** (Pin 4) | I2C0 SDA Data line |
-| **VCC** / **VDD** | **3V3(OUT)** (Pin 36) | 3.3V Power Supply |
-| **GND** | **GND** (Pin 38 or Pin 3) | Ground |
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **I2C SCL** (display `SCL`) | GP3 | `GPIO3` | Pin 5 | I2C1 clock line |
+| **I2C SDA** (display `SDA`) | GP2 | `GPIO2` | Pin 4 | I2C1 data line |
+| **3.3V Power** (display `VCC` / `VDD`) | 3V3(OUT) | `3V3` | Pin 36 | 3.3V DC power supply |
+| **Ground** (display `GND`) | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common digital ground |
 
 *Default I2C 7-bit Address:* `0x3C` (some modules use `0x3D`).
 

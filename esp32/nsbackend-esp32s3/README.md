@@ -20,22 +20,24 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 
 ---
 
-## 2. Hardware Pinout (Seeed Studio XIAO ESP32-S3)
+## 2. Hardware Pinout
 
-| Pin Name | ESP32-S3 GPIO | Function | Description |
-| :--- | :--- | :--- | :--- |
-| **D0** | `GPIO1` | Button A | Active-low, internal pull-up |
-| **D1** | `GPIO2` | D-pad DOWN | Active-low, internal pull-up |
-| **D2** | `GPIO3` | D-pad LEFT | Active-low, internal pull-up |
-| **D3** | `GPIO4` | D-pad RIGHT | Active-low, internal pull-up |
-| **D4** | `GPIO5` | D-pad UP | Active-low, internal pull-up |
-| **D5** | `GPIO6` | Button B | Active-low, internal pull-up |
-| **D6** | `GPIO43` | UART TX | Hardware UART0 TX (115,200 baud) / Dual serial log |
-| **D7** | `GPIO44` | UART RX | Hardware UART0 RX (115,200 baud) / Serial command input |
-| **D10** | `GPIO9` | Buttons L + R | Simultaneous L and R buttons |
-| **LED** | `GPIO21` | Status LED | Active-low yellow onboard user LED |
-| **USB D-** | `GPIO19` | USB OTG D- | Native USB OTG data negative |
-| **USB D+** | `GPIO20` | USB OTG D+ | Native USB OTG data positive |
+| Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
+| :--- | :---: | :---: | :---: | :--- |
+| **Button A** | `GPIO1` | Row A, Pin 4 (silk `1`) | `D0` (Pin 1) | Active-low, internal pull-up |
+| **D-pad DOWN** | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Active-low, internal pull-up |
+| **D-pad LEFT** | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-low, internal pull-up |
+| **D-pad RIGHT** | `GPIO4` | Row B, Pin 4 (silk `4`) | `D3` (Pin 4) | Active-low, internal pull-up |
+| **D-pad UP** | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | Active-low, internal pull-up |
+| **Button B** | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | Active-low, internal pull-up |
+| **UART0 TX** | `GPIO43` | Row A, Pin 2 (silk `TX`) | `D6` (Pin 7) | Hardware UART0 TX (115,200 baud) / Dual serial log |
+| **UART0 RX** | `GPIO44` | Row A, Pin 3 (silk `RX`) | `D7` (Pin 8) | Hardware UART0 RX (115,200 baud) / Serial command input |
+| **Buttons L + R** | `GPIO9` | Row B, Pin 15 (silk `9`) | `D10` (Pin 11) | Active-low, triggers L and R simultaneously |
+| **Status LED** | `GPIO21` | Row A, Pin 18 (silk `21`) | Onboard Yellow LED | Active-low user indicator |
+| **USB D-** | `GPIO19` | Row A, Pin 20 (silk `19`) | Native USB-C connector | Native USB OTG data negative |
+| **USB D+** | `GPIO20` | Row A, Pin 19 (silk `20`) | Native USB-C connector | Native USB OTG data positive |
+| **3.3V Power** | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | 3.3V DC power rail for external buttons |
+| **Ground** | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | Common digital ground |
 
 ---
 

@@ -6,11 +6,11 @@ Two push buttons act as the **'a'** and **'b'** keys.
 
 ## Hardware Wiring
 
-| Pico Pin | Component | Description |
-| :--- | :--- | :--- |
-| **GP17** (Pin 22) | Push Button 1 | 'a' key (active LOW, internal pull-up) |
-| **GP18** (Pin 24) | Push Button 2 | 'b' key (active LOW, internal pull-up) |
-| **GND** (e.g. Pin 23 or Pin 18) | Button Common | Connected to the other side of both buttons |
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **Push Button 1** | GP17 | `GPIO17` | Pin 22 | Sends the `a` key; active-low, internal pull-up |
+| **Push Button 2** | GP18 | `GPIO18` | Pin 24 | Sends the `b` key; active-low, internal pull-up |
+| **Ground** | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common side of both buttons |
 
 > Note: The script utilizes internal pull-up resistors on GP17 and GP18, so no external pull-up resistors are required. Simply wire each button between its GPIO pin and GND.
 

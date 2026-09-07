@@ -32,13 +32,23 @@ Top view of the 5-pin rotary encoder (shaft facing up):
 
 ## Hardware Wiring
 
-| Encoder Pin | Label | Function | Board Pin (Pico / ESP32) | Description |
+### Raspberry Pi Pico (Pico / Pico W / Pico 2 / Pico 2 W)
+
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **A** | Encoder A | Phase A | **GPIO 1** (e.g. `GP1` / `IO1`) | Quadrature Channel A |
-| **C** | GND | Common Ground | **GND** | Encoder ground reference |
-| **B** | Encoder B | Phase B | **GPIO 2** (e.g. `GP2` / `IO2`) | Quadrature Channel B |
-| **D** | Button | Push Switch | **GPIO 3** (e.g. `GP3` / `IO3`) | Active LOW (internal pull-up enabled) |
-| **E** | GND | Switch Ground | **GND** | Push button ground reference |
+| **Encoder A** (encoder pin `A`) | GP1 | `GPIO1` | Pin 2 | Quadrature Channel A, internal pull-up |
+| **Encoder B** (encoder pin `B`) | GP2 | `GPIO2` | Pin 4 | Quadrature Channel B, internal pull-up |
+| **Push Switch** (encoder pin `D`) | GP3 | `GPIO3` | Pin 5 | Active-low, internal pull-up |
+| **Ground** (encoder pins `C`, `E`) | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Encoder and push-switch ground reference |
+
+### ESP32-S3
+
+| Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
+| :--- | :---: | :---: | :---: | :--- |
+| **Encoder A** (encoder pin `A`) | `GPIO1` | Row A, Pin 4 (silk `1`) | `D0` (Pin 1) | Quadrature Channel A, internal pull-up |
+| **Encoder B** (encoder pin `B`) | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Quadrature Channel B, internal pull-up |
+| **Push Switch** (encoder pin `D`) | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-low, internal pull-up |
+| **Ground** (encoder pins `C`, `E`) | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | Encoder and push-switch ground reference |
 
 > *Note: Internal pull-up resistors (`Pull.UP`) are enabled in software for GPIO 1, 2, and 3, so no external pull-up resistors are required.*
 

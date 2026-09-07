@@ -99,15 +99,19 @@ To provide private credentials (Wi-Fi passwords, private keys, static IP configu
 ### Universal Pinout Compatibility
 To maximize portability between the compact Seeed Studio XIAO ESP32-S3 and the 44-pin ESP32-S3-DevKitC-1, projects use universal GPIO assignments where possible:
 
-| Function | ESP32-S3 GPIO | XIAO ESP32-S3 Silk | DevKitC-1 Silk |
-| :--- | :---: | :---: | :---: |
-| **SPI SCLK** | `GPIO7` | `D8` (Pin 9) | Row B, silk `7` (Pin 7) |
-| **SPI MISO** | `GPIO8` | `D9` (Pin 10) | Row B, silk `8` (Pin 12) |
-| **SPI MOSI** | `GPIO9` | `D10` (Pin 11) | Row B, silk `9` (Pin 15) |
-| **SPI CS** | `GPIO4` | `D3` (Pin 4) | Row B, silk `4` (Pin 4) |
-| **Hardware Reset** | `GPIO3` | `D2` (Pin 3) | Row B, silk `3` (Pin 13) |
-| **Hardware Interrupt** | `GPIO2` | `D1` (Pin 2) | Row A, silk `2` (Pin 5) |
-| **Status LED** | `GPIO21` | Onboard Yellow LED | Row A, silk `21` (Pin 18) |
+| Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
+| :--- | :---: | :---: | :---: | :--- |
+| **SPI SCLK** | `GPIO7` | Row B, Pin 7 (silk `7`) | `D8` (Pin 9) | Serial Clock |
+| **SPI MISO** | `GPIO8` | Row B, Pin 12 (silk `8`) | `D9` (Pin 10) | Master In Slave Out |
+| **SPI MOSI** | `GPIO9` | Row B, Pin 15 (silk `9`) | `D10` (Pin 11) | Master Out Slave In |
+| **SPI CS** | `GPIO4` | Row B, Pin 4 (silk `4`) | `D3` (Pin 4) | Active-low chip select |
+| **Hardware Reset** | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-low peripheral reset |
+| **Hardware Interrupt** | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Active-low peripheral interrupt |
+| **I2C SDA** | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | Hardware I2C data line |
+| **I2C SCL** | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | Hardware I2C clock line |
+| **Status LED** | `GPIO21` | Row A, Pin 18 (silk `21`) | Onboard Yellow LED | Active-low user indicator |
+| **3.3V Power** | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | 3.3V DC power rail |
+| **Ground** | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | Common digital ground |
 
 ### Dual USB Port & Console Handling
 - **`UART` Port (USB-UART Bridge)**: Located on the **Row A** side (near `RESET` button). Uses CP2102N or CH343 chip connected to `GPIO43` (TX) and `GPIO44` (RX). Enumerates as `/dev/ttyUSB*` (or `/dev/ttyACM*`).

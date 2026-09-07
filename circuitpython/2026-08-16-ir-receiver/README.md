@@ -9,11 +9,11 @@ A CircuitPython project that captures raw infrared (IR) pulses and decodes remot
 Depending on whether you have a **bare 3-pin sensor component** (e.g. VS1838B / TSOP38238) or a **3-pin breakout PCB module**:
 
 #### Option A: Breakout PCB Module (with 3 header pins)
-| PCB Label | Pin Name | Pico Pin | Pico Physical Pin |
-| :--- | :--- | :--- | :--- |
-| **`S`** / **`DAT`** / **`OUT`** | Data / Signal Output | **GP19** | **Pin 25** |
-| **`+`** / **`VCC`** | Power (3.3V) | **3V3 OUT** | **Pin 36** |
-| **`-`** / **`GND`** | Ground | **GND** | **Pin 23** or **Pin 28** |
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **IR Data / Signal Output** (PCB `S` / `DAT` / `OUT`) | GP19 | `GPIO19` | Pin 25 | Demodulated IR pulse input, idles HIGH |
+| **3.3V Power** (PCB `+` / `VCC`) | 3V3(OUT) | `3V3` | Pin 36 | 3.3V DC power for the receiver module |
+| **Ground** (PCB `-` / `GND`) | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common digital ground |
 
 #### Option B: Bare 3-Pin Sensor Component (e.g. VS1838B / TL1838 / TSOP38238)
 Hold the sensor with the **dome / rounded lens facing you** and the pins pointing downward:

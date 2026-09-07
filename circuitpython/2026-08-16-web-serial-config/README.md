@@ -8,11 +8,11 @@ The browser UI ([`settings.html`](file:///home/omakoto/cbin/src/raspberry-pi-pic
 
 ## Hardware & Pin Configuration
 
-| Pico Pin | Component / Function | Description |
-| :--- | :--- | :--- |
-| **GP14** (Pin 19) | Storage Mode Switch / Jumper | Controls whether the Pico or Host PC has write access to the filesystem |
-| **GND** (Pin 18 or 23) | Ground | Connected to GP14 to enable Host PC write access |
-| **Onboard LED** | Status Indicator | Blinks according to configured `blink_rate` and `feature_enabled` settings |
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **Storage Mode Switch / Jumper** | GP14 | `GPIO14` | Pin 19 | Tie to GND to hand filesystem write access to the host PC |
+| **Ground** | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common side of the storage mode jumper |
+| **Status LED** | GP25 / CYW43 | Board LED | Onboard | Blinks per the configured `blink_rate` and `feature_enabled` settings |
 
 ---
 

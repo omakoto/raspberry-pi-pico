@@ -8,16 +8,16 @@ A CircuitPython application running a TCP echo server on port `10110` over wired
 
 Connect the USR-ES1 module to the Raspberry Pi Pico using the recommended hardware `SPI0` pinout from [`ref/usr-es1-w5500.md`](file:///home/omakoto/cbin/src/raspberry-pi-pico/ref/usr-es1-w5500.md):
 
-| USR-ES1 Pin | Silk Label | Raspberry Pi Pico Pin | Pico Pin # | Description |
-| :---: | :---: | :---: | :---: | :--- |
-| **J2-2 / J2-3** | **3.3V** | `3V3_OUT` | **Pin 36** | 3.3V Power input (requires $\ge 200\text{ mA}$) |
-| **J1-1 / J2-1** | **GND** | `GND` | **Pin 38 / Pin 23**| System Ground |
-| **J1-3** | **MOSI** | `GP19` (SPI0 TX) | **Pin 25** | SPI Data In (Pico MOSI $\rightarrow$ W5500 MOSI) |
-| **J2-6** | **MISO** | `GP16` (SPI0 RX) | **Pin 21** | SPI Data Out (W5500 MISO $\rightarrow$ Pico MISO) |
-| **J1-4** | **SCLK** | `GP18` (SPI0 SCK)| **Pin 24** | SPI Clock |
-| **J1-5** | **SCSn** | `GP17` (SPI0 CSn)| **Pin 22** | SPI Chip Select (Active LOW) |
-| **J2-5** | **RSTn** | `GP20` | **Pin 26** | Hardware Reset (Active LOW) |
-| **J2-4** | **NC/PWDN**| Floating / Ground| — | Leave unconnected or tied to GND for normal operation |
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **SPI0 MOSI** (USR-ES1 `J1-3`) | GP19 | `GPIO19` | Pin 25 | SPI0 TX (Pico MOSI $\rightarrow$ W5500 MOSI) |
+| **SPI0 MISO** (USR-ES1 `J2-6`) | GP16 | `GPIO16` | Pin 21 | SPI0 RX (W5500 MISO $\rightarrow$ Pico MISO) |
+| **SPI0 SCLK** (USR-ES1 `J1-4`) | GP18 | `GPIO18` | Pin 24 | SPI clock |
+| **SPI0 CSn** (USR-ES1 `J1-5`) | GP17 | `GPIO17` | Pin 22 | Active-low SPI chip select |
+| **Hardware Reset** (USR-ES1 `J2-5`) | GP20 | `GPIO20` | Pin 26 | Active-low W5500 reset |
+| **3.3V Power** (USR-ES1 `J2-2` / `J2-3`) | 3V3(OUT) | `3V3` | Pin 36 | 3.3V power input (requires $\ge 200\text{ mA}$) |
+| **Ground** (USR-ES1 `J1-1` / `J2-1`) | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common system ground |
+| **PWDN / NC** (USR-ES1 `J2-4`) | — | — | — | Leave unconnected or tied to GND for normal operation |
 
 > [!CAUTION]
 > The USR-ES1 module requires a **3.3V** power supply and does **NOT** feature an onboard 5V regulator. Never connect 5V or USB VBUS to the 3.3V pins.
