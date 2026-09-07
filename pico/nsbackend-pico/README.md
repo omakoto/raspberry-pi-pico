@@ -171,7 +171,18 @@ Sample `config.toml`:
 ```toml
 hostname = "nscon"
 tcp_port = 10100
+log = true
 enable_echo = true
+led_active_low = false
+
+# Primary Wi-Fi Access Point (Index 0)
+# 'wifi_ssid0' and 'wifi_password0' are also accepted as aliases for index 0.
+wifi_ssid = "MyHomeNetwork"
+wifi_password = "SecretPassword123"
+
+# Fallback Wi-Fi Access Points (Indices 1 to 9)
+wifi_ssid1 = "MobileHotspot"
+wifi_password1 = "BackupPassword456"
 
 # I2C Matrix Keypad (PCF8574 / PCF8574A)
 i2c_keypad_enabled = true
@@ -181,14 +192,6 @@ i2c_address = 0x20
 i2c_reverse_row = true
 i2c_reverse_col = true
 i2c_debounce_ms = 20
-
-[[ap]]
-ssid = "MyHomeNetwork"
-password = "SecretPassword123"
-
-[[ap]]
-ssid = "MobileHotspot"
-password = "BackupPassword456"
 ```
 
 ---

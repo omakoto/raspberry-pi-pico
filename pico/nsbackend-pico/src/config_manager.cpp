@@ -213,22 +213,37 @@ bool ConfigManager::get_bool(const std::string& key, bool default_val) const {
 std::vector<std::pair<std::string, std::string>> ConfigManager::get_wifi_ap_list() const {
     std::vector<std::pair<std::string, std::string>> ap_list;
 
+    // Primary AP: checks wifi_ssid, accepting wifi_ssid0 or wifi_ssdi0 as aliases
     std::string ssid0 = get_string("wifi_ssid");
-    if (ssid0.empty()) {
-        ssid0 = get_string("wifi_ssid0");
-    }
     std::string pass0 = get_string("wifi_password");
-    if (pass0.empty()) {
-        pass0 = get_string("wifi_password0");
+
+    std::string alt_ssid0 = get_string("wifi_ssid0");
+    if (alt_ssid0.empty()) {
+        alt_ssid0 = get_string("wifi_ssdi0");
     }
-    if (!ssid0.empty()) {
-        ap_list.emplace_back(ssid0, pass0);
+    std::string alt_pass0 = get_string("wifi_password0");
+    if (alt_pass0.empty()) {
+        alt_pass0 = get_string("wifi_password");
     }
 
+    if (!ssid0.empty()) {
+        ap_list.emplace_back(ssid0, pass0);
+        // If wifi_ssid0 is also specified with a different SSID, include it as an additional AP
+        if (!alt_ssid0.empty() && alt_ssid0 != ssid0) {
+            ap_list.emplace_back(alt_ssid0, alt_pass0);
+        }
+    } else if (!alt_ssid0.empty()) {
+        ap_list.emplace_back(alt_ssid0, alt_pass0);
+    }
+
+    // Fallback APs (indices 1 through 9)
     for (int i = 1; i <= 9; ++i) {
         std::string ssid_key = "wifi_ssid" + std::to_string(i);
         std::string pass_key = "wifi_password" + std::to_string(i);
         std::string ssid = get_string(ssid_key);
+        if (ssid.empty()) {
+            ssid = get_string("wifi_ssdi" + std::to_string(i));
+        }
         std::string pass = get_string(pass_key);
         if (!ssid.empty()) {
             ap_list.emplace_back(ssid, pass);
