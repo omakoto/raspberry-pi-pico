@@ -11,9 +11,14 @@ spi_mosi  = 9    # XIAO: D10 (Pin 11)| DevKitC-1: Row B, silk '9' (Pin 15)
 spi_miso  = 8    # XIAO: D9 (Pin 10) | DevKitC-1: Row B, silk '8' (Pin 12)
 spi_cs    = 4    # XIAO: D3 (Pin 4)  | DevKitC-1: Row B, silk '4' (Pin 4)
 spi_reset = -1   # -1 if RSTn is unconnected (or 3 for DevKitC-1 Row B silk '3')
-spi_int   = -1   # -1 for polling mode (recommended); set to 2 for interrupt mode (requires USR-ES1 INTn wired to GPIO2)
-poll_period_ms = 2 # Polling interval in ms when spi_int = -1 (1-5 ms)
+spi_int   = 2    # INTn GPIO (interrupt mode); set to -1 to fall back to SPI polling
+poll_period_ms = 2 # Polling interval in ms, used only when spi_int = -1 (1-5 ms)
 spi_speed_mhz  = 25 # SPI clock speed in MHz (14, 20, 25, 33 supported; default: 25)
+
+# Logs how long INTn is left asserted, every 10 s. A healthy receive path clears the line
+# within a few ms; times approaching 1000000 us mean interrupts are being missed and the
+# link is only limping along on the MAC task's one-second fallback.
+int_diag = false
 
 # Alternative DevKitC-1 Dedicated FSPI Pinout (uncomment to use):
 # spi_sck   = 12   # DevKitC-1: Row B, silk '12' (Pin 18)

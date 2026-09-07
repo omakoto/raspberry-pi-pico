@@ -5,8 +5,53 @@
 #include "esp_event.h"
 #include "driver/spi_master.h"
 #include "esp_eth_mac_spi.h"
+#include "esp_timer.h"
 
 static const char* TAG = "W5500Driver";
+
+namespace {
+
+// Samples the W5500 INTn line and periodically reports the longest time it was left
+// asserted. The W5500 holds INTn LOW until the driver reads and clears the socket
+// interrupt register, so this measures how promptly the receive path is being serviced,
+// independently of any network-level measurement.
+//
+// A healthy link clears the line within a few milliseconds. ESP-IDF's MAC receive task
+// also wakes on a one-second timeout as a safety net, so assert times approaching one
+// second would indicate interrupts are being missed and the link is only limping along
+// on that fallback.
+void w5500_int_diag_task(void* arg) {
+    const auto pin = static_cast<gpio_num_t>(reinterpret_cast<intptr_t>(arg));
+    int64_t asserted_since_us = 0;
+    int64_t worst_low_us = 0;
+    uint32_t assertions = 0;
+    int64_t last_report_us = esp_timer_get_time();
+
+    while (true) {
+        const int64_t now_us = esp_timer_get_time();
+        if (gpio_get_level(pin) == 0) {
+            if (asserted_since_us == 0) {
+                asserted_since_us = now_us;
+                assertions++;
+            } else if (now_us - asserted_since_us > worst_low_us) {
+                worst_low_us = now_us - asserted_since_us;
+            }
+        } else {
+            asserted_since_us = 0;
+        }
+
+        if (now_us - last_report_us >= 10000000) {
+            last_report_us = now_us;
+            ESP_LOGI(TAG, "INTn diag: %lu assertions, longest assert %lld us",
+                     static_cast<unsigned long>(assertions), worst_low_us);
+            assertions = 0;
+            worst_low_us = 0;
+        }
+        vTaskDelay(1);
+    }
+}
+
+}  // namespace
 
 static bool parse_mac(const std::string& mac_str, uint8_t mac_out[6]) {
     unsigned int bytes[6];
@@ -108,18 +153,28 @@ bool W5500Driver::init(const W5500Config& config, StatusLed* status_led, IpCallb
 
     // 4. Configure W5500 MAC
     eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(SPI2_HOST, &devcfg);
-    if (config_.int_pin >= 0) {
-        ESP_LOGI(TAG, "Configuring W5500 in Interrupt mode on GPIO %d", config_.int_pin);
+    bool use_interrupt = config_.int_pin >= 0;
+    if (use_interrupt) {
         esp_err_t isr_err = gpio_install_isr_service(0);
-        if (isr_err == ESP_OK) {
-            isr_installed_ = true;
-        } else if (isr_err == ESP_ERR_INVALID_STATE) {
-            // Already installed by system or earlier component
+        if (isr_err == ESP_OK || isr_err == ESP_ERR_INVALID_STATE) {
+            // ESP_ERR_INVALID_STATE means the service is already up, installed by the
+            // system or an earlier component, which is equally usable here.
             isr_installed_ = true;
         } else {
-            ESP_LOGW(TAG, "gpio_install_isr_service returned: %s", esp_err_to_name(isr_err));
+            // The MAC registers its INTn handler during esp_eth_driver_install(), which
+            // needs this service; without it the driver install fails and the board comes
+            // up with no network at all. Polling is slower but keeps the link working, so
+            // prefer it over losing connectivity entirely.
+            ESP_LOGW(TAG, "gpio_install_isr_service failed (%s); falling back to polling mode",
+                     esp_err_to_name(isr_err));
+            use_interrupt = false;
         }
+    }
+
+    if (use_interrupt) {
+        ESP_LOGI(TAG, "Configuring W5500 in Interrupt mode on GPIO %d", config_.int_pin);
         w5500_config.int_gpio_num = config_.int_pin;
+        // ESP-IDF requires exactly one of int_gpio_num / poll_period_ms to be active.
         w5500_config.poll_period_ms = 0;
     } else {
         uint32_t poll_ms = (config_.poll_period_ms > 0) ? config_.poll_period_ms : 5;
@@ -165,6 +220,14 @@ bool W5500Driver::init(const W5500Config& config, StatusLed* status_led, IpCallb
         } else {
             ESP_LOGW(TAG, "Failed to set custom MAC address: %s", esp_err_to_name(err));
         }
+    }
+
+    // esp_eth_driver_install() runs the MAC's init(), which is where INTn is configured,
+    // so the pin is only meaningful to sample from this point on.
+    if (use_interrupt && config_.int_diag) {
+        xTaskCreate(w5500_int_diag_task, "w5500_intdiag", 2560,
+                    reinterpret_cast<void*>(static_cast<intptr_t>(config_.int_pin)), 4, nullptr);
+        ESP_LOGI(TAG, "INTn diagnostic sampling enabled on GPIO %d", config_.int_pin);
     }
 
     // 7. Register Event Handlers

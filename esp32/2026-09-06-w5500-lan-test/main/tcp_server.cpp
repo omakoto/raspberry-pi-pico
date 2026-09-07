@@ -1,6 +1,7 @@
 #include "tcp_server.hpp"
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cerrno>
@@ -10,6 +11,13 @@
 #include "esp_timer.h"
 
 static const char* TAG = "TcpServer";
+
+// TCP keepalive tuning for the client connection: start probing after this many idle
+// seconds, then send up to kKeepaliveCount probes this many seconds apart. A peer that
+// answers none of them is declared dead after roughly 25 seconds.
+static constexpr int kKeepaliveIdleSec = 10;
+static constexpr int kKeepaliveIntervalSec = 5;
+static constexpr int kKeepaliveCount = 3;
 
 TcpServer::TcpServer()
     : port_(10110),
@@ -151,9 +159,27 @@ void TcpServer::run_task() {
                 status_led_->set_state(LedState::CLIENT_CONNECTED);
             }
 
-            // Set 5-second receive timeout on client socket to detect link loss or dead connection
+            // Wake out of recv() periodically so that a stop() request is noticed promptly.
             struct timeval client_tv = { .tv_sec = 5, .tv_usec = 0 };
             setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &client_tv, sizeof(client_tv));
+
+            // Only one client is served at a time, so a peer that disappears without closing
+            // the connection - a yanked cable, a crashed host, a network outage - would
+            // otherwise hold this task in recv() forever and no further client could ever be
+            // accepted. Nothing is transmitted while waiting for input, so the stack has no
+            // other way to discover the peer is gone: keepalive probes supply that traffic
+            // and make recv() fail, which returns this task to accept().
+            int keepalive_enable = 1;
+            int keepalive_idle = kKeepaliveIdleSec;
+            int keepalive_interval = kKeepaliveIntervalSec;
+            int keepalive_count = kKeepaliveCount;
+            if (setsockopt(client_sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive_enable, sizeof(keepalive_enable)) != 0 ||
+                setsockopt(client_sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepalive_idle, sizeof(keepalive_idle)) != 0 ||
+                setsockopt(client_sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepalive_interval, sizeof(keepalive_interval)) != 0 ||
+                setsockopt(client_sock, IPPROTO_TCP, TCP_KEEPCNT, &keepalive_count, sizeof(keepalive_count)) != 0) {
+                ESP_LOGW(TAG, "Failed to enable TCP keepalive for %s:%d: errno %d (%s)",
+                         client_ip, client_port, errno, strerror(errno));
+            }
 
             while (running_) {
                 int len = recv(client_sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
@@ -163,7 +189,10 @@ void TcpServer::run_task() {
                         vTaskDelay(pdMS_TO_TICKS(10));
                         continue;
                     }
-                    if (errno == ECONNRESET || errno == ENOTCONN || errno == ESHUTDOWN || errno == ECONNABORTED) {
+                    if (errno == ETIMEDOUT) {
+                        ESP_LOGW(TAG, "Client %s:%d stopped responding to keepalive; dropping connection",
+                                 client_ip, client_port);
+                    } else if (errno == ECONNRESET || errno == ENOTCONN || errno == ESHUTDOWN || errno == ECONNABORTED) {
                         ESP_LOGI(TAG, "Client %s:%d closed connection", client_ip, client_port);
                     } else {
                         ESP_LOGW(TAG, "Socket receive error from %s:%d: errno %d (%s)", client_ip, client_port, errno, strerror(errno));

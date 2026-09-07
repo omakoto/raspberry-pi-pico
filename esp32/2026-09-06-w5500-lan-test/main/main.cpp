@@ -52,8 +52,9 @@ static const char* TAG = "Main";
 #define CONFIG_W5500_INT_GPIO 2
 #endif
 
+// Only consulted when spi_int is -1 (polling mode); interrupt mode ignores it.
 #ifndef CONFIG_W5500_POLL_MS
-#define CONFIG_W5500_POLL_MS 0
+#define CONFIG_W5500_POLL_MS 2
 #endif
 
 #ifndef CONFIG_W5500_STATUS_LED_GPIO
@@ -131,6 +132,7 @@ extern "C" void app_main(void) {
     cfg.int_pin = static_cast<gpio_num_t>(s_config_mgr.get_int("spi_int", CONFIG_W5500_INT_GPIO));
     cfg.poll_period_ms = s_config_mgr.get_int("poll_period_ms", CONFIG_W5500_POLL_MS);
     cfg.spi_speed_mhz = s_config_mgr.get_int("spi_speed_mhz", 25);
+    cfg.int_diag = s_config_mgr.get_bool("int_diag", false);
     cfg.hostname = s_active_hostname;
     cfg.mac_address = s_config_mgr.get_string("mac", CONFIG_W5500_MAC_ADDR);
 

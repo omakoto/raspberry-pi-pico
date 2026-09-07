@@ -9,6 +9,7 @@ This project is a high-performance C++ re-implementation of `circuitpython/2026-
 ## 1. Overview & Features
 
 - **Hardware W5500 SPI Ethernet**: Uses ESP-IDF's high-speed SPI Ethernet MAC driver (`esp_eth_mac_w5500`) with full LwIP TCP/IP stack integration.
+- **Interrupt-driven Receive**: Frames are collected when the W5500 asserts `INTn` on `GPIO2`, with SPI polling available as a fallback when the interrupt line is not wired.
 - **Hardware Reset Sequencing**: Executes an active-low hardware reset with a 160 ms stabilization window to allow the W5500 internal PLL clock to lock.
 - **Automatic DHCP Client**: Requests and binds an IPv4 address upon Ethernet cable connection.
 - **mDNS Service Responder**: Advertises the configured hostname as `<hostname>.local` (default: `w5500-test.local`) and registers service `_echo._tcp` on port `10110`.
@@ -175,10 +176,43 @@ mac = "DE:AD:BE:EF:FE:ED"
 #   spi_mosi  = 9    # XIAO: D10 (Pin 11)| DevKitC-1: Row B, silk '9' (Pin 15)
 #   spi_miso  = 8    # XIAO: D9 (Pin 10) | DevKitC-1: Row B, silk '8' (Pin 12)
 #   spi_cs    = 4    # XIAO: D3 (Pin 4)  | DevKitC-1: Row B, silk '4' (Pin 4)
-#   spi_reset = 3    # XIAO: D2 (Pin 3)  | DevKitC-1: Row B, silk '3' (Pin 13)
+#   spi_reset = -1   # -1 if RSTn is unconnected (or 3 to drive it)
 #   spi_int   = 2    # XIAO: D1 (Pin 2)  | DevKitC-1: Row A, silk '2' (Pin 5)
-#   poll_period_ms = 0 # 0 for interrupt mode, > 0 (e.g. 5) if spi_int = -1
+#   poll_period_ms = 2 # Only used when spi_int = -1
+#   int_diag = false # Log INTn assert durations for RX path diagnosis
 ```
+
+### Interrupt vs. Polling Receive
+
+`spi_int` selects how the driver learns that a frame has arrived:
+
+| `spi_int` | Mode | Behaviour |
+| :--- | :--- | :--- |
+| `2` (default) | **Interrupt** | The W5500 asserts `INTn` on the configured GPIO and the MAC receive task is woken immediately. `poll_period_ms` is ignored. |
+| `-1` | **Polling** | The driver reads the chip every `poll_period_ms` milliseconds. Use this when `INTn` is not wired. |
+
+Interrupt mode requires the module's `J1-6` (`INTn`) pin to be physically connected to
+`GPIO2`. If it is not wired, the pin floats and no receive events are delivered, so set
+`spi_int = -1` instead.
+
+If `gpio_install_isr_service()` cannot be started, the driver logs a warning and falls back
+to polling rather than failing to bring up the network.
+
+#### Verifying the interrupt path
+
+Set `int_diag = true` to have the driver sample `INTn` and report, every 10 seconds, how
+long the line was left asserted:
+
+```text
+I (20401) W5500Driver: INTn diag: 11 assertions, longest assert 7000 us
+```
+
+The W5500 holds `INTn` LOW until the driver clears its socket interrupt register, so this
+measures how promptly the receive path is being serviced, independently of any network
+measurement. A healthy link clears the line within a few milliseconds. ESP-IDF's MAC
+receive task also wakes on a one-second timeout as a safety net, so `longest assert` values
+approaching `1000000 us` indicate interrupts are being missed and the link is only limping
+along on that fallback — check the `INTn` wiring and the `spi_int` GPIO number.
 
 ### 2. External Config Override (`$ESP32_CONFIG_TOML`)
 

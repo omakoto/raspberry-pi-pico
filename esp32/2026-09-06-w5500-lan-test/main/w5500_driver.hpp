@@ -16,6 +16,7 @@ struct W5500Config {
     gpio_num_t int_pin;
     uint32_t poll_period_ms;
     int spi_speed_mhz;
+    bool int_diag;
     std::string hostname;
     std::string mac_address;
 };
