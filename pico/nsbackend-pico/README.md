@@ -22,21 +22,23 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 
 ## 2. Hardware Pinout
 
-| Function | Pin Name | Default GPIO | Details |
-| :--- | :--- | :--- | :--- |
-| **Button A** | GP0 | `GPIO0` | Active-low, internal pull-up |
-| **D-pad DOWN** | GP1 | `GPIO1` | Active-low, internal pull-up |
-| **D-pad LEFT** | GP2 | `GPIO2` | Active-low, internal pull-up |
-| **D-pad RIGHT** | GP3 | `GPIO3` | Active-low, internal pull-up |
-| **D-pad UP** | GP4 | `GPIO4` | Active-low, internal pull-up |
-| **Button B** | GP5 | `GPIO5` | Active-low, internal pull-up |
-| **Buttons L + R** | GP10 | `GPIO10` | Active-low, triggers L and R simultaneously |
-| **UART0 TX** | GP12 | `GPIO12` | 115,200 baud, 8N1 / Serial log output |
-| **UART0 RX** | GP13 | `GPIO13` | 115,200 baud, 8N1 / Serial command input |
-| **I2C0 SDA** | GP20 | `GPIO20` | Physical pin 26 / PCF8574 Keypad SDA (configurable) |
-| **I2C0 SCL** | GP21 | `GPIO21` | Physical pin 27 / PCF8574 Keypad SCL (configurable) |
-| **Status LED** | GP25 / CYW43 | Board LED | GP25 on Pico / Pico 2; CYW43 WL GPIO on Pico W / Pico 2 W |
-| **USB** | D+ / D- | Native USB | Standard micro-USB (Pico) or USB-C connector |
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **Button A** | GP0 | `GPIO0` | Pin 1 | Active-low, internal pull-up |
+| **D-pad DOWN** | GP1 | `GPIO1` | Pin 2 | Active-low, internal pull-up |
+| **D-pad LEFT** | GP2 | `GPIO2` | Pin 4 | Active-low, internal pull-up |
+| **D-pad RIGHT** | GP3 | `GPIO3` | Pin 5 | Active-low, internal pull-up |
+| **D-pad UP** | GP4 | `GPIO4` | Pin 6 | Active-low, internal pull-up |
+| **Button B** | GP5 | `GPIO5` | Pin 7 | Active-low, internal pull-up |
+| **Buttons L + R** | GP10 | `GPIO10` | Pin 14 | Active-low, triggers L and R simultaneously |
+| **UART0 TX** | GP12 | `GPIO12` | Pin 16 | 115,200 baud, 8N1 / Serial log output |
+| **UART0 RX** | GP13 | `GPIO13` | Pin 17 | 115,200 baud, 8N1 / Serial command input |
+| **I2C0 SDA** | GP20 | `GPIO20` | Pin 26 | PCF8574 Keypad SDA (configurable via `i2c_sda_pin`) |
+| **I2C0 SCL** | GP21 | `GPIO21` | Pin 27 | PCF8574 Keypad SCL (configurable via `i2c_scl_pin`) |
+| **Status LED** | GP25 / CYW43 | Board LED | Onboard | GP25 on Pico / Pico 2; CYW43 WL GPIO on Pico W / Pico 2 W |
+| **USB** | D+ / D- | Native USB | USB Port | Standard micro-USB (Pico) or USB-C connector |
+| **3.3V Power** | 3V3(OUT) | `3V3` | Pin 36 | 3.3V DC power for external peripherals (e.g. I2C keypad) |
+| **GND** | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Digital ground |
 
 ---
 
