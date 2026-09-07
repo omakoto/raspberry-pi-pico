@@ -124,7 +124,8 @@ int ConfigManager::get_int(const std::string& key, int default_val) const {
     auto it = config_map_.find(key);
     if (it != config_map_.end() && !it->second.empty()) {
         char* end_ptr = nullptr;
-        long val = std::strtol(it->second.c_str(), &end_ptr, 10);
+        // Base 0 automatically parses decimal and hexadecimal (0x...) literals
+        long val = std::strtol(it->second.c_str(), &end_ptr, 0);
         if (end_ptr != it->second.c_str()) {
             return static_cast<int>(val);
         }

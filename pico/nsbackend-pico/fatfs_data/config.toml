@@ -12,3 +12,13 @@ wifi_password = "YOUR_WIFI_PASSWORD"
 # Fallback Wi-Fi Access Points (Optional: indices 1 to 9)
 # wifi_ssid1 = "BackupHotspot"
 # wifi_password1 = "HotspotPass"
+
+# I2C Matrix Keypad (PCF8574 / PCF8574A)
+i2c_keypad_enabled = true
+i2c_sda_pin = 20
+i2c_scl_pin = 21
+i2c_address = 0x20
+i2c_reverse_row = true
+i2c_reverse_col = true
+i2c_debounce_ms = 20
+

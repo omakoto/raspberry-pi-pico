@@ -13,6 +13,7 @@
 #include "gamepad_hid.hpp"
 #include "controller_state.hpp"
 #include "gpio_buttons.hpp"
+#include "i2c_keypad.hpp"
 #include "dual_logger.hpp"
 #include "serial_command_server.hpp"
 
@@ -60,7 +61,23 @@ static void supervisor_task(void* param) {
     GpioButtonManager gpio_buttons(controller);
     gpio_buttons.init();
 
-    // 6. Start Serial Command Server (accepts commands on UART0 GP12/GP13 and USB CDC)
+    // 6. Initialize I2C Matrix Keypad (PCF8574)
+    I2cKeypadConfig keypad_config;
+    keypad_config.enabled = config.get_bool("i2c_keypad_enabled", true);
+    keypad_config.sda_pin = static_cast<uint8_t>(config.get_int("i2c_sda_pin", 20));
+    keypad_config.scl_pin = static_cast<uint8_t>(config.get_int("i2c_scl_pin", 21));
+    keypad_config.address = static_cast<uint8_t>(config.get_int("i2c_address", 0x20));
+    keypad_config.reverse_row = config.get_bool("i2c_reverse_row", true);
+    keypad_config.reverse_col = config.get_bool("i2c_reverse_col", true);
+    keypad_config.debounce_ms = static_cast<uint32_t>(config.get_int("i2c_debounce_ms", 20));
+
+    I2cKeypadManager keypad(controller, keypad_config);
+    if (keypad_config.enabled) {
+        keypad.init();
+        keypad.start();
+    }
+
+    // 7. Start Serial Command Server (accepts commands on UART0 GP12/GP13 and USB CDC)
     SerialCommandServer serial_server(controller, log_enabled, enable_echo);
     serial_server.start();
 

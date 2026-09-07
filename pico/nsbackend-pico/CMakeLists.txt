@@ -56,6 +56,7 @@ set(APP_SOURCES
     src/gamepad_hid.cpp
     src/controller_state.cpp
     src/gpio_buttons.cpp
+    src/i2c_keypad.cpp
     src/status_led.cpp
     src/dual_logger.cpp
     src/serial_command_server.cpp
@@ -96,6 +97,7 @@ target_link_libraries(nsbackend-pico PRIVATE
     hardware_sync
     hardware_uart
     hardware_gpio
+    hardware_i2c
     hardware_timer
 )
 

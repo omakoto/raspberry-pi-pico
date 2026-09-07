@@ -33,6 +33,8 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 | **Buttons L + R** | GP10 | `GPIO10` | Active-low, triggers L and R simultaneously |
 | **UART0 TX** | GP12 | `GPIO12` | 115,200 baud, 8N1 / Serial log output |
 | **UART0 RX** | GP13 | `GPIO13` | 115,200 baud, 8N1 / Serial command input |
+| **I2C0 SDA** | GP20 | `GPIO20` | Physical pin 26 / PCF8574 Keypad SDA (configurable) |
+| **I2C0 SCL** | GP21 | `GPIO21` | Physical pin 27 / PCF8574 Keypad SCL (configurable) |
 | **Status LED** | GP25 / CYW43 | Board LED | GP25 on Pico / Pico 2; CYW43 WL GPIO on Pico W / Pico 2 W |
 | **USB** | D+ / D- | Native USB | Standard micro-USB (Pico) or USB-C connector |
 
@@ -67,16 +69,50 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 |   UART0 / USB CDC | --------> |    * CDC Serial Console   |
 |   Serial Console  |           |    * MSC Storage (FATFS)  |
 +-------------------+           |  - Dual Logger (UART/CDC) |
-                                |  - GPIO Button Debouncer  |
+|  Physical Buttons | --------> |  - GPIO Button Debouncer  |
+|   (GP0-GP5, GP10) |           |  - I2C Keypad (PCF8574)   |
 +-------------------+           |  - CYW43 Wi-Fi & lwIP mDNS|
-|  Physical Buttons | --------> |  - FreeRTOS SMP (Dual Core|
-|   (GP0-GP5, GP10) |           |  - 1MB Flash FAT12 DiskIO |
+| I2C Matrix Keypad | --------> |  - FreeRTOS SMP (Dual Core|
+|  (4x4 on GP20/21) |           |  - 1MB Flash FAT12 DiskIO |
 +-------------------+           +---------------------------+
 ```
 
 ---
 
-## 5. Supported Boards
+## 5. I2C Matrix Keypad (PCF8574 / PCF8574A)
+
+Supports standard 4x4 matrix keypads interfaced through an I2C PCF8574 / PCF8574A expander module.
+
+### Hardware Connections
+- **SDA**: `GP20` (Pin 26, default, configurable via `i2c_sda_pin`)
+- **SCL**: `GP21` (Pin 27, default, configurable via `i2c_scl_pin`)
+- **VCC**: 3.3V
+- **GND**: GND
+- **I2C Address**: `0x20` (standard PCF8574) or `0x38` (PCF8574A, auto-detected fallback)
+
+### Key Assignment
+| Keypad Key | Target Controller Input | Description |
+| :---: | :---: | :--- |
+| **`2`** | **D-pad UP** | Directional Pad UP |
+| **`4`** | **D-pad LEFT** | Directional Pad LEFT |
+| **`6`** | **D-pad RIGHT** | Directional Pad RIGHT |
+| **`8`** | **D-pad DOWN** | Directional Pad DOWN |
+| **`1`** | **L1** (`BTN_L`) | Left bumper |
+| **`3`** | **R1** (`BTN_R`) | Right bumper |
+| **`7`** | **L2** (`BTN_ZL`) | Left trigger (ZL) |
+| **`9`** | **R2** (`BTN_ZR`) | Right trigger (ZR) |
+| **`*`** | **Minus** (`BTN_MINUS`) | Select / Minus |
+| **`#`** | **Plus** (`BTN_PLUS`) | Start / Plus |
+| **`A`** | **A** (`BTN_A`) | Button A |
+| **`B`** | **B** (`BTN_B`) | Button B |
+| **`C`** | **X** (`BTN_X`) | Button X |
+| **`D`** | **Y** (`BTN_Y`) | Button Y |
+| **`0`** | **Home** (`BTN_HOME`) | Home Button |
+| **`5`** | *(Unused)* | Ignored |
+
+---
+
+## 6. Supported Boards
 
 | Board Target | MCU Architecture | Wireless Support | Default Build Command |
 | :--- | :--- | :--- | :--- |
@@ -87,7 +123,7 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 
 ---
 
-## 6. Building & Installation
+## 7. Building & Installation
 
 ### Prerequisites
 - Raspberry Pi Pico SDK (`v2.1.1` or later)
@@ -124,7 +160,7 @@ Or manually copy `build/storage.uf2` followed by `build/nsbackend-pico.uf2` into
 
 ---
 
-## 7. Configuration (`config.toml`)
+## 8. Configuration (`config.toml`)
 
 When plugged into a PC via USB, the Pico exposes a standard USB flash drive with `config.toml`. You can open and edit this file directly in any text editor.
 
@@ -133,6 +169,15 @@ Sample `config.toml`:
 hostname = "nscon"
 tcp_port = 10100
 enable_echo = true
+
+# I2C Matrix Keypad (PCF8574 / PCF8574A)
+i2c_keypad_enabled = true
+i2c_sda_pin = 20
+i2c_scl_pin = 21
+i2c_address = 0x20
+i2c_reverse_row = true
+i2c_reverse_col = true
+i2c_debounce_ms = 20
 
 [[ap]]
 ssid = "MyHomeNetwork"
@@ -145,7 +190,7 @@ password = "BackupPassword456"
 
 ---
 
-## 8. Serial Console Monitoring
+## 9. Serial Console Monitoring
 
 Run the monitor script to view debug logs over USB CDC:
 ```bash
@@ -156,7 +201,7 @@ Run the monitor script to view debug logs over USB CDC:
 
 ---
 
-## 9. Controller Command Protocol
+## 10. Controller Command Protocol
 
 Commands can be transmitted over TCP (port 10100) or over serial (UART0 / USB CDC).
 
@@ -198,7 +243,7 @@ pu 0.15        # Hold D-pad UP for 150 milliseconds
 
 ---
 
-## 10. Latency Benchmarking
+## 11. Latency Benchmarking
 
 To benchmark network round-trip latency over Wi-Fi:
 ```bash

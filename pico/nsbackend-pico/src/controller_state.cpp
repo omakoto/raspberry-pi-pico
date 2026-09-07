@@ -47,6 +47,11 @@ ControllerState::ControllerState(GamepadHid& gamepad)
       gpio_dpad_down_(false),
       gpio_dpad_left_(false),
       gpio_dpad_right_(false),
+      keypad_buttons_(BTN_NONE),
+      keypad_dpad_up_(false),
+      keypad_dpad_down_(false),
+      keypad_dpad_left_(false),
+      keypad_dpad_right_(false),
       lx_(0.0f),
       ly_(0.0f),
       rx_(0.0f),
@@ -66,6 +71,11 @@ void ControllerState::reset_all() {
     dpad_down_ = false;
     dpad_left_ = false;
     dpad_right_ = false;
+    keypad_buttons_ = BTN_NONE;
+    keypad_dpad_up_ = false;
+    keypad_dpad_down_ = false;
+    keypad_dpad_left_ = false;
+    keypad_dpad_right_ = false;
     lx_ = 0.0f;
     ly_ = 0.0f;
     rx_ = 0.0f;
@@ -92,12 +102,22 @@ void ControllerState::set_gpio_state(uint16_t gpio_buttons, bool up, bool down, 
     sync_report();
 }
 
+void ControllerState::set_keypad_state(uint16_t keypad_buttons, bool up, bool down, bool left, bool right) {
+    MutexLock lock(mutex_);
+    keypad_buttons_ = keypad_buttons;
+    keypad_dpad_up_ = up;
+    keypad_dpad_down_ = down;
+    keypad_dpad_left_ = left;
+    keypad_dpad_right_ = right;
+    sync_report();
+}
+
 void ControllerState::sync_report() {
     // Resolve hat direction with opposing cancellation
-    bool up = dpad_up_ || gpio_dpad_up_;
-    bool down = dpad_down_ || gpio_dpad_down_;
-    bool left = dpad_left_ || gpio_dpad_left_;
-    bool right = dpad_right_ || gpio_dpad_right_;
+    bool up = dpad_up_ || gpio_dpad_up_ || keypad_dpad_up_;
+    bool down = dpad_down_ || gpio_dpad_down_ || keypad_dpad_down_;
+    bool left = dpad_left_ || gpio_dpad_left_ || keypad_dpad_left_;
+    bool right = dpad_right_ || gpio_dpad_right_ || keypad_dpad_right_;
 
     if (up && down) {
         up = down = false;
@@ -132,7 +152,7 @@ void ControllerState::sync_report() {
     uint8_t rx_byte = to_byte(rx_);
     uint8_t ry_byte = to_byte(ry_);
 
-    uint16_t merged_buttons = buttons_ | gpio_buttons_;
+    uint16_t merged_buttons = buttons_ | gpio_buttons_ | keypad_buttons_;
 
     gamepad_.send_report(merged_buttons, hat, lx_byte, ly_byte, rx_byte, ry_byte);
 }
