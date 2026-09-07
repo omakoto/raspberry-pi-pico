@@ -25,14 +25,31 @@ A CircuitPython port of [Rob Tillaart's I2CKeyPad library](https://github.com/Ro
 
 ### Pin Assignment
 
-* **ESP32-S3 (e.g. Seeed XIAO ESP32-S3)**:
-  * `SDA` -> `D4` (`GPIO5`)
-  * `SCL` -> `D5` (`GPIO6`)
-* **Raspberry Pi Pico**:
-  * `SDA` -> `GP10` / `GP4`
-  * `SCL` -> `GP11` / `GP5`
-* **PCF8574 I2C Address**:
-  * Default `0x20` (PCF8574) or `0x38` (PCF8574A). Configurable via jumpers A0, A1, A2.
+The script requests `D4` (SDA) and `D5` (SCL); `common.get_pin()` resolves those
+names to the equivalent pins on whichever board is running.
+
+#### Raspberry Pi Pico (Pico / Pico W / Pico 2 / Pico 2 W)
+
+| Function | Pin Name | Default GPIO | Physical Pin # | Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **I2C SDA** (PCF8574 `SDA`) | GP4 | `GPIO4` | Pin 6 | I2C0 data line |
+| **I2C SCL** (PCF8574 `SCL`) | GP5 | `GPIO5` | Pin 7 | I2C0 clock line |
+| **3.3V Power** (PCF8574 `VCC`) | 3V3(OUT) | `3V3` | Pin 36 | 3.3V DC power for the expander and keypad |
+| **Ground** (PCF8574 `GND`) | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common digital ground |
+
+To drive the expander from I2C1 instead, set `PIN_I2C_SDA` / `PIN_I2C_SCL` to
+`GP10` (Pin 14) and `GP11` (Pin 15).
+
+#### ESP32-S3
+
+| Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
+| :--- | :---: | :---: | :---: | :--- |
+| **I2C SDA** (PCF8574 `SDA`) | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | Hardware I2C data line |
+| **I2C SCL** (PCF8574 `SCL`) | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | Hardware I2C clock line |
+| **3.3V Power** (PCF8574 `VCC`) | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | 3.3V DC power for the expander and keypad |
+| **Ground** (PCF8574 `GND`) | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | Common digital ground |
+
+**PCF8574 I2C Address**: default `0x20` (PCF8574) or `0x38` (PCF8574A), configurable via jumpers A0, A1, A2.
 
 ---
 
