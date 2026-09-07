@@ -132,8 +132,8 @@ void SerialCommandServer::process_stream(std::string& accum, const char* data, s
                     tud_cdc_n_write(0, "\r\n", 2);
                     tud_cdc_n_write_flush(0);
                 } else if (!is_cdc) {
-                    std::printf("%s\n", line.c_str());
-                    std::fflush(stdout);
+                    uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(line.c_str()), line.length());
+                    uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>("\r\n"), 2);
                 }
             }
 

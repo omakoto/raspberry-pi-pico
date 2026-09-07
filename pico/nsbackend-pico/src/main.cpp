@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include "pico/stdlib.h"
+#include "hardware/uart.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "tusb.h"
@@ -140,7 +141,13 @@ static void supervisor_task(void* param) {
 
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
     (void)xTask;
-    std::printf("\n[E][FreeRTOS] Stack overflow in task: %s\n", pcTaskName ? pcTaskName : "unknown");
+    const char prefix[] = "\r\n[E][FreeRTOS] Stack overflow in task: ";
+    uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(prefix), sizeof(prefix) - 1);
+    if (pcTaskName != nullptr) {
+        uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(pcTaskName), std::strlen(pcTaskName));
+    }
+    uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>("\r\n"), 2);
+
     if (tud_mounted()) {
         tud_cdc_n_write(0, "\r\n[E][FreeRTOS] Stack overflow in task: ", 40);
         if (pcTaskName != nullptr) {
@@ -155,8 +162,9 @@ extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskNa
 }
 
 extern "C" void vApplicationMallocFailedHook(void) {
-    std::printf("\n[E][FreeRTOS] Heap allocation failed! Free heap: %u bytes\n",
-                static_cast<unsigned>(xPortGetFreeHeapSize()));
+    const char msg[] = "\r\n[E][FreeRTOS] Heap allocation failed!\r\n";
+    uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(msg), sizeof(msg) - 1);
+
     if (tud_mounted()) {
         tud_cdc_n_write(0, "\r\n[E][FreeRTOS] Heap allocation failed!\r\n", 41);
         tud_cdc_n_write_flush(0);
