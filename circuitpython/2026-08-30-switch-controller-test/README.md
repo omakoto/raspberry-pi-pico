@@ -8,12 +8,12 @@ A CircuitPython project for Raspberry Pi Pico (Pico / Pico 2 / Pico 2 W) and ESP
 
 | Function | Pin Name | Default GPIO | Physical Pin # | Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **Button A** *(index 0)* | GP0 | `GPIO0` | Pin 1 | Active-low, internal pull-up |
-| **D-pad DOWN** *(index 1)* | GP1 | `GPIO1` | Pin 2 | Active-low, internal pull-up |
-| **D-pad LEFT** *(index 2)* | GP2 | `GPIO2` | Pin 4 | Active-low, internal pull-up |
-| **D-pad RIGHT** *(index 3)* | GP3 | `GPIO3` | Pin 5 | Active-low, internal pull-up |
-| **D-pad UP** *(index 4)* | GP4 | `GPIO4` | Pin 6 | Active-low, internal pull-up |
-| **Buttons L + R** *(index 5)* | GP5 | `GPIO5` | Pin 7 | Active-low, triggers L and R simultaneously |
+| **Button A** | GP0 | `GPIO0` | Pin 1 | Active-low, internal pull-up |
+| **D-pad DOWN** | GP1 | `GPIO1` | Pin 2 | Active-low, internal pull-up |
+| **D-pad LEFT** | GP2 | `GPIO2` | Pin 4 | Active-low, internal pull-up |
+| **D-pad RIGHT** | GP3 | `GPIO3` | Pin 5 | Active-low, internal pull-up |
+| **D-pad UP** | GP4 | `GPIO4` | Pin 6 | Active-low, internal pull-up |
+| **Buttons L + R** | GP5 | `GPIO5` | Pin 7 | Active-low, triggers L and R simultaneously |
 | **Activity LED** | GP25 / CYW43 | Board LED | Onboard | GP25 on Pico / Pico 2; CYW43 WL GPIO on Pico W / Pico 2 W |
 | **Ground** | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Common side of every switch |
 
@@ -21,16 +21,16 @@ A CircuitPython project for Raspberry Pi Pico (Pico / Pico 2 / Pico 2 W) and ESP
 
 | Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
 | :--- | :---: | :---: | :---: | :--- |
-| **Button A** *(index 0)* | `GPIO1` | Row A, Pin 4 (silk `1`) | `D0` (Pin 1) | Active-low, internal pull-up |
-| **D-pad DOWN** *(index 1)* | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Active-low, internal pull-up |
-| **D-pad LEFT** *(index 2)* | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-low, internal pull-up |
-| **D-pad RIGHT** *(index 3)* | `GPIO4` | Row B, Pin 4 (silk `4`) | `D3` (Pin 4) | Active-low, internal pull-up |
-| **D-pad UP** *(index 4)* | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | Active-low, internal pull-up |
-| **Buttons L + R** *(index 5)* | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | Active-low, triggers L and R simultaneously |
+| **Button A** | `GPIO1` | Row A, Pin 4 (silk `1`) | `D0` (Pin 1) | Active-low, internal pull-up |
+| **D-pad DOWN** | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Active-low, internal pull-up |
+| **D-pad LEFT** | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-low, internal pull-up |
+| **D-pad RIGHT** | `GPIO4` | Row B, Pin 4 (silk `4`) | `D3` (Pin 4) | Active-low, internal pull-up |
+| **D-pad UP** | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | Active-low, internal pull-up |
+| **Buttons L + R** | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | Active-low, triggers L and R simultaneously |
 | **Activity LED** | `GPIO21` | Row A, Pin 18 (silk `21`) | Onboard Yellow LED | Active-low user indicator |
 | **Ground** | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | Common side of every switch |
 
-> **Note**: All inputs use internal microcontroller pull-up resistors (`digitalio.Pull.UP`), resolved dynamically via `common.get_pin(0..5)` across Pico and ESP32 boards. Simply wire each switch directly between its designated pin and GND.
+> **Note**: All inputs use internal microcontroller pull-up resistors (`digitalio.Pull.UP`). The script selects its GPIO numbers per board family and resolves them with `common.get_pin()`, which takes SoC GPIO numbers - the same numbers in the tables above. Simply wire each switch directly between its designated pin and GND.
 
 ---
 

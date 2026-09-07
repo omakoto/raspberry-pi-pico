@@ -25,8 +25,8 @@ A CircuitPython port of [Rob Tillaart's I2CKeyPad library](https://github.com/Ro
 
 ### Pin Assignment
 
-The script requests `D4` (SDA) and `D5` (SCL); `common.get_pin()` resolves those
-names to the equivalent pins on whichever board is running.
+The script selects its I2C GPIO numbers per board family, because GPIO4/GPIO5 is a
+hardware I2C pair on the RP2040 while the ESP32-S3 equivalent is GPIO5/GPIO6.
 
 #### Raspberry Pi Pico (Pico / Pico W / Pico 2 / Pico 2 W)
 

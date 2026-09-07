@@ -5,13 +5,14 @@
 # Switch Controller Emulator (Composite Device Mode) for Raspberry Pi Pico, ESP32, and compatible boards.
 #
 # Emulates a HORI Pokken Nintendo Switch controller over USB HID.
-# Reads physical inputs and transmits 8-byte HID reports to the Nintendo Switch or host PC:
-# - Pin 0 (D0 / GP0): A button (Active LOW, internal pull-up)
-# - Pin 1 (D1 / GP1): D-pad DOWN (Active LOW, internal pull-up)
-# - Pin 2 (D2 / GP2): D-pad LEFT (Active LOW, internal pull-up)
-# - Pin 3 (D3 / GP3): D-pad RIGHT (Active LOW, internal pull-up)
-# - Pin 4 (D4 / GP4): D-pad UP (Active LOW, internal pull-up)
-# - Pin 5 (D5 / GP5): L and R buttons together (Active LOW, internal pull-up)
+# Reads physical inputs and transmits 8-byte HID reports to the Nintendo Switch or host PC.
+# Inputs are active LOW with internal pull-ups, on these GPIOs (Pico / ESP32-S3):
+# - A button:      GPIO0 (silk GP0)  / GPIO1 (XIAO silk D0)
+# - D-pad DOWN:    GPIO1 (silk GP1)  / GPIO2 (XIAO silk D1)
+# - D-pad LEFT:    GPIO2 (silk GP2)  / GPIO3 (XIAO silk D2)
+# - D-pad RIGHT:   GPIO3 (silk GP3)  / GPIO4 (XIAO silk D3)
+# - D-pad UP:      GPIO4 (silk GP4)  / GPIO5 (XIAO silk D4)
+# - L + R buttons: GPIO5 (silk GP5)  / GPIO6 (XIAO silk D5)
 #
 # Hardware Connections:
 # - Connect each switch/button between its designated GPIO pin and GND.
@@ -22,15 +23,25 @@ import time
 import board
 import digitalio
 import usb_hid
-from common import get_pin, get_led_pin
+from common import get_pin, get_led_pin, get_board_family, BOARD_RP2040
 
-# Pin Configuration Constants (resolves dynamically across Pico GPx and ESP32 IOx)
-PIN_BTN_A: board.Pin = get_pin(0)
-PIN_DPAD_DOWN: board.Pin = get_pin(1)
-PIN_DPAD_LEFT: board.Pin = get_pin(2)
-PIN_DPAD_RIGHT: board.Pin = get_pin(3)
-PIN_DPAD_UP: board.Pin = get_pin(4)
-PIN_BTN_LR: board.Pin = get_pin(5)
+# GPIO assignments, given as SoC GPIO numbers. They differ per family because a
+# GPIO number lands on a different physical pin on each: the Pico run starts at
+# GPIO0 (silk GP0), while the XIAO ESP32-S3 breaks out GPIO1-GPIO6 as silk
+# D0-D5, the six pins nearest the USB connector on both boards.
+if get_board_family() == BOARD_RP2040:
+    GPIO_BTN_A, GPIO_DPAD_DOWN, GPIO_DPAD_LEFT = 0, 1, 2
+    GPIO_DPAD_RIGHT, GPIO_DPAD_UP, GPIO_BTN_LR = 3, 4, 5
+else:
+    GPIO_BTN_A, GPIO_DPAD_DOWN, GPIO_DPAD_LEFT = 1, 2, 3
+    GPIO_DPAD_RIGHT, GPIO_DPAD_UP, GPIO_BTN_LR = 4, 5, 6
+
+PIN_BTN_A: board.Pin = get_pin(GPIO_BTN_A)
+PIN_DPAD_DOWN: board.Pin = get_pin(GPIO_DPAD_DOWN)
+PIN_DPAD_LEFT: board.Pin = get_pin(GPIO_DPAD_LEFT)
+PIN_DPAD_RIGHT: board.Pin = get_pin(GPIO_DPAD_RIGHT)
+PIN_DPAD_UP: board.Pin = get_pin(GPIO_DPAD_UP)
+PIN_BTN_LR: board.Pin = get_pin(GPIO_BTN_LR)
 
 # Nintendo Switch HID Constants
 HID_USAGE_PAGE_GENERIC: int = 0x01
@@ -208,12 +219,12 @@ def main() -> None:
             pass
 
     print("Switch Controller Emulator ready.")
-    print("  - Pin 0 (D0 / GP0): A")
-    print("  - Pin 1 (D1 / GP1): D-pad DOWN")
-    print("  - Pin 2 (D2 / GP2): D-pad LEFT")
-    print("  - Pin 3 (D3 / GP3): D-pad RIGHT")
-    print("  - Pin 4 (D4 / GP4): D-pad UP")
-    print("  - Pin 5 (D5 / GP5): L+R")
+    print(f"  - GPIO{GPIO_BTN_A}: A")
+    print(f"  - GPIO{GPIO_DPAD_DOWN}: D-pad DOWN")
+    print(f"  - GPIO{GPIO_DPAD_LEFT}: D-pad LEFT")
+    print(f"  - GPIO{GPIO_DPAD_RIGHT}: D-pad RIGHT")
+    print(f"  - GPIO{GPIO_DPAD_UP}: D-pad UP")
+    print(f"  - GPIO{GPIO_BTN_LR}: L+R")
 
     # Send initial neutral state
     gamepad.send_state(buttons=BTN_NONE, hat=HAT_CENTER)

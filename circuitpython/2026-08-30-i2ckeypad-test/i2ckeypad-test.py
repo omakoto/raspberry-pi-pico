@@ -6,8 +6,8 @@
 # Reads pressed keys and logs both the raw key index and the mapped character in real time.
 #
 # Hardware Connections (ESP32-S3 / XIAO ESP32-S3):
-# - SDA: D4 (IO5)
-# - SCL: D5 (IO6)
+# - Pico:     SDA GPIO4 (silk GP4), SCL GPIO5 (silk GP5)  - I2C0
+# - ESP32-S3: SDA GPIO5, SCL GPIO6                        - XIAO silk D4 / D5
 # - VCC: 3.3V (or 5V if PCF8574 module requires 5V logic)
 # - GND: GND
 # - PCF8574 I2C Address: 0x20 (Default)
@@ -15,7 +15,7 @@
 import time
 import board
 import digitalio
-from common import get_i2c, get_led_pin
+from common import get_i2c, get_led_pin, get_board_family, BOARD_RP2040
 from i2ckeypad import (
     I2CKeyPad,
     KEYPAD_4x4,
@@ -26,8 +26,15 @@ from i2ckeypad import (
 )
 
 # Pin Definitions
-PIN_I2C_SDA: int | str | None = "D4"
-PIN_I2C_SCL: int | str | None = "D5"
+# I2C GPIOs as SoC GPIO numbers, chosen per family so both land on a valid
+# hardware I2C pair: GPIO4/GPIO5 is I2C0 on the RP2040, while GPIO5/GPIO6 is the
+# ESP32-S3 hardware I2C exposed as silk D4 / D5 on the XIAO.
+if get_board_family() == BOARD_RP2040:
+    PIN_I2C_SDA: int | None = 4
+    PIN_I2C_SCL: int | None = 5
+else:
+    PIN_I2C_SDA: int | None = 5
+    PIN_I2C_SCL: int | None = 6
 
 # PCF8574 I2C Address (0x20 to 0x27 for PCF8574, 0x38 to 0x3F for PCF8574A)
 I2C_ADDRESS: int = 0x20
@@ -65,7 +72,7 @@ if led_pin is not None:
 
 print("=" * 50)
 print("I2CKeyPad (PCF8574) CircuitPython Test")
-print(f"I2C Pins -> SDA: {PIN_I2C_SDA}, SCL: {PIN_I2C_SCL}")
+print(f"I2C Pins -> SDA: GPIO{PIN_I2C_SDA}, SCL: GPIO{PIN_I2C_SCL}")
 print(f"I2C Target Address: {hex(I2C_ADDRESS)}")
 print(f"Reversal -> Row: {REVERSE_ROW}, Col: {REVERSE_COL}")
 print("=" * 50)

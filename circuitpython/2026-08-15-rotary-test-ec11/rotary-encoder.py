@@ -3,7 +3,7 @@
 #
 # Script to test and print EC11 rotary encoder inputs on Raspberry Pi Pico, ESP32, and compatible boards.
 #
-# Pin Connections (default: GPIO 1, 2, 3):
+# Pin Connections, as SoC GPIO numbers (silk GP1/GP2/GP3 on Pico, silk D0/D1/D2 on the XIAO):
 # - GPIO 1: Encoder Phase A
 # - GPIO 2: Encoder Phase B
 # - GPIO 3: Push Button (active LOW, internal pull-up)
@@ -17,7 +17,8 @@ import board
 import digitalio
 from common import get_pin
 
-# Pin Definitions
+# Pin Definitions. GPIO1-GPIO3 are broken out by both families, so one set of
+# numbers serves both boards here.
 PIN_ENCODER_A: board.Pin = get_pin(1)
 PIN_ENCODER_B: board.Pin = get_pin(2)
 PIN_BUTTON: board.Pin = get_pin(3)

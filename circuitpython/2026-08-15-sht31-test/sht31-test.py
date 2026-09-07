@@ -4,8 +4,8 @@
 # Script to read and print temperature and humidity from an SHT31 sensor on Raspberry Pi Pico, ESP32-S3, and compatible boards.
 #
 # Default Pin Connections:
-# - Raspberry Pi Pico: GP10 (SDA), GP11 (SCL)
-# - Seeed XIAO ESP32-S3: D4 / IO5 (SDA), D5 / IO6 (SCL)
+# - Raspberry Pi Pico: GPIO10 (SDA, silk GP10), GPIO11 (SCL, silk GP11)
+# - Seeed XIAO ESP32-S3: GPIO5 (SDA, silk D4), GPIO6 (SCL, silk D5)
 # - Power: 3.3V (VCC) and GND
 
 import time
@@ -13,9 +13,9 @@ import board
 import digitalio
 from common import get_i2c, get_led_pin
 
-# Pin Definitions (set to None for automatic board default / fallback discovery, or specify pin number/name)
-PIN_I2C_SDA: int | str | None = None
-PIN_I2C_SCL: int | str | None = None
+# Pin Definitions as SoC GPIO numbers, or None for automatic board default / fallback discovery
+PIN_I2C_SDA: int | None = None
+PIN_I2C_SCL: int | None = None
 
 SHT31_ADDR: int = 0x44
 
