@@ -11,6 +11,7 @@
 #include <vector>
 #include <cstring>
 #include <cstdio>
+#include <cerrno>
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "dual_logger.hpp"

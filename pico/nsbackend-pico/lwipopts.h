@@ -25,6 +25,11 @@
 #define DEFAULT_ACCEPTMBOX_SIZE         8
 #define TCPIP_MBOX_SIZE                 32
 #define LWIP_TIMEVAL_PRIVATE            0
+// Ensure lwIP uses newlib's reentrant per-thread errno (*__errno()) so socket errors
+// (such as EWOULDBLOCK / EAGAIN) are consistently visible across lwIP and C++ application code.
+#ifdef LWIP_PROVIDE_ERRNO
+#undef LWIP_PROVIDE_ERRNO
+#endif
 #define LWIP_ERRNO_STDINCLUDE           1
 
 // Socket Options

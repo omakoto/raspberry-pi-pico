@@ -64,7 +64,8 @@ std::set<std::string> WifiManager::scan_networks() {
         return visible_ssids;
     }
 
-    while (cyw43_wifi_scan_active(&cyw43_state)) {
+    uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    while (cyw43_wifi_scan_active(&cyw43_state) && (to_ms_since_boot(get_absolute_time()) - start_ms < 5000)) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
@@ -147,9 +148,15 @@ const char* WifiManager::link_status_to_string(int status) {
 bool WifiManager::attempt_connect(const std::string& ssid, const std::string& password) {
     LOG_I(TAG, "Connecting to Wi-Fi SSID: '%s' (password length: %u)...", ssid.c_str(), static_cast<unsigned>(password.length()));
 
-    // Use mixed WPA2/WPA mode for password networks to maximize AP compatibility
-    uint32_t auth = password.empty() ? CYW43_AUTH_OPEN : CYW43_AUTH_WPA2_MIXED_PSK;
-    int ret = cyw43_arch_wifi_connect_timeout_ms(ssid.c_str(), password.c_str(), auth, 20000);
+    // Try standard WPA2-AES first (standard across modern APs)
+    uint32_t auth = password.empty() ? CYW43_AUTH_OPEN : CYW43_AUTH_WPA2_AES_PSK;
+    int ret = cyw43_arch_wifi_connect_timeout_ms(ssid.c_str(), password.c_str(), auth, 10000);
+
+    // If WPA2-AES failed and network has a password, attempt WPA2/WPA mixed mode fallback
+    if (ret != 0 && !password.empty()) {
+        LOG_I(TAG, "Retrying '%s' with mixed WPA2/WPA auth mode...", ssid.c_str());
+        ret = cyw43_arch_wifi_connect_timeout_ms(ssid.c_str(), password.c_str(), CYW43_AUTH_WPA2_MIXED_PSK, 10000);
+    }
 
     if (ret == 0) {
         const ip4_addr_t* addr = netif_ip4_addr(&cyw43_state.netif[CYW43_ITF_STA]);
@@ -189,45 +196,19 @@ void WifiManager::connect(StatusLed* led) {
         led->set_state(LedState::WIFI_CONNECTING);
     }
 
-    // Step 1: Fast direct attempt on primary AP
-    size_t last_tried_idx = 0;
-    if (attempt_connect(ap_list_[0].first, ap_list_[0].second)) {
-        return;
-    }
-
-    // Step 2: Scan and round-robin fallback
+    // Try each configured AP in round-robin sequence
     while (!is_connected()) {
-        std::set<std::string> visible_ssids = scan_networks();
-
-        std::vector<size_t> candidates;
-        size_t num_aps = ap_list_.size();
-        for (size_t step = 1; step <= num_aps; ++step) {
-            size_t idx = (last_tried_idx + step) % num_aps;
-            if (visible_ssids.find(ap_list_[idx].first) != visible_ssids.end()) {
-                candidates.push_back(idx);
-            }
-        }
-
-        if (candidates.empty()) {
-            LOG_W(TAG, "No configured Wi-Fi APs visible in scan. Retrying in 3 seconds...");
-            if (led != nullptr) {
-                led->set_state(LedState::WIFI_RECONNECTING);
-            }
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            continue;
-        }
-
-        for (size_t idx : candidates) {
-            last_tried_idx = idx;
+        for (size_t idx = 0; idx < ap_list_.size(); ++idx) {
             if (led != nullptr) {
                 led->set_state(LedState::WIFI_CONNECTING);
             }
             if (attempt_connect(ap_list_[idx].first, ap_list_[idx].second)) {
                 return;
             }
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
 
-        LOG_W(TAG, "All visible Wi-Fi candidates failed. Retrying scan in 3 seconds...");
+        LOG_W(TAG, "All configured Wi-Fi APs failed to connect. Retrying in 3 seconds...");
         if (led != nullptr) {
             led->set_state(LedState::WIFI_RECONNECTING);
         }
