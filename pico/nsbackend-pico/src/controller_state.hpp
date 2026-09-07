@@ -27,6 +27,9 @@ public:
     void execute_command(const std::string& cmd_line);
     void check_scheduled();
 
+    // Formats a command string for console logging (e.g. "h" -> "h [Home]")
+    static std::string format_command_for_log(const std::string& cmd_line);
+
     // Direct GPIO button input interface
     void set_gpio_state(uint16_t gpio_buttons, bool up, bool down, bool left, bool right);
 

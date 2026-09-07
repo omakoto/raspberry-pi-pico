@@ -93,24 +93,24 @@ Supports standard 4x4 matrix keypads interfaced through an I2C PCF8574 / PCF8574
 - **I2C Address**: `0x20` (standard PCF8574) or `0x38` (PCF8574A, auto-detected fallback)
 
 ### Key Assignment
-| Keypad Key | Target Controller Input | Description |
-| :---: | :---: | :--- |
-| **`2`** | **D-pad UP** | Directional Pad UP |
-| **`4`** | **D-pad LEFT** | Directional Pad LEFT |
-| **`6`** | **D-pad RIGHT** | Directional Pad RIGHT |
-| **`8`** | **D-pad DOWN** | Directional Pad DOWN |
-| **`1`** | **L1** (`BTN_L`) | Left bumper |
-| **`3`** | **R1** (`BTN_R`) | Right bumper |
-| **`7`** | **L2** (`BTN_ZL`) | Left trigger (ZL) |
-| **`9`** | **R2** (`BTN_ZR`) | Right trigger (ZR) |
-| **`*`** | **Minus** (`BTN_MINUS`) | Select / Minus |
-| **`#`** | **Plus** (`BTN_PLUS`) | Start / Plus |
-| **`A`** | **A** (`BTN_A`) | Button A |
-| **`B`** | **B** (`BTN_B`) | Button B |
-| **`C`** | **X** (`BTN_X`) | Button X |
-| **`D`** | **Y** (`BTN_Y`) | Button Y |
-| **`0`** | **Home** (`BTN_HOME`) | Home Button |
-| **`5`** | *(Unused)* | Ignored |
+| Keypad Key | Target Controller Input | Logged Command | Description |
+| :---: | :---: | :---: | :--- |
+| **`2`** | **D-pad UP** | `pu [Up]` | Directional Pad UP |
+| **`4`** | **D-pad LEFT** | `pl [Left]` | Directional Pad LEFT |
+| **`6`** | **D-pad RIGHT** | `pr [Right]` | Directional Pad RIGHT |
+| **`8`** | **D-pad DOWN** | `pd [Down]` | Directional Pad DOWN |
+| **`1`** | **L1** (`BTN_L`) | `l1 [L]` | Left bumper |
+| **`3`** | **R1** (`BTN_R`) | `r1 [R]` | Right bumper |
+| **`7`** | **L2** (`BTN_ZL`) | `l2 [ZL]` | Left trigger (ZL) |
+| **`9`** | **R2** (`BTN_ZR`) | `r2 [ZR]` | Right trigger (ZR) |
+| **`*`** | **Minus** (`BTN_MINUS`) | `m [Minus]` | Select / Minus |
+| **`#`** | **Plus** (`BTN_PLUS`) | `p [Plus]` | Start / Plus |
+| **`A`** | **A** (`BTN_A`) | `a [A]` | Button A |
+| **`B`** | **B** (`BTN_B`) | `b [B]` | Button B |
+| **`C`** | **X** (`BTN_X`) | `x [X]` | Button X |
+| **`D`** | **Y** (`BTN_Y`) | `y [Y]` | Button Y |
+| **`0`** | **Home** (`BTN_HOME`) | `h [Home]` | Home Button |
+| **`5`** | *(Unused)* | *(None)* | Ignored |
 
 ---
 
@@ -223,10 +223,10 @@ l1             # Left bumper (L)
 r1             # Right bumper (R)
 l2             # Left trigger (ZL)
 r2             # Right trigger (ZR)
-plus           # Plus / Start button
-minus          # Minus / Select button
-home           # Home button
-capture        # Capture / Screenshot button
+p, plus        # Plus / Start button
+m, minus       # Minus / Select button
+h, home        # Home button
+c, capture     # Capture / Screenshot button
 pu             # D-pad UP
 pd             # D-pad DOWN
 pl             # D-pad LEFT

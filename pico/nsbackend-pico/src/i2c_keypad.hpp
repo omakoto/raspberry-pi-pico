@@ -17,6 +17,7 @@ constexpr int KEYPAD_FAIL = 17;
 
 struct I2cKeypadConfig {
     bool enabled = true;
+    bool log_enabled = true;
     uint8_t sda_pin = 20;
     uint8_t scl_pin = 21;
     uint8_t address = 0x20;
@@ -32,6 +33,9 @@ public:
 
     bool init();
     void start();
+
+    // Converts a matrix key character to its canonical console command string
+    static const char* key_to_command_name(char c);
 
 private:
     static void keypad_task_entry(void* param);

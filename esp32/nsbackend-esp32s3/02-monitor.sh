@@ -38,9 +38,9 @@ if [[ -z "$PORT" ]]; then
 fi
 
 if [[ -n "$PORT" ]]; then
-    echo "Monitoring serial output on port ${PORT} (Press Ctrl+] to exit)..."
+    echo "Monitoring serial output on port ${PORT} (Press Ctrl+] to quit)..."
     idf.py -p "$PORT" monitor "$@"
 else
-    echo "No serial port specified or auto-detected. Attempting default monitor..."
+    echo "No serial port specified or auto-detected. Attempting default monitor (Press Ctrl+] to quit)..."
     idf.py monitor "$@"
 fi

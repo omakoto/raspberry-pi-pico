@@ -67,6 +67,7 @@ static void supervisor_task(void* param) {
     // 6. Initialize I2C Matrix Keypad (PCF8574)
     I2cKeypadConfig keypad_config;
     keypad_config.enabled = config.get_bool("i2c_keypad_enabled", true);
+    keypad_config.log_enabled = log_enabled;
     keypad_config.sda_pin = static_cast<uint8_t>(config.get_int("i2c_sda_pin", 20));
     keypad_config.scl_pin = static_cast<uint8_t>(config.get_int("i2c_scl_pin", 21));
     keypad_config.address = static_cast<uint8_t>(config.get_int("i2c_address", 0x20));

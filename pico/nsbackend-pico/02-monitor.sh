@@ -35,18 +35,23 @@ echo "Connecting to serial console on ${PORT} at ${BAUD} baud..."
 
 # Try available serial monitor utilities
 if command -v tio >/dev/null 2>&1; then
+    echo "Launching tio (Press Ctrl+t then q to quit)..."
     exec tio -b "$BAUD" "$PORT" "$@"
 elif command -v picocom >/dev/null 2>&1; then
+    echo "Launching picocom (Press Ctrl+a then Ctrl+x to quit)..."
     exec picocom -b "$BAUD" "$PORT" "$@"
 elif command -v minicom >/dev/null 2>&1; then
+    echo "Launching minicom (Press Ctrl+a then q to quit)..."
     exec minicom -D "$PORT" -b "$BAUD" "$@"
 elif python3 -c "import serial.tools.miniterm" >/dev/null 2>&1; then
+    echo "Launching miniterm (Press Ctrl+] to quit)..."
     exec python3 -m serial.tools.miniterm "$PORT" "$BAUD" "$@"
 elif command -v screen >/dev/null 2>&1; then
+    echo "Launching screen (Press Ctrl+a then k to quit)..."
     exec screen "$PORT" "$BAUD"
 else
     echo "No interactive terminal tool found (tio, picocom, minicom, pyserial, or screen)." >&2
-    echo "Streaming raw output with cat (Ctrl+C to stop)..."
+    echo "Streaming raw output with cat (Press Ctrl+C to quit)..."
     stty -F "$PORT" "$BAUD" raw -echo
     cat "$PORT"
 fi

@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <sstream>
+#include <cctype>
 #include "pico/time.h"
 
 static constexpr int64_t DEFAULT_AUTO_RELEASE_US = 50000; // 50ms
@@ -157,6 +158,86 @@ void ControllerState::sync_report() {
     gamepad_.send_report(merged_buttons, hat, lx_byte, ly_byte, rx_byte, ry_byte);
 }
 
+std::string ControllerState::format_command_for_log(const std::string& cmd_line) {
+    std::string line = cmd_line;
+    auto hash_pos = line.find('#');
+    std::string comment;
+    if (hash_pos != std::string::npos) {
+        comment = line.substr(hash_pos);
+        line = line.substr(0, hash_pos);
+    }
+
+    std::stringstream ss(line);
+    std::vector<std::string> tokens;
+    std::string token;
+    while (ss >> token) {
+        tokens.push_back(token);
+    }
+
+    if (tokens.empty()) {
+        return cmd_line;
+    }
+
+    size_t cmd_idx = 0;
+    std::string duration_prefix;
+
+    // Check for optional leading duration e.g. "0.05 a 1"
+    if (!tokens[0].empty() && (std::isdigit(static_cast<unsigned char>(tokens[0][0])) || tokens[0][0] == '.')) {
+        char* end_ptr = nullptr;
+        std::strtod(tokens[0].c_str(), &end_ptr);
+        if (end_ptr != tokens[0].c_str()) {
+            duration_prefix = tokens[0] + " ";
+            cmd_idx = 1;
+        }
+    }
+
+    if (cmd_idx >= tokens.size()) {
+        return cmd_line;
+    }
+
+    std::string lower_cmd = tokens[cmd_idx];
+    std::transform(lower_cmd.begin(), lower_cmd.end(), lower_cmd.begin(), [](unsigned char c){ return std::tolower(c); });
+
+    const char* short_name = nullptr;
+    const char* full_name = nullptr;
+
+    if (lower_cmd == "a") { short_name = "a"; full_name = "A"; }
+    else if (lower_cmd == "b") { short_name = "b"; full_name = "B"; }
+    else if (lower_cmd == "x") { short_name = "x"; full_name = "X"; }
+    else if (lower_cmd == "y") { short_name = "y"; full_name = "Y"; }
+    else if (lower_cmd == "h" || lower_cmd == "home") { short_name = "h"; full_name = "Home"; }
+    else if (lower_cmd == "c" || lower_cmd == "capture") { short_name = "c"; full_name = "Capture"; }
+    else if (lower_cmd == "m" || lower_cmd == "-" || lower_cmd == "minus") { short_name = "m"; full_name = "Minus"; }
+    else if (lower_cmd == "p" || lower_cmd == "+" || lower_cmd == "plus") { short_name = "p"; full_name = "Plus"; }
+    else if (lower_cmd == "l1") { short_name = "l1"; full_name = "L"; }
+    else if (lower_cmd == "r1") { short_name = "r1"; full_name = "R"; }
+    else if (lower_cmd == "l2") { short_name = "l2"; full_name = "ZL"; }
+    else if (lower_cmd == "r2") { short_name = "r2"; full_name = "ZR"; }
+    else if (lower_cmd == "lp") { short_name = "lp"; full_name = "LStick"; }
+    else if (lower_cmd == "rp") { short_name = "rp"; full_name = "RStick"; }
+    else if (lower_cmd == "pu") { short_name = "pu"; full_name = "Up"; }
+    else if (lower_cmd == "pd") { short_name = "pd"; full_name = "Down"; }
+    else if (lower_cmd == "pl") { short_name = "pl"; full_name = "Left"; }
+    else if (lower_cmd == "pr") { short_name = "pr"; full_name = "Right"; }
+    else if (lower_cmd == "pur") { short_name = "pur"; full_name = "Up+Right"; }
+    else if (lower_cmd == "pul") { short_name = "pul"; full_name = "Up+Left"; }
+    else if (lower_cmd == "pdr") { short_name = "pdr"; full_name = "Down+Right"; }
+    else if (lower_cmd == "pdl") { short_name = "pdl"; full_name = "Down+Left"; }
+
+    if (short_name == nullptr) {
+        return cmd_line;
+    }
+
+    std::string formatted = duration_prefix + short_name + " [" + full_name + "]";
+    for (size_t i = cmd_idx + 1; i < tokens.size(); ++i) {
+        formatted += " " + tokens[i];
+    }
+    if (!comment.empty()) {
+        formatted += " " + comment;
+    }
+    return formatted;
+}
+
 void ControllerState::execute_command(const std::string& cmd_line) {
     std::string line = cmd_line;
     auto hash_pos = line.find('#');
@@ -220,10 +301,10 @@ void ControllerState::execute_command(const std::string& cmd_line) {
     else if (cmd == "b") set_button(BTN_B, is_active);
     else if (cmd == "x") set_button(BTN_X, is_active);
     else if (cmd == "y") set_button(BTN_Y, is_active);
-    else if (cmd == "h") set_button(BTN_HOME, is_active);
-    else if (cmd == "c") set_button(BTN_CAPTURE, is_active);
-    else if (cmd == "m" || cmd == "-") set_button(BTN_MINUS, is_active);
-    else if (cmd == "p" || cmd == "+") set_button(BTN_PLUS, is_active);
+    else if (cmd == "h" || cmd == "home") set_button(BTN_HOME, is_active);
+    else if (cmd == "c" || cmd == "capture") set_button(BTN_CAPTURE, is_active);
+    else if (cmd == "m" || cmd == "-" || cmd == "minus") set_button(BTN_MINUS, is_active);
+    else if (cmd == "p" || cmd == "+" || cmd == "plus") set_button(BTN_PLUS, is_active);
     else if (cmd == "l1") set_button(BTN_L, is_active);
     else if (cmd == "l2") set_button(BTN_ZL, is_active);
     else if (cmd == "r1") set_button(BTN_R, is_active);

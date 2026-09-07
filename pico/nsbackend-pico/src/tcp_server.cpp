@@ -193,7 +193,7 @@ void TcpServer::handle_client(int client_sock) {
 
             if (!line.empty()) {
                 if (log_enabled_) {
-                    dual_println(line);
+                    dual_println(ControllerState::format_command_for_log(line));
                 }
 
                 if (enable_echo_) {

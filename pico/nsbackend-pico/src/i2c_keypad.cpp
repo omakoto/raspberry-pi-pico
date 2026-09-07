@@ -206,6 +206,38 @@ void I2cKeypadManager::map_char_to_controller(
     }
 }
 
+const char* I2cKeypadManager::key_to_command_name(char c) {
+    switch (c) {
+        // Directional Pad
+        case '2': return "pu [Up]";
+        case '4': return "pl [Left]";
+        case '6': return "pr [Right]";
+        case '8': return "pd [Down]";
+
+        // Bumpers and Triggers
+        case '1': return "l1 [L]";
+        case '3': return "r1 [R]";
+        case '7': return "l2 [ZL]";
+        case '9': return "r2 [ZR]";
+
+        // System Buttons
+        case '*': return "m [Minus]";
+        case '#': return "p [Plus]";
+        case '0': return "h [Home]";
+
+        // Face Buttons
+        case 'A': case 'a': return "a [A]";
+        case 'B': case 'b': return "b [B]";
+        case 'C': case 'c': return "x [X]";
+        case 'D': case 'd': return "y [Y]";
+
+        // Key '5' is unassigned
+        case '5':
+        default:
+            return nullptr;
+    }
+}
+
 void I2cKeypadManager::run_task() {
     int stable_key = KEYPAD_NOKEY;
     int candidate_key = KEYPAD_NOKEY;
@@ -254,6 +286,13 @@ void I2cKeypadManager::run_task() {
                 char ch = key_to_char(stable_key);
                 map_char_to_controller(ch, buttons, up, down, left, right);
                 LOG_D(TAG, "Keypad event: key index %d ('%c')", stable_key, ch);
+
+                if (config_.log_enabled) {
+                    const char* cmd_name = key_to_command_name(ch);
+                    if (cmd_name != nullptr) {
+                        dual_println(cmd_name);
+                    }
+                }
             }
 
             controller_.set_keypad_state(buttons, up, down, left, right);

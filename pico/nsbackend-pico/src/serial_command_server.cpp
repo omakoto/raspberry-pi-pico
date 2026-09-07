@@ -123,7 +123,7 @@ void SerialCommandServer::process_stream(std::string& accum, const char* data, s
 
         if (!line.empty()) {
             if (log_enabled_) {
-                dual_println(line);
+                dual_println(ControllerState::format_command_for_log(line));
             }
 
             if (enable_echo_) {
