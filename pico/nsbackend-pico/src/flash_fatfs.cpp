@@ -247,8 +247,14 @@ int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t* 
 }
 
 int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void* buffer, uint16_t bufsize) {
-    (void)lun; (void)scsi_cmd; (void)buffer; (void)bufsize;
-    return -1;
+    (void)lun; (void)buffer; (void)bufsize;
+    switch (scsi_cmd[0]) {
+    case SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL: // 0x1E
+        // Allow or prevent medium removal command from host operating systems
+        return 0;
+    default:
+        return -1;
+    }
 }
 
 } // extern "C"
