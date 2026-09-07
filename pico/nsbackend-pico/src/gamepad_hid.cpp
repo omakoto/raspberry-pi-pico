@@ -57,6 +57,7 @@ static const uint8_t switch_hid_report_descriptor[] = {
 };
 
 // Device Descriptor
+// Use MISC class with IAD protocol for composite USB device (HID + CDC + MSC)
 static const tusb_desc_device_t desc_device = {
     .bLength            = sizeof(tusb_desc_device_t),
     .bDescriptorType    = TUSB_DESC_DEVICE,
@@ -99,9 +100,10 @@ static const char* string_descriptors[] = {
 };
 
 static uint16_t s_desc_str[64];
+static GamepadHid* s_gamepad_instance = nullptr;
 
 // ---------------------------------------------------------------------------
-// TinyUSB Standard Descriptor Callbacks
+// TinyUSB Standard Descriptor & Device Callbacks
 // ---------------------------------------------------------------------------
 
 extern "C" {
@@ -146,7 +148,24 @@ uint8_t const* tud_hid_descriptor_report_cb(uint8_t instance) {
 }
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
-    (void)instance; (void)report_id; (void)report_type; (void)buffer; (void)reqlen;
+    (void)instance; (void)report_id;
+    if (report_type == HID_REPORT_TYPE_INPUT) {
+        SwitchReport rep = {
+            .buttons = BTN_NONE,
+            .hat = HAT_CENTER,
+            .lx = 128,
+            .ly = 128,
+            .rx = 128,
+            .ry = 128,
+            .vendor = 0x00
+        };
+        if (s_gamepad_instance) {
+            rep = s_gamepad_instance->get_current_report();
+        }
+        uint16_t copy_len = std::min(reqlen, static_cast<uint16_t>(sizeof(SwitchReport)));
+        std::memcpy(buffer, &rep, copy_len);
+        return copy_len;
+    }
     return 0;
 }
 
@@ -157,6 +176,25 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* p_line_coding) {
     if (itf == 0 && p_line_coding->bit_rate == 1200) {
         reboot_to_bootsel();
+    }
+}
+
+void tud_mount_cb(void) {
+    if (s_gamepad_instance) {
+        s_gamepad_instance->on_mount();
+    }
+}
+
+void tud_umount_cb(void) {
+    if (s_gamepad_instance) {
+        s_gamepad_instance->on_umount();
+    }
+}
+
+void tud_hid_report_complete_cb(uint8_t instance, uint8_t const* report, uint16_t len) {
+    (void)instance; (void)report; (void)len;
+    if (s_gamepad_instance) {
+        s_gamepad_instance->on_report_complete();
     }
 }
 
@@ -172,13 +210,17 @@ void reboot_to_bootsel() {
 // GamepadHid Class Implementation
 // ---------------------------------------------------------------------------
 
-GamepadHid::GamepadHid() : initialized_(false) {
-    std::memset(&last_report_, 0, sizeof(last_report_));
-    last_report_.hat = HAT_CENTER;
-    last_report_.lx = 128;
-    last_report_.ly = 128;
-    last_report_.rx = 128;
-    last_report_.ry = 128;
+GamepadHid::GamepadHid() : current_report_{}, last_report_{}, report_sent_(false), initialized_(false) {
+    current_report_ = {
+        .buttons = BTN_NONE,
+        .hat = HAT_CENTER,
+        .lx = 128,
+        .ly = 128,
+        .rx = 128,
+        .ry = 128,
+        .vendor = 0x00
+    };
+    std::memset(&last_report_, 0xFF, sizeof(last_report_));
 }
 
 GamepadHid::~GamepadHid() {}
@@ -189,7 +231,10 @@ void GamepadHid::usb_task_entry(void* param) {
 
 void GamepadHid::run_usb_task() {
     while (true) {
-        tud_task();
+        // Sleep on the TinyUSB event queue that the USB ISR posts to, so USB transactions are
+        // serviced with no polling latency. The 10ms cap only bounds how long a BOOTSEL reboot
+        // request waits when the bus is idle.
+        tud_task_ext(10, false);
 
         if (s_bootsel_reboot_requested) {
             // Allow in-flight USB transactions (such as control ACK or serial echo) to complete
@@ -200,12 +245,20 @@ void GamepadHid::run_usb_task() {
             reset_usb_boot(0, 0);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1));
+        // Transmit initial neutral report once host finishes mounting and endpoint is ready
+        if (!report_sent_ && tud_mounted() && tud_hid_ready()) {
+            if (tud_hid_report(0, &current_report_, sizeof(SwitchReport))) {
+                last_report_ = current_report_;
+                report_sent_ = true;
+                LOG_I(TAG, "Sent initial neutral HID report to host");
+            }
+        }
     }
 }
 
 bool GamepadHid::init() {
     LOG_I(TAG, "Initializing TinyUSB Composite Device (Switch Gamepad HID + CDC + MSC)...");
+    s_gamepad_instance = this;
 
     if (!tusb_init()) {
         LOG_E(TAG, "tusb_init() failed");
@@ -237,11 +290,38 @@ void GamepadHid::send_report(uint16_t buttons, uint8_t hat, uint8_t lx, uint8_t 
         .ry = ry,
         .vendor = 0x00
     };
+    current_report_ = report;
 
-    if (std::memcmp(&report, &last_report_, sizeof(SwitchReport)) != 0) {
+    if (!report_sent_ || std::memcmp(&report, &last_report_, sizeof(SwitchReport)) != 0) {
         if (tud_mounted() && tud_hid_ready()) {
-            tud_hid_report(0, &report, sizeof(SwitchReport));
-            last_report_ = report;
+            if (tud_hid_report(0, &report, sizeof(SwitchReport))) {
+                last_report_ = report;
+                report_sent_ = true;
+            }
         }
     }
+}
+
+void GamepadHid::on_mount() {
+    report_sent_ = false;
+}
+
+void GamepadHid::on_umount() {
+    report_sent_ = false;
+}
+
+void GamepadHid::on_report_complete() {
+    // If state changed while the previous transfer was in flight, transmit updated report
+    if (!report_sent_ || std::memcmp(&current_report_, &last_report_, sizeof(SwitchReport)) != 0) {
+        if (tud_mounted() && tud_hid_ready()) {
+            if (tud_hid_report(0, &current_report_, sizeof(SwitchReport))) {
+                last_report_ = current_report_;
+                report_sent_ = true;
+            }
+        }
+    }
+}
+
+SwitchReport GamepadHid::get_current_report() const {
+    return current_report_;
 }

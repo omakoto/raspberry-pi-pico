@@ -59,11 +59,18 @@ public:
     bool is_mounted() const;
     void send_report(uint16_t buttons, uint8_t hat, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry);
 
+    void on_mount();
+    void on_umount();
+    void on_report_complete();
+    SwitchReport get_current_report() const;
+
 private:
     static void usb_task_entry(void* param);
     void run_usb_task();
 
+    SwitchReport current_report_;
     SwitchReport last_report_;
+    bool report_sent_;
     bool initialized_;
 };
 

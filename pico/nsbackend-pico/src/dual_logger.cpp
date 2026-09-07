@@ -17,7 +17,7 @@ static SemaphoreHandle_t s_log_mutex = nullptr;
 
 // Translates newline characters to CRLF line endings for USB CDC ACM output
 static void cdc_write_crlf(const char* buf, size_t len) {
-    if (!tud_mounted() || len == 0) {
+    if (!tud_mounted() || !tud_cdc_n_connected(0) || len == 0) {
         return;
     }
 
@@ -123,8 +123,8 @@ void dual_println(const std::string& str) {
     uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(str.c_str()), str.length());
     uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>("\r\n"), 2);
 
-    // 2. Output to USB CDC ACM when host is mounted
-    if (tud_mounted() && (taken || !scheduler_running)) {
+    // 2. Output to USB CDC ACM when host terminal is actively connected
+    if (tud_mounted() && tud_cdc_n_connected(0) && (taken || !scheduler_running)) {
         tud_cdc_n_write(0, str.c_str(), static_cast<uint32_t>(str.length()));
         tud_cdc_n_write(0, "\r\n", 2);
         tud_cdc_n_write_flush(0);

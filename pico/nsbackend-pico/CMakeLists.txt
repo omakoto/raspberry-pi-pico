@@ -26,6 +26,15 @@ endif()
 
 include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
+# Select the FreeRTOS TinyUSB OS abstraction layer before the SDK builds TinyUSB.
+# hw/bsp/rp2040/family.cmake only defaults TINYUSB_OPT_OS to OPT_OS_PICO when it is unset,
+# and the OPT_OS_PICO osal has a non-blocking osal_queue_receive(). Under FreeRTOS that forces
+# the USB device task to either poll on a timer (adding latency to every USB transaction) or
+# spin without yielding, which starves lower-priority tasks because FreeRTOS SMP defaults
+# configRUN_MULTIPLE_PRIORITIES to 0. With the FreeRTOS osal, tud_task_ext() sleeps on a queue
+# that the USB ISR posts to, so USB events are serviced immediately and the CPU stays free.
+set(TINYUSB_OPT_OS OPT_OS_FREERTOS)
+
 project(nsbackend-pico C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -88,6 +97,12 @@ add_executable(nsbackend-pico ${APP_SOURCES})
 
 target_compile_definitions(nsbackend-pico PRIVATE
     NSBACKEND_HAS_WIFI=${NSBACKEND_HAS_WIFI}
+    # Apply the RP2040-E5 USB workaround. The RP2040 USB PHY expects 800us of uninterrupted
+    # linestate J after a bus reset before it considers itself connected, which never happens
+    # downstream of a hub that is also passing traffic for other devices -- for example the
+    # USB hub inside a Nintendo Switch dock. The SDK links the workaround but leaves it
+    # disabled; it self-checks the silicon revision, so it is inert on RP2350 and on RP2040-B2.
+    PICO_RP2040_USB_DEVICE_ENUMERATION_FIX=1
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)

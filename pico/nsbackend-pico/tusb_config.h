@@ -13,6 +13,11 @@
 extern "C" {
 #endif
 
+// CFG_TUSB_OS is supplied on the compiler command line by the Pico SDK, driven by the
+// TINYUSB_OPT_OS variable set in CMakeLists.txt. It must stay OPT_OS_FREERTOS: with the
+// OPT_OS_PICO osal, osal_queue_receive() ignores its timeout and returns immediately, which
+// turns the USB device task into an unyielding spin that starves every other FreeRTOS task.
+
 // Port configuration (Device mode)
 #define CFG_TUSB_RHPORT0_MODE       (OPT_MODE_DEVICE)
 
