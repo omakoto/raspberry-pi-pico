@@ -10,8 +10,9 @@
 #include "pico/time.h"
 #include "dual_logger.hpp"
 
-#if defined(PICO_CYW43_SUPPORTED) && PICO_CYW43_SUPPORTED
+#if defined(CYW43_WL_GPIO_LED_PIN)
 #include "pico/cyw43_arch.h"
+#include "cyw43.h"
 #endif
 
 static const char* TAG = "StatusLed";
@@ -19,6 +20,7 @@ static const char* TAG = "StatusLed";
 StatusLed::StatusLed(uint32_t pin, bool active_low)
     : pin_(pin),
       active_low_(active_low),
+      last_raw_(-1),
       current_state_(LedState::INITIALIZING),
       task_handle_(nullptr),
       running_(false) {}
@@ -29,11 +31,25 @@ StatusLed::~StatusLed() {
         vTaskDelete(task_handle_);
         task_handle_ = nullptr;
     }
+    last_raw_ = -1;
     set_raw(false);
 }
 
 bool StatusLed::init() {
-#if !(defined(PICO_CYW43_SUPPORTED) && PICO_CYW43_SUPPORTED)
+#if defined(CYW43_WL_GPIO_LED_PIN)
+    if (pin_ == 25) {
+        // Pico W / Pico 2 W routes onboard LED through the CYW43 wireless controller
+        if (!cyw43_is_initialized(&cyw43_state)) {
+            if (cyw43_arch_init() != 0) {
+                LOG_E(TAG, "Failed to initialize CYW43 architecture");
+                return false;
+            }
+        }
+    } else {
+        gpio_init(pin_);
+        gpio_set_dir(pin_, GPIO_OUT);
+    }
+#else
     gpio_init(pin_);
     gpio_set_dir(pin_, GPIO_OUT);
 #endif
@@ -47,7 +63,7 @@ bool StatusLed::init() {
         return false;
     }
 
-    LOG_I(TAG, "Status LED initialized (active_low=%d)", active_low_);
+    LOG_I(TAG, "Status LED initialized (pin=%lu, active_low=%d)", static_cast<unsigned long>(pin_), active_low_);
     return true;
 }
 
@@ -60,13 +76,23 @@ LedState StatusLed::get_state() const {
 }
 
 void StatusLed::set_raw(bool on) {
-    int level = active_low_ ? (!on ? 1 : 0) : (on ? 1 : 0);
+    if (last_raw_ == static_cast<int>(on)) {
+        return;
+    }
+    last_raw_ = static_cast<int>(on);
 
-#if defined(PICO_CYW43_SUPPORTED) && PICO_CYW43_SUPPORTED
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, level);
-#else
-    gpio_put(pin_, level);
+#if defined(CYW43_WL_GPIO_LED_PIN)
+    if (pin_ == 25) {
+        if (cyw43_is_initialized(&cyw43_state)) {
+            // Onboard CYW43 wireless LED is hardwired active-high
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, on ? 1 : 0);
+        }
+        return;
+    }
 #endif
+
+    int level = active_low_ ? (!on ? 1 : 0) : (on ? 1 : 0);
+    gpio_put(pin_, level);
 }
 
 void StatusLed::task_entry(void* arg) {

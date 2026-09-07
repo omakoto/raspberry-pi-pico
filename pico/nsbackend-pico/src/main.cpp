@@ -43,7 +43,7 @@ static void supervisor_task(void* param) {
     int tcp_port = config.get_int("tcp_port", 10100);
     bool log_enabled = config.get_bool("log", true);
     bool enable_echo = config.get_bool("enable_echo", true);
-    bool led_active_low = config.get_bool("led_active_low", false);
+    bool led_active_low = config.get_bool("pico_led_active_low", config.get_bool("led_active_low", false));
 
     // 2. Initialize Status LED
     StatusLed status_led(25, led_active_low);

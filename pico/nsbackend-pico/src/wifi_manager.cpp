@@ -31,9 +31,11 @@ bool WifiManager::init() {
         return true;
     }
 
-    if (cyw43_arch_init() != 0) {
-        LOG_E(TAG, "Failed to initialize CYW43 architecture");
-        return false;
+    if (!cyw43_is_initialized(&cyw43_state)) {
+        if (cyw43_arch_init() != 0) {
+            LOG_E(TAG, "Failed to initialize CYW43 architecture");
+            return false;
+        }
     }
 
     cyw43_arch_enable_sta_mode();

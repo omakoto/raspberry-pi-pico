@@ -35,6 +35,7 @@ private:
 
     uint32_t pin_;
     bool active_low_;
+    int last_raw_;
     std::atomic<LedState> current_state_;
     TaskHandle_t task_handle_;
     std::atomic<bool> running_;
