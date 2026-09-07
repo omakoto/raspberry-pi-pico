@@ -13,33 +13,33 @@ All four models share a standardized, pin-compatible 40-pin DIP form factor (21 
 ## ASCII Pinout Diagram (All Models)
 
 ```text
-                                  [ Micro-USB ]
-                               +-----------------+
-        (UART0 TX / I2C0 SDA)  GP0 -| [1]          [40] |- VBUS  (5V USB Input)
-        (UART0 RX / I2C0 SCL)  GP1 -| [2]          [39] |- VSYS  (1.8V-5.5V Main Power)
+                                       [ Micro-USB ]
+                                    +-------------------+
+         GP0 / UART0 TX / I2C0 SDA -| [1]          [40] |- VBUS  (5V USB Input)
+         GP1 / UART0 RX / I2C0 SCL -| [2]          [39] |- VSYS  (1.8V-5.5V Main Power)
                                GND -| [3]          [38] |- GND
-       (UART1 TX / I2C1 SDA)   GP2 -| [4]          [37] |- 3V3_EN (Regulator Enable)
-       (UART1 RX / I2C1 SCL)   GP3 -| [5]          [36] |- 3V3_OUT (3.3V Power Out)
-       (UART1 CTS / I2C0 SDA)  GP4 -| [6]          [35] |- ADC_VREF (ADC Reference)
-       (UART1 RTS / I2C0 SCL)  GP5 -| [7]   PICO   [34] |- GP28 / ADC2
+         GP2 / UART1 TX / I2C1 SDA -| [4]          [37] |- 3V3_EN (Regulator Enable)
+         GP3 / UART1 RX / I2C1 SCL -| [5]          [36] |- 3V3_OUT (3.3V Power Out)
+        GP4 / UART1 CTS / I2C0 SDA -| [6]          [35] |- ADC_VREF (ADC Reference)
+        GP5 / UART1 RTS / I2C0 SCL -| [7]   PICO   [34] |- GP28 / ADC2
                                GND -| [8]  FAMILY  [33] |- AGND (ADC Ground Reference)
-       (UART1 TX / I2C1 SDA)   GP6 -| [9]          [32] |- GP27 / ADC1 / I2C1 SCL
-       (UART1 RX / I2C1 SCL)   GP7 -| [10]         [31] |- GP26 / ADC0 / I2C1 SDA
-       (UART1 CTS / I2C0 SDA)  GP8 -| [11]         [30] |- RUN (Hardware Reset / Enable)
-       (UART1 RTS / I2C0 SCL)  GP9 -| [12]         [29] |- GP22
+         GP6 / UART1 TX / I2C1 SDA -| [9]          [32] |- GP27 / ADC1 / I2C1 SCL
+         GP7 / UART1 RX / I2C1 SCL -| [10]         [31] |- GP26 / ADC0 / I2C1 SDA
+        GP8 / UART1 CTS / I2C0 SDA -| [11]         [30] |- RUN (Hardware Reset / Enable)
+        GP9 / UART1 RTS / I2C0 SCL -| [12]         [29] |- GP22
                                GND -| [13]         [28] |- GND
-       (UART1 TX / I2C1 SDA)  GP10 -| [14]         [27] |- GP21 / I2C0 SCL
-       (UART1 RX / I2C1 SCL)  GP11 -| [15]         [26] |- GP20 / I2C0 SDA
-       (UART0 TX / I2C0 SDA)  GP12 -| [16]         [25] |- GP19 / SPI0 TX(MOSI) / I2C1 SCL
-       (UART0 RX / I2C0 SCL)  GP13 -| [17]         [24] |- GP18 / SPI0 SCK      / I2C1 SDA
+        GP10 / UART1 TX / I2C1 SDA -| [14]         [27] |- GP21 / I2C0 SCL
+        GP11 / UART1 RX / I2C1 SCL -| [15]         [26] |- GP20 / I2C0 SDA
+        GP12 / UART0 TX / I2C0 SDA -| [16]         [25] |- GP19 / SPI0 TX(MOSI) / I2C1 SCL
+        GP13 / UART0 RX / I2C0 SCL -| [17]         [24] |- GP18 / SPI0 SCK      / I2C1 SDA
                                GND -| [18]         [23] |- GND
-       (UART0 CTS / I2C1 SDA) GP14 -| [19]         [22] |- GP17 / SPI0 CS
-       (UART0 RTS / I2C1 SCL) GP15 -| [20]         [21] |- GP16 / SPI0 RX(MISO)
-                               +-----------------+
-                                     | | |
-                             [ SWD Debug Port ]*
-                       *(Pico / Pico 2: 3-pin bottom header)
-                       *(Pico W / Pico 2 W: 3 pads near center)
+       GP14 / UART0 CTS / I2C1 SDA -| [19]         [22] |- GP17 / SPI0 CS
+       GP15 / UART0 RTS / I2C1 SCL -| [20]         [21] |- GP16 / SPI0 RX(MISO)
+                                    +-------------------+
+                                            | | |
+                                     [ SWD Debug Port ]*
+                             *(Pico / Pico 2: 3-pin bottom header)
+                             *(Pico W / Pico 2 W: 3 pads near center)
 ```
 
 ---
