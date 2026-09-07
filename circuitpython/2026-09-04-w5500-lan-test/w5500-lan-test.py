@@ -19,7 +19,6 @@ import time
 import board
 import busio
 import digitalio
-import microcontroller
 from adafruit_wiznet5k.adafruit_wiznet5k import WIZNET5K
 import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
 
@@ -115,19 +114,15 @@ def format_mac_address(mac_bytes: bytes | list[int] | tuple[int, ...]) -> str:
     return ":".join(f"{b:02X}" for b in mac_bytes)
 
 
-# Resolve a GPIO pin identifier on the current board
-def get_pin(pin_id: int | str) -> board.Pin:
-    if isinstance(pin_id, str):
-        if hasattr(board, pin_id):
-            return getattr(board, pin_id)
-        digits = "".join([c for c in pin_id if c.isdigit()])
-        num = int(digits) if digits else 0
-    else:
-        num = int(pin_id)
-    for candidate in (f"GP{num}", f"IO{num}", f"D{num}", f"GPIO{num}"):
+# Resolve an SoC GPIO number to the board pin exposing it (silk GP# on Pico, IO# on ESP32).
+# Silkscreen 'D' indices are deliberately not accepted: on the Seeed XIAO they count
+# header positions rather than GPIOs (silk D0 is GPIO1), which would leave the numbers
+# in config.toml meaning two different pins depending on the board.
+def get_pin(gpio: int) -> board.Pin:
+    for candidate in (f"GP{gpio}", f"IO{gpio}"):
         if hasattr(board, candidate):
             return getattr(board, candidate)
-    raise ValueError(f"GPIO pin {pin_id} not found on this board")
+    raise ValueError(f"GPIO{gpio} is not broken out on this board")
 
 
 # Obtain hardware MAC address from configuration, or default to standard test MAC
@@ -153,7 +148,7 @@ def main() -> None:
     pin_reset_id: int = int(config.get("spi_reset", DEFAULT_PIN_SPI_RESET))
 
     print(f"Configuration: hostname='{hostname}', tcp_port={tcp_port}")
-    print(f"SPI Pins: SCK=GP{pin_sck_id}, MOSI=GP{pin_mosi_id}, MISO=GP{pin_miso_id}, CS=GP{pin_cs_id}, RST=GP{pin_reset_id}")
+    print(f"SPI Pins: SCK=GPIO{pin_sck_id}, MOSI=GPIO{pin_mosi_id}, MISO=GPIO{pin_miso_id}, CS=GPIO{pin_cs_id}, RST=GPIO{pin_reset_id}")
 
     # Resolve board pins
     pin_sck = get_pin(pin_sck_id)

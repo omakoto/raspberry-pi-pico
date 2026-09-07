@@ -8,14 +8,15 @@
 # and runs a TCP server on port 10100 (advertised as nscon.local via mDNS).
 # Receives controller commands streamed from nsfrontend or interactive pipelines,
 # parsing inputs, directional sticks, and auto-releases, then updates HID reports.
-# Also supports physical hardware buttons wired to GPIO pins (active-low with pull-up):
-#   - D0 (GP0 / GPIO1): A button
-#   - D1 (GP1 / GPIO2): D-pad DOWN
-#   - D2 (GP2 / GPIO3): D-pad LEFT
-#   - D3 (GP3 / GPIO4): D-pad RIGHT
-#   - D4 (GP4 / GPIO5): D-pad UP
-#   - D5 (GP5 / GPIO6): B button
-#   - D10 (GP10 / GPIO9): L and R buttons simultaneously
+# Also supports physical hardware buttons wired to GPIO pins (active-low with pull-up),
+# given as SoC GPIO numbers (Pico / ESP32-S3):
+#   - A button:      GPIO0 (silk GP0)  / GPIO1 (XIAO silk D0)
+#   - D-pad DOWN:    GPIO1 (silk GP1)  / GPIO2 (XIAO silk D1)
+#   - D-pad LEFT:    GPIO2 (silk GP2)  / GPIO3 (XIAO silk D2)
+#   - D-pad RIGHT:   GPIO3 (silk GP3)  / GPIO4 (XIAO silk D3)
+#   - D-pad UP:      GPIO4 (silk GP4)  / GPIO5 (XIAO silk D4)
+#   - B button:      GPIO5 (silk GP5)  / GPIO6 (XIAO silk D5)
+#   - L + R buttons: GPIO10 (silk GP10) / GPIO9 (XIAO silk D10)
 # Accepts streaming serial commands on hardware UART (TX/RX @ 115200 baud) and USB CDC console.
 # Uses the onboard user LED to indicate progress:
 #   - Initialization (Wi-Fi + Server startup): LED constantly ON
@@ -28,7 +29,6 @@ import time
 import board
 import digitalio
 import mdns
-import microcontroller
 import socketpool
 import usb_hid
 import wifi
@@ -397,33 +397,16 @@ class SwitchGamepad:
                 pass
 
 
-# Resolves a GPIO pin identifier across different board architectures (ESP32-S3, Pico, etc.)
-def resolve_pin(pin_id: int | str) -> board.Pin | None:
-    if isinstance(pin_id, str):
-        if hasattr(board, pin_id):
-            return getattr(board, pin_id)
-        if hasattr(microcontroller.pin, pin_id):
-            return getattr(microcontroller.pin, pin_id)
-        digits = "".join([c for c in pin_id if c.isdigit()])
-        if digits:
-            num = int(digits)
-        else:
-            return None
-    else:
-        num = int(pin_id)
-
-    # Candidate prefixes across board definitions (D0-D5, D10 on XIAO, GP0-GP5, GP10 on Pico)
-    for prefix in ("D", "GP", "IO", "GPIO", "P"):
-        attr = f"{prefix}{num}"
-        if hasattr(board, attr):
-            return getattr(board, attr)
-
-    # Candidate prefixes in microcontroller.pin hardware layer
-    for prefix in ("GPIO", "GP", "IO"):
-        attr = f"{prefix}{num}"
-        if hasattr(microcontroller.pin, attr):
-            return getattr(microcontroller.pin, attr)
-
+# Resolves an SoC GPIO number to the board pin exposing it (silk GP# on Pico, IO# on
+# ESP32), or None when this board does not break that GPIO out.
+# Silkscreen 'D' indices are deliberately not accepted: on the Seeed XIAO they count
+# header positions rather than GPIOs (silk D0 is GPIO1), so a bare number would name
+# two different pins depending on the board. Only the board module is consulted, since
+# only it knows which GPIOs actually reach a header pad.
+def resolve_pin(gpio: int) -> board.Pin | None:
+    for candidate in (f"GP{gpio}", f"IO{gpio}"):
+        if hasattr(board, candidate):
+            return getattr(board, candidate)
     return None
 
 
@@ -468,28 +451,37 @@ class GpioButtonManager:
         self.controller: "ControllerState" = controller
         self.buttons: list[GpioButton] = []
 
-        # Pin mapping definition using 0-based digital pin indices: (pin_id, action, mask, description, cmd_name)
-        pin_specs: list[tuple[int | str, str, int, str, str]] = [
-            (0, "button", BTN_A, "A button", "a"),
-            (1, "dpad_down", 0, "D-pad Down", "pd"),
-            (2, "dpad_left", 0, "D-pad Left", "pl"),
-            (3, "dpad_right", 0, "D-pad Right", "pr"),
-            (4, "dpad_up", 0, "D-pad Up", "pu"),
-            (5, "button", BTN_B, "B button", "b"),
-            (10, "button", BTN_L | BTN_R, "L and R buttons", "l1 r1"),
+        # Button GPIOs as SoC GPIO numbers. They differ per family because a GPIO
+        # number lands on a different physical pin on each: the Pico run starts at
+        # GPIO0 (silk GP0) with GPIO10 for the shoulder pair, while the XIAO
+        # ESP32-S3 exposes the equivalent silk D0-D5 and D10 as GPIO1-GPIO6 and GPIO9.
+        is_rp2040: bool = hasattr(board, "GP0")
+        gpio_a, gpio_down, gpio_left = (0, 1, 2) if is_rp2040 else (1, 2, 3)
+        gpio_right, gpio_up, gpio_b = (3, 4, 5) if is_rp2040 else (4, 5, 6)
+        gpio_lr: int = 10 if is_rp2040 else 9
+
+        # Pin mapping definition: (gpio, action, mask, description, cmd_name)
+        pin_specs: list[tuple[int, str, int, str, str]] = [
+            (gpio_a, "button", BTN_A, "A button", "a"),
+            (gpio_down, "dpad_down", 0, "D-pad Down", "pd"),
+            (gpio_left, "dpad_left", 0, "D-pad Left", "pl"),
+            (gpio_right, "dpad_right", 0, "D-pad Right", "pr"),
+            (gpio_up, "dpad_up", 0, "D-pad Up", "pu"),
+            (gpio_b, "button", BTN_B, "B button", "b"),
+            (gpio_lr, "button", BTN_L | BTN_R, "L and R buttons", "l1 r1"),
         ]
 
-        for pin_id, action, mask, desc, cmd_name in pin_specs:
-            pin_obj = resolve_pin(pin_id)
+        for gpio, action, mask, desc, cmd_name in pin_specs:
+            pin_obj = resolve_pin(gpio)
             if pin_obj is not None:
                 try:
-                    btn = GpioButton(pin_obj, f"D{pin_id}", action, cmd_name, mask)
+                    btn = GpioButton(pin_obj, f"GPIO{gpio}", action, cmd_name, mask)
                     self.buttons.append(btn)
-                    print(f"GPIO button mapped: D{pin_id} ({pin_obj}) -> {desc} ({cmd_name})")
+                    print(f"GPIO button mapped: GPIO{gpio} ({pin_obj}) -> {desc} ({cmd_name})")
                 except Exception as e:
-                    print(f"Warning: Failed to initialize D{pin_id} for {desc}: {e}")
+                    print(f"Warning: Failed to initialize GPIO{gpio} for {desc}: {e}")
             else:
-                print(f"Notice: D{pin_id} not available on this board (skipping {desc})")
+                print(f"Notice: GPIO{gpio} not available on this board (skipping {desc})")
 
         # Apply initial physical switch state
         self._apply_to_controller()
@@ -894,9 +886,11 @@ class SerialCommandManager:
         self.uart_accum: str = ""
         self.cdc_accum: str = ""
 
-        # Attempt to initialize hardware UART (D6 TX / D7 RX on XIAO, GP0 TX / GP1 RX on Pico)
-        uart_tx = getattr(board, "TX", None) or resolve_pin("TX") or resolve_pin("D6") or resolve_pin("GP0")
-        uart_rx = getattr(board, "RX", None) or resolve_pin("RX") or resolve_pin("D7") or resolve_pin("GP1")
+        # Attempt to initialize hardware UART. board.TX / board.RX name the UART0 pair
+        # wherever the board defines them (GPIO43 / GPIO44, silk D6 / D7 on the XIAO);
+        # the Pico defines neither, so fall back to its UART0 default on GPIO0 / GPIO1.
+        uart_tx = getattr(board, "TX", None) or resolve_pin(0)
+        uart_rx = getattr(board, "RX", None) or resolve_pin(1)
         if uart_tx is not None and uart_rx is not None:
             try:
                 self.uart = busio.UART(tx=uart_tx, rx=uart_rx, baudrate=115200, timeout=0.0)

@@ -64,7 +64,10 @@ def discover_pins_from_microcontroller():
 
 def discover_pins_from_range(min_pin: int = SCAN_MIN_PIN, max_pin: int = SCAN_MAX_PIN):
     # Method B: Probes pin index range (min_pin to max_pin) looking up known naming patterns
-    # on both board and microcontroller.pin modules.
+    # on both board and microcontroller.pin modules. Only GPIO-numbered names are probed,
+    # since results are reported as GPIO<n>: silkscreen 'D' indices count header positions
+    # rather than GPIOs on the XIAO (silk D0 is GPIO1) and would be reported under the
+    # wrong number.
     # Returns a list of tuples: (pin_object, pin_name).
     discovered = []
     seen_pin_ids = set()
@@ -74,7 +77,6 @@ def discover_pins_from_range(min_pin: int = SCAN_MIN_PIN, max_pin: int = SCAN_MA
             (board, f"GP{pin_num}"),
             (board, f"GPIO{pin_num}"),
             (board, f"IO{pin_num}"),
-            (board, f"D{pin_num}"),
             (microcontroller.pin, f"GPIO{pin_num}"),
             (microcontroller.pin, f"GP{pin_num}"),
             (microcontroller.pin, f"IO{pin_num}"),
