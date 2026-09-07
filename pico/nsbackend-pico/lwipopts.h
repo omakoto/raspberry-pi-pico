@@ -40,6 +40,44 @@
 
 // Memory Configuration
 #define MEM_ALIGNMENT                   4
+
+#if defined(PICO_RP2040) && PICO_RP2040
+// RP2040 has 264KB total SRAM (256KB main RAM). Keep lwIP static memory pools
+// compact so they fit comfortably alongside the 160KB FreeRTOS heap and task stacks.
+#define MEM_SIZE                        (8 * 1024)
+#define MEMP_NUM_PBUF                   16
+#define MEMP_NUM_RAW_PCB                2
+#define MEMP_NUM_UDP_PCB                4
+#define MEMP_NUM_TCP_PCB                4
+#define MEMP_NUM_TCP_PCB_LISTEN         2
+#define MEMP_NUM_TCP_SEG                16
+#define MEMP_NUM_SYS_TIMEOUT            16
+#define MEMP_NUM_NETBUF                 4
+#define MEMP_NUM_NETCONN                4
+#define MEMP_NUM_TCPIP_MSG_API          8
+#define MEMP_NUM_TCPIP_MSG_INPKT        16
+
+#define PBUF_POOL_SIZE                  12
+#define PBUF_POOL_BUFSIZE               1536
+
+// Protocols
+#define LWIP_ARP                        1
+#define LWIP_ETHERNET                   1
+#define LWIP_ICMP                       1
+#define LWIP_RAW                        1
+#define LWIP_DHCP                       1
+#define LWIP_AUTOIP                     1
+#define LWIP_IGMP                       1
+#define LWIP_DNS                        1
+#define LWIP_UDP                        1
+#define LWIP_TCP                        1
+
+#define TCP_MSS                         1460
+#define TCP_WND                         (4 * TCP_MSS)
+#define TCP_SND_BUF                     (4 * TCP_MSS)
+#define TCP_SND_QUEUELEN                ((4 * (TCP_SND_BUF) + (TCP_MSS - 1)) / (TCP_MSS))
+#else
+// RP2350 has 512KB SRAM; allocate larger pools for maximum network buffer headroom.
 #define MEM_SIZE                        (16 * 1024)
 #define MEMP_NUM_PBUF                   32
 #define MEMP_NUM_RAW_PCB                4
@@ -72,6 +110,7 @@
 #define TCP_WND                         (8 * TCP_MSS)
 #define TCP_SND_BUF                     (8 * TCP_MSS)
 #define TCP_SND_QUEUELEN                ((4 * (TCP_SND_BUF) + (TCP_MSS - 1)) / (TCP_MSS))
+#endif
 
 #define LWIP_CHECKSUM_CTRL_PER_NETIF    0
 

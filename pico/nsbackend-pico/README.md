@@ -1,21 +1,19 @@
 # nsbackend-pico
 
-A high-performance C++ port of **nsbackend** for the **RP2350 Raspberry Pi Pico boards** (**Pico 2 W**, **Pico 2**), built on the **Raspberry Pi Pico SDK** and **FreeRTOS SMP**.
-
-> **RP2040 boards (Pico, Pico W) are not supported.** The firmware's static footprint needs the RP2350's 512KB of SRAM; see [Supported Boards](#6-supported-boards).
+A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family** (**Pico**, **Pico 2**, **Pico W**, **Pico 2 W**), built on the **Raspberry Pi Pico SDK** and **FreeRTOS SMP**.
 
 ---
 
 ## 1. Overview
 
-`nsbackend-pico` enables a Raspberry Pi Pico 2 microcontroller to operate as a high-performance Nintendo Switch controller backend:
+`nsbackend-pico` enables a Raspberry Pi Pico or Pico 2 microcontroller to operate as a high-performance Nintendo Switch controller backend:
 1. **USB HID Gamepad**: Emulates a HORI Pokken Nintendo Switch controller over native USB (`VID: 0x0f0d`, `PID: 0x0092`), transmitting 8-byte HID reports to the Nintendo Switch.
 2. **USB CDC ACM Serial Console**: Exposes a virtual serial console (`/dev/ttyACM0`) for real-time logging, status monitoring, and controller command input.
 3. **USB MSC Flash Storage**: Exposes the internal 1MB FAT12 partition as a standard USB flash drive, allowing configuration editing of `config.toml` directly from your PC without re-flashing.
 4. **Physical GPIO Buttons**: Active-low physical pushbuttons with internal pull-ups, 15ms debouncing, and opposing D-pad direction cancellation.
 5. **Dual Serial Command Server**: Concurrently accepts controller commands on hardware UART0 (GP12 TX / GP13 RX at 115,200 baud) and USB CDC ACM serial, while echoing logs to both channels.
-6. **Status LED State Machine**: Visual status indicators via onboard LED (CYW43 wireless GPIO on Pico 2 W, GP25 on Pico 2).
-7. **Wireless Networking (Pico 2 W only)**:
+6. **Status LED State Machine**: Visual status indicators via onboard LED (GP25 on Pico/Pico 2, CYW43 wireless GPIO on Pico W/Pico 2 W).
+7. **Wireless Networking (Pico W / Pico 2 W only)**:
    - **Multi-AP Wi-Fi Manager**: Automatic connection to configured access points with background scanning and seamless auto-reconnect.
    - **lwIP mDNS Service**: Advertises `nscon.local` with service `_nscon._tcp` on port `10100`.
    - **TCP Command Server**: High-throughput BSD socket server on port `10100` for streaming controller commands from frontend clients (`nsfrontend` or scripts).
@@ -37,7 +35,7 @@ A high-performance C++ port of **nsbackend** for the **RP2350 Raspberry Pi Pico 
 | **UART0 RX** | GP13 | `GPIO13` | Pin 17 | 115,200 baud, 8N1 / Serial command input |
 | **I2C0 SDA** | GP20 | `GPIO20` | Pin 26 | PCF8574 Keypad SDA (configurable via `i2c_sda_pin`) |
 | **I2C0 SCL** | GP21 | `GPIO21` | Pin 27 | PCF8574 Keypad SCL (configurable via `i2c_scl_pin`) |
-| **Status LED** | GP25 / CYW43 | Board LED | Onboard | CYW43 WL GPIO on Pico 2 W; GP25 on Pico 2 |
+| **Status LED** | GP25 / CYW43 | Board LED | Onboard | GP25 on Pico / Pico 2; CYW43 WL GPIO on Pico W / Pico 2 W |
 | **USB** | D+ / D- | Native USB | USB Port | Standard micro-USB (Pico) or USB-C connector |
 | **3.3V Power** | 3V3(OUT) | `3V3` | Pin 36 | 3.3V DC power for external peripherals (e.g. I2C keypad) |
 | **GND** | GND | `GND` | Pin 3, 8, 13, 18, 23, 28, 38 | Digital ground |
@@ -122,13 +120,13 @@ Supports standard 4x4 matrix keypads interfaced through an I2C PCF8574 / PCF8574
 | :--- | :--- | :--- | :--- |
 | **`pico2_w`** *(default)* | RP2350 (Dual ARM Cortex-M33) | CYW43439 (Wi-Fi 4 + BLE) | `./00-build.sh` |
 | **`pico2`** | RP2350 (Dual ARM Cortex-M33) | None (Serial/USB control) | `./00-build.sh -b pico2` |
+| **`pico_w`** | RP2040 (Dual ARM Cortex-M0+) | CYW43439 (Wi-Fi 4 + BLE) | `./00-build.sh -b pico_w` |
+| **`pico`** | RP2040 (Dual ARM Cortex-M0+) | None (Serial/USB control) | `./00-build.sh -b pico` |
 
-### Unsupported: RP2040 (`pico`, `pico_w`)
+### Memory Footprint & Architecture Differences
 
-Both the build script and CMake reject these boards. The firmware's static footprint is
-roughly 428KB -- a 320KB FreeRTOS heap plus ~110KB of other statics (lwIP, the CYW43 driver,
-the FatFs sector cache and the TinyUSB buffers) -- which fits the RP2350's 512KB of SRAM with
-about 84KB to spare, but does not fit the RP2040's 264KB.
+- **RP2350 (`pico2_w`, `pico2`)**: 512KB SRAM allows a 320KB FreeRTOS heap and expanded lwIP buffer pools (32 pbufs, 16KB TCP heap, 8×MSS windows).
+- **RP2040 (`pico_w`, `pico`)**: 264KB SRAM (256KB main RAM). On `pico_w`, lwIP static buffer pools are sized to 12 pbufs with an 8KB TCP heap and 4×MSS windows in `lwipopts.h`, allowing the full network stack to fit alongside a 160KB FreeRTOS heap with over 40KB of headroom for the C heap and runtime stacks.
 
 ---
 
@@ -147,8 +145,14 @@ cd ~/cbin/src/raspberry-pi-pico/pico/nsbackend-pico
 # Build for Pico 2 W (default):
 ./00-build.sh
 
+# Or build for Pico W:
+./00-build.sh -b pico_w -c
+
 # Or build clean for non-wireless Pico 2:
 ./00-build.sh -b pico2 -c
+
+# Or build clean for non-wireless Pico:
+./00-build.sh -b pico -c
 ```
 
 The build produces a single combined UF2 image in `build/`:
@@ -156,7 +160,7 @@ The build produces a single combined UF2 image in `build/`:
 - `storage.bin` / `storage.uf2`: Standalone FAT filesystem image and UF2 partition.
 
 ### 2. Flashing
-Hold down the **BOOTSEL** button on your Pico 2 while plugging it into your computer's USB port (the board mounts as a drive named `RP2350`).
+Hold down the **BOOTSEL** button on your Pico while plugging it into your computer's USB port (the board mounts as a drive named `RPI-RP2` or `RP2350`).
 
 Run:
 ```bash

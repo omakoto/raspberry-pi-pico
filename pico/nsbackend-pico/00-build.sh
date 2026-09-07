@@ -3,12 +3,9 @@
 # Builds the nsbackend-pico firmware and FAT partition image for Raspberry Pi Pico boards.
 #
 # Usage:
-#   ./00-build.sh [-b <pico2_w|pico2>] [-c] [cmake-build-options]
+#   ./00-build.sh [-b <pico2_w|pico2|pico_w|pico>] [-c] [cmake-build-options]
 #
 # Default board is pico2_w.
-#
-# Only RP2350 boards are supported. The RP2040 boards (pico, pico_w) are rejected because
-# the firmware's static footprint does not fit in their 264KB of SRAM.
 #
 
 set -euo pipefail
@@ -46,23 +43,21 @@ done
 
 cd "$SCRIPT_DIR"
 
-# Reject RP2040 boards up front so the failure is obvious rather than a linker overflow.
-if [[ "$BOARD" == "pico" || "$BOARD" == "pico_w" ]]; then
-    cat >&2 <<EOF
-Error: board '${BOARD}' is an RP2040 board and is not supported.
-
-This firmware needs the RP2350's 512KB of SRAM; the RP2040 has 264KB and the
-image does not link. Build for an RP2350 board instead:
-
-    ./00-build.sh -b pico2_w    # Pico 2 W (default)
-    ./00-build.sh -b pico2      # Pico 2, no Wi-Fi
-EOF
-    exit 1
-fi
-
 if [[ $DO_CLEAN -eq 1 && -d "build" ]]; then
     echo "Cleaning build directory..."
     rm -rf build
+elif [[ -f "build/CMakeCache.txt" ]]; then
+    # CMake cannot switch between RP2040 and RP2350 platforms in-place without a clean reconfigure.
+    CACHED_BOARD="$(grep -E '^PICO_BOARD:' build/CMakeCache.txt | cut -d= -f2 || true)"
+    CACHED_PLATFORM="$(grep -E '^PICO_PLATFORM:' build/CMakeCache.txt | cut -d= -f2 || true)"
+    case "$BOARD" in
+        pico2*) EXPECTED_PLATFORM="rp2350" ;;
+        *)      EXPECTED_PLATFORM="rp2040" ;;
+    esac
+    if [[ "$CACHED_BOARD" != "$BOARD" || "$CACHED_PLATFORM" != *"$EXPECTED_PLATFORM"* ]]; then
+        echo "Target board or platform changed (cached: ${CACHED_BOARD:-none}/${CACHED_PLATFORM:-none}, target: ${BOARD}/${EXPECTED_PLATFORM}). Cleaning build directory..."
+        rm -rf build
+    fi
 fi
 
 mkdir -p build
