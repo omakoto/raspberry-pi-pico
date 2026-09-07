@@ -13,9 +13,21 @@ elseif(DEFINED ENV{ESP32_CONFIG_TOML})
     endif()
 endif()
 
-# Default board to pico_w if not specified
+# Default board to pico2_w if not specified
 if(NOT DEFINED PICO_BOARD)
-    set(PICO_BOARD pico_w)
+    set(PICO_BOARD pico2_w)
+endif()
+
+# Reject the RP2040 boards. This firmware's static footprint is dominated by the 320KB
+# FreeRTOS heap plus roughly 110KB of other statics (lwIP, the CYW43 driver, the FatFs
+# sector cache and the TinyUSB buffers), which needs the RP2350's 512KB of SRAM. The RP2040
+# has 264KB, and shrinking the FreeRTOS heap far enough to link leaves too little for the
+# task stacks and network buffers to run reliably.
+if(PICO_BOARD STREQUAL "pico" OR PICO_BOARD STREQUAL "pico_w")
+    message(FATAL_ERROR
+        "PICO_BOARD '${PICO_BOARD}' is an RP2040 board and is not supported: this firmware "
+        "does not fit in the RP2040's 264KB of SRAM. Build for an RP2350 board instead, "
+        "for example 'pico2_w' (default) or 'pico2'.")
 endif()
 
 # Setup Pico SDK path
