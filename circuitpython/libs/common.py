@@ -2,55 +2,62 @@
 
 import board
 import busio
-import microcontroller
 
-def get_pin(pin_id: int | str) -> board.Pin:
+# Board pin-naming families returned by get_board_family().
+BOARD_RP2040: str = "rp2040"
+BOARD_ESP32: str = "esp32"
+
+
+def get_board_family() -> str:
     """
-    Resolves a GPIO pin identifier across different board architectures (Raspberry Pi Pico, ESP32/ESP32-S3, etc.).
+    Returns the pin-naming family of the running board: BOARD_RP2040 for the
+    Raspberry Pi Pico family, BOARD_ESP32 for ESP32 boards.
+
+    Scripts that run on both families use this to choose their own GPIO
+    assignments. A GPIO number identifies a different physical pin on each
+    family, so a single number cannot serve both.
+    """
+    return BOARD_RP2040 if hasattr(board, "GP0") else BOARD_ESP32
+
+
+def get_pin(gpio: int) -> board.Pin:
+    """
+    Resolves an SoC GPIO number to the board pin object exposing it.
+
+    A number always means the SoC GPIO number - the identifier shared by the
+    datasheet, microcontroller.pin, ESP-IDF, config.toml, and the silkscreen on
+    the Pico (GP#) and the ESP32-S3-DevKitC-1 (bare numbers). It is never a
+    silkscreen 'D' index: on the Seeed XIAO those count header positions rather
+    than GPIOs (silk D0 is GPIO1), so honouring them here would leave a bare
+    number meaning two different pins on that board.
+
+    Only the board module is consulted, never microcontroller.pin, because only
+    the board definition knows which GPIOs the vendor actually broke out. A GPIO
+    that exists on the die but reaches no header pad must raise rather than hand
+    back a pin nothing can be wired to.
 
     Args:
-        pin_id: An integer pin number (e.g. 1, 15) or pin name string (e.g. 'GP1', 'IO1', 'D1', 'GPIO1').
+        gpio: SoC GPIO number, e.g. 5 for GPIO5 (silk GP5 on Pico, IO5 on ESP32).
 
     Returns:
-        The board.Pin object corresponding to the requested GPIO.
+        The board.Pin exposing that GPIO.
 
     Raises:
-        ValueError: If the pin cannot be found on the current board.
+        ValueError: If this board does not break out that GPIO.
     """
-    if isinstance(pin_id, str):
-        # Direct lookup by exact attribute name on board or microcontroller.pin
-        if hasattr(board, pin_id):
-            return getattr(board, pin_id)
-        if hasattr(microcontroller.pin, pin_id):
-            return getattr(microcontroller.pin, pin_id)
-
-        # Extract numeric component if a string like 'GP1' or 'IO1' was passed on an incompatible board
-        digits = "".join([c for c in pin_id if c.isdigit()])
-        if digits:
-            num = int(digits)
-        else:
-            raise ValueError(f"Invalid pin identifier: '{pin_id}'")
-    else:
-        num = int(pin_id)
-
-    # Candidate prefixes across board definitions
-    board_candidates = (f"GP{num}", f"IO{num}", f"D{num}", f"GPIO{num}", f"P{num}")
-    for candidate in board_candidates:
+    for candidate in (f"GP{gpio}", f"IO{gpio}"):
         if hasattr(board, candidate):
             return getattr(board, candidate)
-
-    # Candidate prefixes in microcontroller.pin hardware layer
-    mcu_candidates = (f"GPIO{num}", f"GP{num}", f"IO{num}")
-    for candidate in mcu_candidates:
-        if hasattr(microcontroller.pin, candidate):
-            return getattr(microcontroller.pin, candidate)
-
-    raise ValueError(f"GPIO pin {pin_id} not found on this board")
+    raise ValueError(f"GPIO{gpio} is not broken out on this board")
 
 
 def get_led_pin() -> board.Pin | None:
     """
     Returns the onboard LED pin if available on the current board, or None.
+
+    Looked up by name rather than by GPIO number because on Pico W / Pico 2 W the
+    LED hangs off the CYW43 wireless module instead of an RP2040 pad, so it has
+    no GPIO number at all and board.LED is the only handle that reaches it.
     """
     for attr in ("LED", "LED_RED", "LED_BLUE", "LED_GREEN", "USER_LED"):
         if hasattr(board, attr):
@@ -58,17 +65,16 @@ def get_led_pin() -> board.Pin | None:
     return None
 
 
-def get_i2c(scl: int | str | None = None, sda: int | str | None = None) -> busio.I2C:
+def get_i2c(scl: int | None = None, sda: int | None = None) -> busio.I2C:
     """
     Returns an initialized busio.I2C bus.
-    If scl and sda are provided, initializes I2C using those pins.
-    If either is None, attempts to use the board's default I2C bus (board.I2C() or board.SCL/SDA),
-    falling back to standard Pico/ESP32 default pin pairings.
+
+    Args:
+        scl: SoC GPIO number for the clock line, or None to use the board default.
+        sda: SoC GPIO number for the data line, or None to use the board default.
     """
     if scl is not None and sda is not None:
-        scl_pin = get_pin(scl)
-        sda_pin = get_pin(sda)
-        return busio.I2C(scl=scl_pin, sda=sda_pin)
+        return busio.I2C(scl=get_pin(scl), sda=get_pin(sda))
 
     # 1. Try board.I2C() singleton helper
     if hasattr(board, "I2C"):
@@ -84,20 +90,25 @@ def get_i2c(scl: int | str | None = None, sda: int | str | None = None) -> busio
         except Exception:
             pass
 
-    # 3. Fallback candidates for boards without defined default SCL/SDA attributes (e.g. standard Pico RP2040)
-    fallback_pairs = (
-        ("GP11", "GP10"),  # RP2040 I2C1
-        ("GP3", "GP2"),    # RP2040 I2C1
-        ("GP5", "GP4"),    # RP2040 I2C0
-        ("GP1", "GP0"),    # RP2040 I2C0
-        ("IO6", "IO5"),    # ESP32-S3 default (Seeed XIAO D5/D4)
-        ("IO9", "IO8"),    # ESP32-S3 alternative
-    )
+    # 3. Fallback (scl, sda) GPIO pairs for boards exposing no default SCL/SDA
+    # attributes (e.g. the standard Pico). Listed per family because the same
+    # GPIO numbers belong to different peripherals on each.
+    if get_board_family() == BOARD_RP2040:
+        fallback_pairs = (
+            (11, 10),  # RP2040 I2C1 (silk GP11 / GP10)
+            (3, 2),    # RP2040 I2C1 (silk GP3 / GP2)
+            (5, 4),    # RP2040 I2C0 (silk GP5 / GP4)
+            (1, 0),    # RP2040 I2C0 (silk GP1 / GP0)
+        )
+    else:
+        fallback_pairs = (
+            (6, 5),  # ESP32-S3 default (XIAO silk D5 / D4)
+            (9, 8),  # ESP32-S3 alternative (XIAO silk D10 / D9)
+        )
+
     for fallback_scl, fallback_sda in fallback_pairs:
         try:
-            scl_pin = get_pin(fallback_scl)
-            sda_pin = get_pin(fallback_sda)
-            return busio.I2C(scl=scl_pin, sda=sda_pin)
+            return busio.I2C(scl=get_pin(fallback_scl), sda=get_pin(fallback_sda))
         except Exception:
             continue
 
