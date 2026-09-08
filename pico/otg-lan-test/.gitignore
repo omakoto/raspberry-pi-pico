@@ -1,0 +1,9 @@
+# Pico SDK build output directory
+build/
+
+# IDE & Editor artifacts
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

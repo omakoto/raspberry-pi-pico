@@ -41,7 +41,7 @@ To ensure wiring diagrams and hardware connections are unambiguous and easy to f
 
 ## Directory Overview
 
-- **[`pico/`](pico/)**: Native C++ firmware projects for Raspberry Pi Pico / Pico 2 / Pico W / Pico 2 W built with Pico SDK and FreeRTOS SMP (e.g., [`nsbackend-pico`](pico/nsbackend-pico)).
+- **[`pico/`](pico/)**: Native C++ firmware projects for Raspberry Pi Pico / Pico 2 / Pico W / Pico 2 W built with Pico SDK, some on FreeRTOS SMP (e.g., [`nsbackend-pico`](pico/nsbackend-pico), [`otg-lan-test`](pico/otg-lan-test)).
 - **[`esp32/`](esp32/)**: Native C++ firmware projects for ESP32-S3 and ESP32-C6 built with ESP-IDF (e.g., [`nsbackend-esp32s3`](esp32/nsbackend-esp32s3), [`2026-09-06-w5500-lan-test`](esp32/2026-09-06-w5500-lan-test)).
 - **[`circuitpython/`](circuitpython/)**: CircuitPython scripts, peripheral drivers, and hardware test utilities.
 - **[`ref/`](ref/)**: Hardware reference guides and pinout diagrams for Pico, DevKitC-1, and Seeed Studio XIAO boards.
