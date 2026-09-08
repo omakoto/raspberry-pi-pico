@@ -9,7 +9,8 @@
  *     traffic and TinyUSB's ecm_rndis_device driver handles either.
  *   - CDC ACM serial console (interfaces 2-3): stdio logs; setting 1200 baud reboots
  *     the board into BOOTSEL (handled by pico_stdio_usb).
- *   - Raspberry Pi reset interface (interface 4): lets `picotool reboot` work
+ *   - Mass storage (interface 4): 32 KB FAT12 configuration drive (msc_flash_disk.c).
+ *   - Raspberry Pi reset interface (interface 5): lets `picotool reboot` work
  *     (custom class driver in pico_stdio_usb's reset_interface.c).
  */
 
@@ -32,6 +33,7 @@ enum {
     STRID_INTERFACE,
     STRID_MAC,
     STRID_CDC,
+    STRID_MSC,
     STRID_RESET,
 };
 
@@ -40,6 +42,7 @@ enum {
     ITF_NUM_NET_DATA,
     ITF_NUM_CDC_CTRL,
     ITF_NUM_CDC_DATA,
+    ITF_NUM_MSC,
     ITF_NUM_RESET,
     ITF_NUM_TOTAL,
 };
@@ -57,12 +60,15 @@ enum {
 #define EPNUM_CDC_NOTIF 0x83
 #define EPNUM_CDC_OUT   0x04
 #define EPNUM_CDC_IN    0x84
+#define EPNUM_MSC_OUT   0x05
+#define EPNUM_MSC_IN    0x85
 
 // The VID/PID follow the TinyUSB example convention (0xCafe, 0x4000 | class bitmap:
-// bit 5 = network, bit 0 = CDC). Nothing on the host keys off them: RNDIS, ECM and CDC
-// are matched by class/subclass/protocol, and picotool matches the reset interface.
+// bit 5 = network, bit 1 = MSC, bit 0 = CDC). Nothing on the host keys off them: RNDIS,
+// ECM, CDC and MSC are matched by class/subclass/protocol, and picotool matches the reset
+// interface.
 #define USB_VID 0xCafe
-#define USB_PID 0x4021
+#define USB_PID 0x4023
 
 static const tusb_desc_device_t desc_device = {
     .bLength = sizeof(tusb_desc_device_t),
@@ -98,9 +104,11 @@ const uint8_t *tud_descriptor_device_cb(void) {
     /* Interface number, string index, EP notification address and size, EP data address (out, in) and */ \
     /* size. */                                                                                            \
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC_CTRL, STRID_CDC, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),  \
+    /* Interface number, string index, EP out & in address, EP size. */                                    \
+    TUD_MSC_DESCRIPTOR(ITF_NUM_MSC, STRID_MSC, EPNUM_MSC_OUT, EPNUM_MSC_IN, 64),                            \
     TUD_RPI_RESET_DESCRIPTOR(ITF_NUM_RESET, STRID_RESET)
 
-#define COMMON_DESC_LEN        (TUD_CDC_DESC_LEN + TUD_RPI_RESET_DESC_LEN)
+#define COMMON_DESC_LEN        (TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN + TUD_RPI_RESET_DESC_LEN)
 #define RNDIS_CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_RNDIS_DESC_LEN + COMMON_DESC_LEN)
 #define ECM_CONFIG_TOTAL_LEN   (TUD_CONFIG_DESC_LEN + TUD_CDC_ECM_DESC_LEN + COMMON_DESC_LEN)
 
@@ -142,6 +150,7 @@ static const char *const string_desc_arr[] = {
     [STRID_INTERFACE] = "otg-lan-test Network Interface",
     [STRID_MAC] = NULL,  // generated from tud_network_mac_address
     [STRID_CDC] = "otg-lan-test Serial Console",
+    [STRID_MSC] = "otg-lan-test Config Drive",
     [STRID_RESET] = "Reset",
 };
 

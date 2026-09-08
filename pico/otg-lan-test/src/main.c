@@ -9,7 +9,8 @@
  *
  * A CDC ACM serial console rides along on the same USB device (pico_stdio_usb): printf
  * output goes there and to UART0, and the host can reboot the board into BOOTSEL by
- * setting 1200 baud or via `picotool reboot` (reset interface).
+ * setting 1200 baud or via `picotool reboot` (reset interface). A 32 KB FAT12 drive on
+ * flash is exposed over USB mass storage for configuration files (msc_flash_disk.c).
  *
  * Everything runs on the main loop without an RTOS: TinyUSB is polled with tud_task(),
  * frames it received are handed to lwIP, and lwIP's timers are run from the same loop.
@@ -23,6 +24,7 @@
 #include "tusb.h"
 
 #include "dhserver.h"
+#include "msc_flash_disk.h"
 #include "lwip/apps/httpd.h"
 #include "lwip/init.h"
 #include "lwip/netif.h"
@@ -195,8 +197,10 @@ int main(void) {
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 #endif
 
-    // The MAC must be final before the host can read the descriptors.
+    // The MAC must be final before the host can read the descriptors, and the config
+    // drive must be formatted before the host can mount it.
     init_mac_addresses();
+    msc_flash_disk_init();
 
     tusb_rhport_init_t dev_init = {
         .role = TUSB_ROLE_DEVICE,
@@ -227,6 +231,7 @@ int main(void) {
     while (true) {
         tud_task();
         service_traffic();
+        msc_flash_disk_poll();
 
         bool mounted = tud_mounted();
         if (mounted != was_mounted) {

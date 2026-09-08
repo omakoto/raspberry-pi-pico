@@ -3,7 +3,8 @@ cmake_minimum_required(VERSION 3.16)
 # otg-lan-test: makes the Pico's native USB port appear to the host PC as a USB Ethernet
 # adapter (RNDIS or CDC-ECM), then runs a DHCP server and a tiny HTTP server on it, in the
 # same spirit as GP2040-CE's web configurator mode. A CDC serial console rides along for
-# logs and for rebooting into BOOTSEL from the host. See README.md.
+# logs and for rebooting into BOOTSEL from the host, and a 32 KB FAT12 drive in flash is
+# exposed over USB mass storage for configuration files. See README.md.
 
 # Default board to pico (RP2040, non-W) if not specified
 if(NOT DEFINED PICO_BOARD)
@@ -29,6 +30,7 @@ set(TINYUSB_NETWORKING_DIR "${PICO_SDK_PATH}/lib/tinyusb/lib/networking")
 add_executable(otg-lan-test
     src/main.c
     src/usb_descriptors.c
+    src/msc_flash_disk.c
     # DHCP server that ships with TinyUSB (lwIP raw API, no OS needed).
     ${TINYUSB_NETWORKING_DIR}/dhserver.c
     # RNDIS control-message handler; ecm_rndis_device.c calls into it but the
@@ -70,6 +72,8 @@ target_link_libraries(otg-lan-test PRIVATE
     pico_unique_id
     tinyusb_device
     pico_stdio_usb     # CDC console + 1200-baud reset + picotool reset interface
+    hardware_flash     # config drive: erase/program the last 32 KB of flash
+    pico_flash         # flash_safe_execute()
     pico_lwip          # lwIP core, NO_SYS=1 (see lwipopts.h); we drive it by polling
     pico_lwip_arch     # arch/cc.h for the Pico
     pico_lwip_http     # httpd + fs

@@ -1,9 +1,10 @@
 /*
  * TinyUSB configuration for otg-lan-test.
  *
- * Composite device: a virtual Ethernet adapter plus a CDC ACM serial console (stdio
- * logs, and the 1200-baud BOOTSEL trick) plus the Raspberry Pi reset interface (picotool
- * reboot). The Ethernet function is offered as two USB configurations: RNDIS
+ * Composite device: a virtual Ethernet adapter, a CDC ACM serial console (stdio logs,
+ * and the 1200-baud BOOTSEL trick), a mass storage device (32 KB FAT12 config drive on
+ * flash) and the Raspberry Pi reset interface (picotool reboot). The Ethernet function is
+ * offered as two USB configurations: RNDIS
  * (configuration 1, what Windows and Linux pick) and CDC-ECM (configuration 2, what
  * macOS picks).
  */
@@ -37,8 +38,11 @@ extern "C" {
 #define CFG_TUD_CDC_TX_BUFSIZE      1024
 #define CFG_TUD_CDC_EP_BUFSIZE      64
 
+// Mass storage: the 32 KB FAT12 config drive (msc_flash_disk.c). One sector per transfer.
+#define CFG_TUD_MSC                 1
+#define CFG_TUD_MSC_EP_BUFSIZE      512
+
 // No other classes. (The reset interface is a custom class driver, not a TinyUSB class.)
-#define CFG_TUD_MSC                 0
 #define CFG_TUD_HID                 0
 #define CFG_TUD_MIDI                0
 #define CFG_TUD_VENDOR              0
