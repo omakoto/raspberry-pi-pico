@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include "pico/stdlib.h"
+#include "hardware/clocks.h"
 #include "hardware/uart.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -19,6 +20,7 @@
 #include "i2c_keypad.hpp"
 #include "dual_logger.hpp"
 #include "serial_command_server.hpp"
+#include "usb_host_input.hpp"
 
 #if defined(NSBACKEND_HAS_WIFI) && NSBACKEND_HAS_WIFI
 #include "wifi_manager.hpp"
@@ -81,12 +83,21 @@ static void supervisor_task(void* param) {
         keypad.start();
     }
 
-    // 7. Start Serial Command Server (accepts commands on UART0 GP12/GP13 and USB CDC)
+    // 7. Initialize USB Host Port (PIO-USB on USB-A receptacle, controller pass-through)
+    UsbHostInputConfig usb_host_config;
+    usb_host_config.enabled = config.get_bool("usb_host_enabled", true);
+    usb_host_config.dp_pin = static_cast<uint8_t>(config.get_int("usb_host_dp_pin", 16));
+    usb_host_config.deadzone_percent = config.get_int("usb_host_deadzone_percent", 10);
+    usb_host_config.log_enabled = log_enabled;
+    UsbHostInput usb_host(controller, usb_host_config);
+    usb_host.init();
+
+    // 8. Start Serial Command Server (accepts commands on UART0 GP12/GP13 and USB CDC)
     SerialCommandServer serial_server(controller, log_enabled, enable_echo);
     serial_server.start();
 
 #if defined(NSBACKEND_HAS_WIFI) && NSBACKEND_HAS_WIFI
-    // 7. Initialize Wi-Fi Manager
+    // 9. Initialize Wi-Fi Manager
     auto ap_list = config.get_wifi_ap_list();
     WifiManager wifi(ap_list);
     wifi.init();
@@ -104,7 +115,7 @@ static void supervisor_task(void* param) {
     MdnsService mdns;
     mdns.init(hostname, tcp_port);
 
-    // 8. Start TCP Command Server
+    // 10. Start TCP Command Server
     LOG_I(TAG, "Initializing TCP Server on port %d...", tcp_port);
     TcpServer tcp_server(tcp_port, controller, status_led, log_enabled, enable_echo);
     if (!tcp_server.start()) {
@@ -176,6 +187,12 @@ extern "C" void vApplicationMallocFailedHook(void) {
 }
 
 int main() {
+    // The PIO-USB host port derives full-speed USB timing from clk_sys with PIO clock
+    // dividers, which only come out exact when clk_sys is a multiple of 12 MHz. Run at
+    // 120 MHz on every board (instead of the 125/150 MHz defaults) and do it before any
+    // clock-dependent peripheral (UART, USB, Wi-Fi) is initialized.
+    set_sys_clock_khz(120000, true);
+
     stdio_init_all();
     dual_logger_init();
 

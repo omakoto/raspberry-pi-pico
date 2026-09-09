@@ -13,6 +13,13 @@ wifi_password = "YOUR_WIFI_PASSWORD"
 # wifi_ssid1 = "BackupHotspot"
 # wifi_password1 = "HotspotPass"
 
+# USB Host Port (USB-A controller pass-through over PIO-USB)
+# D+ connects to usb_host_dp_pin, D- to the next GPIO (default: GP16 D+, GP17 D-).
+usb_host_enabled = true
+usb_host_dp_pin = 16
+# Stick deadzone in percent of full deflection
+usb_host_deadzone_percent = 10
+
 # I2C Matrix Keypad (PCF8574 / PCF8574A)
 i2c_keypad_enabled = true
 i2c_sda_pin = 20

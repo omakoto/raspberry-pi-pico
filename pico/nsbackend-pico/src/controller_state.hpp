@@ -36,6 +36,11 @@ public:
     // I2C matrix keypad input interface
     void set_keypad_state(uint16_t keypad_buttons, bool up, bool down, bool left, bool right);
 
+    // USB host (pass-through controller) input interface.
+    // Sticks are floats in [-1.0, +1.0] with negative Y = up, matching the command engine.
+    void set_usb_host_state(uint16_t usb_buttons, bool up, bool down, bool left, bool right,
+                            float lx, float ly, float rx, float ry);
+
 private:
     void set_button(uint16_t mask, bool active);
 
@@ -55,6 +60,17 @@ private:
     bool gpio_dpad_down_;
     bool gpio_dpad_left_;
     bool gpio_dpad_right_;
+
+    // USB Host Pass-Through Controller State
+    uint16_t usb_buttons_;
+    bool usb_dpad_up_;
+    bool usb_dpad_down_;
+    bool usb_dpad_left_;
+    bool usb_dpad_right_;
+    float usb_lx_;
+    float usb_ly_;
+    float usb_rx_;
+    float usb_ry_;
 
     // I2C Keypad State
     uint16_t keypad_buttons_;

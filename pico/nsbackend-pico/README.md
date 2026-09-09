@@ -11,9 +11,10 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 2. **USB CDC ACM Serial Console**: Exposes a virtual serial console (`/dev/ttyACM0`) for real-time logging, status monitoring, and controller command input.
 3. **USB MSC Flash Storage**: Exposes the internal 1MB FAT12 partition as a standard USB flash drive, allowing configuration editing of `config.toml` directly from your PC without re-flashing.
 4. **Physical GPIO Buttons**: Active-low physical pushbuttons with internal pull-ups, 15ms debouncing, and opposing D-pad direction cancellation.
-5. **Dual Serial Command Server**: Concurrently accepts controller commands on hardware UART0 (GP12 TX / GP13 RX at 115,200 baud) and USB CDC ACM serial, while echoing logs to both channels.
-6. **Status LED State Machine**: Visual status indicators via onboard LED (GP25 on Pico/Pico 2, CYW43 wireless GPIO on Pico W/Pico 2 W).
-7. **Wireless Networking (Pico W / Pico 2 W only)**:
+5. **USB-A Controller Pass-Through**: A secondary full-speed USB **host** port, bit-banged with PIO on GP16/GP17 and wired to a USB-A receptacle, lets you plug in a regular PC controller (Xbox 360/One/Series XInput pads, DualShock 4, DualSense, generic DirectInput HID gamepads) and use it to control the Switch directly.
+6. **Dual Serial Command Server**: Concurrently accepts controller commands on hardware UART0 (GP12 TX / GP13 RX at 115,200 baud) and USB CDC ACM serial, while echoing logs to both channels.
+7. **Status LED State Machine**: Visual status indicators via onboard LED (GP25 on Pico/Pico 2, CYW43 wireless GPIO on Pico W/Pico 2 W).
+8. **Wireless Networking (Pico W / Pico 2 W only)**:
    - **Multi-AP Wi-Fi Manager**: Automatic connection to configured access points with background scanning and seamless auto-reconnect.
    - **lwIP mDNS Service**: Advertises `nscon.local` with service `_nscon._tcp` on port `10100`.
    - **TCP Command Server**: High-throughput BSD socket server on port `10100` for streaming controller commands from frontend clients (`nsfrontend` or scripts).
@@ -31,6 +32,9 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 | **D-pad UP** | GP4 | `GPIO4` | Pin 6 | Active-low, internal pull-up |
 | **Button B** | GP5 | `GPIO5` | Pin 7 | Active-low, internal pull-up |
 | **Buttons L + R** | GP10 | `GPIO10` | Pin 14 | Active-low, triggers L and R simultaneously |
+| **USB Host D+** | GP16 | `GPIO16` | Pin 21 | USB-A receptacle D+ (green), PIO-USB host port (configurable via `usb_host_dp_pin`) |
+| **USB Host D-** | GP17 | `GPIO17` | Pin 22 | USB-A receptacle D- (white), always `usb_host_dp_pin` + 1 |
+| **USB Host VBUS** | VBUS | `VBUS` | Pin 40 | 5V from the Pico's USB supply to the USB-A receptacle VBUS (red) |
 | **UART0 TX** | GP12 | `GPIO12` | Pin 16 | 115,200 baud, 8N1 / Serial log output |
 | **UART0 RX** | GP13 | `GPIO13` | Pin 17 | 115,200 baud, 8N1 / Serial command input |
 | **I2C0 SDA** | GP20 | `GPIO20` | Pin 26 | PCF8574 Keypad SDA (configurable via `i2c_sda_pin`) |
@@ -76,6 +80,9 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 +-------------------+           |  - CYW43 Wi-Fi & lwIP mDNS|
 | I2C Matrix Keypad | --------> |  - FreeRTOS SMP (Dual Core|
 |  (4x4 on GP20/21) |           |  - 1MB Flash FAT12 DiskIO |
++-------------------+           |  - PIO-USB Host (GP16/17) |
+|   PC Controller   | --------> |    * XInput (Xbox pads)   |
+| (USB-A, XInput/HID)|          |    * Generic HID gamepads |
 +-------------------+           +---------------------------+
 ```
 
@@ -114,7 +121,44 @@ Supports standard 4x4 matrix keypads interfaced through an I2C PCF8574 / PCF8574
 
 ---
 
-## 6. Supported Boards
+## 6. USB-A Controller Pass-Through
+
+Plug a regular PC controller into the USB-A host port and it acts directly as a Switch controller, merged with all other input sources (TCP/serial commands, GPIO buttons, I2C keypad).
+
+Because the Pico's native USB port is occupied by the Switch-facing composite device, the host port is a second full-speed USB port bit-banged with PIO (Pico-PIO-USB) on two GPIOs. This also requires the system clock to run at 120 MHz (a multiple of the 12 MHz USB bit clock), which the firmware sets at boot.
+
+### Wiring the USB-A receptacle
+
+| USB-A Pin | Wire Color | Connect To | Physical Pin # |
+| :--- | :--- | :--- | :--- |
+| VBUS (1) | Red | VBUS (5V) | Pin 40 |
+| D- (2) | White | GP17 | Pin 22 |
+| D+ (3) | Green | GP16 | Pin 21 |
+| GND (4) | Black | GND | Pin 38 (or any GND) |
+
+Keep the D+/D- wires short (a few cm) and equal length. The D+/D- GPIOs are configurable via `usb_host_dp_pin` (D- is always D+ + 1). A small USB hub between the port and the controller also works.
+
+### Supported controllers
+
+- **XInput**: Xbox 360 / Xbox One / Xbox Series wired controllers (and the Xbox 360 wireless receiver), via the vendored [tusb_xinput](https://github.com/Ryzee119/tusb_xinput) host driver.
+- **Generic HID gamepads**: DualShock 4, DualSense, 8BitDo pads in D-input mode, and other DirectInput-style USB gamepads. The HID report descriptor is parsed at connect time, so most pads work without per-device quirks.
+
+### Button mapping
+
+Face buttons are mapped **positionally** (by physical location, not by label), so muscle memory carries over:
+
+| Physical Position | Xbox | PlayStation | Acts as Switch |
+| :--- | :--- | :--- | :--- |
+| Bottom | A | Cross | B |
+| Right | B | Circle | A |
+| Left | X | Square | Y |
+| Top | Y | Triangle | X |
+
+Shoulders map L1/LB → L, R1/RB → R, L2/LT → ZL, R2/RT → ZR; Back/Share/Select → Minus, Start/Options → Plus, Guide/PS → Home, Xbox Share button / PS touchpad click → Capture. Sticks (including click) and the D-pad pass through directly, with a configurable radial deadzone (`usb_host_deadzone_percent`).
+
+---
+
+## 7. Supported Boards
 
 | Board Target | MCU Architecture | Wireless Support | Default Build Command |
 | :--- | :--- | :--- | :--- |
@@ -130,7 +174,7 @@ Supports standard 4x4 matrix keypads interfaced through an I2C PCF8574 / PCF8574
 
 ---
 
-## 7. Building & Installation
+## 8. Building & Installation
 
 ### Prerequisites
 - Raspberry Pi Pico SDK (`v2.1.1` or later)
@@ -173,7 +217,7 @@ Or simply copy `build/nsbackend-pico.uf2` directly into the mounted drive.
 
 ---
 
-## 8. Configuration (`config.toml`)
+## 9. Configuration (`config.toml`)
 
 When plugged into a PC via USB, the Pico exposes a standard USB flash drive with `config.toml`. You can open and edit this file directly in any text editor.
 
@@ -202,11 +246,16 @@ i2c_address = 0x20
 i2c_reverse_row = true
 i2c_reverse_col = true
 i2c_debounce_ms = 20
+
+# USB Host Port (USB-A controller pass-through)
+usb_host_enabled = true
+usb_host_dp_pin = 16
+usb_host_deadzone_percent = 10
 ```
 
 ---
 
-## 9. Serial Console Monitoring
+## 10. Serial Console Monitoring
 
 Run the monitor script to view debug logs over USB CDC:
 ```bash
@@ -217,7 +266,7 @@ Run the monitor script to view debug logs over USB CDC:
 
 ---
 
-## 10. Controller Command Protocol
+## 11. Controller Command Protocol
 
 Commands can be transmitted over TCP (port 10100) or over serial (UART0 / USB CDC).
 
@@ -259,7 +308,7 @@ pu 0.15        # Hold D-pad UP for 150 milliseconds
 
 ---
 
-## 11. Latency Benchmarking
+## 12. Latency Benchmarking
 
 To benchmark network round-trip latency over Wi-Fi:
 ```bash

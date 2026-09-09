@@ -48,6 +48,15 @@ ControllerState::ControllerState(GamepadHid& gamepad)
       gpio_dpad_down_(false),
       gpio_dpad_left_(false),
       gpio_dpad_right_(false),
+      usb_buttons_(BTN_NONE),
+      usb_dpad_up_(false),
+      usb_dpad_down_(false),
+      usb_dpad_left_(false),
+      usb_dpad_right_(false),
+      usb_lx_(0.0f),
+      usb_ly_(0.0f),
+      usb_rx_(0.0f),
+      usb_ry_(0.0f),
       keypad_buttons_(BTN_NONE),
       keypad_dpad_up_(false),
       keypad_dpad_down_(false),
@@ -77,6 +86,15 @@ void ControllerState::reset_all() {
     keypad_dpad_down_ = false;
     keypad_dpad_left_ = false;
     keypad_dpad_right_ = false;
+    usb_buttons_ = BTN_NONE;
+    usb_dpad_up_ = false;
+    usb_dpad_down_ = false;
+    usb_dpad_left_ = false;
+    usb_dpad_right_ = false;
+    usb_lx_ = 0.0f;
+    usb_ly_ = 0.0f;
+    usb_rx_ = 0.0f;
+    usb_ry_ = 0.0f;
     lx_ = 0.0f;
     ly_ = 0.0f;
     rx_ = 0.0f;
@@ -113,12 +131,27 @@ void ControllerState::set_keypad_state(uint16_t keypad_buttons, bool up, bool do
     sync_report();
 }
 
+void ControllerState::set_usb_host_state(uint16_t usb_buttons, bool up, bool down, bool left, bool right,
+                                         float lx, float ly, float rx, float ry) {
+    MutexLock lock(mutex_);
+    usb_buttons_ = usb_buttons;
+    usb_dpad_up_ = up;
+    usb_dpad_down_ = down;
+    usb_dpad_left_ = left;
+    usb_dpad_right_ = right;
+    usb_lx_ = lx;
+    usb_ly_ = ly;
+    usb_rx_ = rx;
+    usb_ry_ = ry;
+    sync_report();
+}
+
 void ControllerState::sync_report() {
     // Resolve hat direction with opposing cancellation
-    bool up = dpad_up_ || gpio_dpad_up_ || keypad_dpad_up_;
-    bool down = dpad_down_ || gpio_dpad_down_ || keypad_dpad_down_;
-    bool left = dpad_left_ || gpio_dpad_left_ || keypad_dpad_left_;
-    bool right = dpad_right_ || gpio_dpad_right_ || keypad_dpad_right_;
+    bool up = dpad_up_ || gpio_dpad_up_ || keypad_dpad_up_ || usb_dpad_up_;
+    bool down = dpad_down_ || gpio_dpad_down_ || keypad_dpad_down_ || usb_dpad_down_;
+    bool left = dpad_left_ || gpio_dpad_left_ || keypad_dpad_left_ || usb_dpad_left_;
+    bool right = dpad_right_ || gpio_dpad_right_ || keypad_dpad_right_ || usb_dpad_right_;
 
     if (up && down) {
         up = down = false;
@@ -148,12 +181,14 @@ void ControllerState::sync_report() {
         return static_cast<uint8_t>(std::max(0, std::min(255, rounded)));
     };
 
-    uint8_t lx_byte = to_byte(lx_);
-    uint8_t ly_byte = to_byte(ly_);
-    uint8_t rx_byte = to_byte(rx_);
-    uint8_t ry_byte = to_byte(ry_);
+    // Sum the command-engine sticks with the USB pass-through controller sticks; to_byte()
+    // clamps the result, so simultaneous input simply saturates at full deflection.
+    uint8_t lx_byte = to_byte(lx_ + usb_lx_);
+    uint8_t ly_byte = to_byte(ly_ + usb_ly_);
+    uint8_t rx_byte = to_byte(rx_ + usb_rx_);
+    uint8_t ry_byte = to_byte(ry_ + usb_ry_);
 
-    uint16_t merged_buttons = buttons_ | gpio_buttons_ | keypad_buttons_;
+    uint16_t merged_buttons = buttons_ | gpio_buttons_ | keypad_buttons_ | usb_buttons_;
 
     gamepad_.send_report(merged_buttons, hat, lx_byte, ly_byte, rx_byte, ry_byte);
 }

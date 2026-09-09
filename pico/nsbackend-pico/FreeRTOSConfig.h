@@ -10,7 +10,9 @@
 #define configUSE_TIME_SLICING                  1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION 0
 #define configUSE_TICKLESS_IDLE                 0
-#define configCPU_CLOCK_HZ                      133000000
+// Must match the set_sys_clock_khz() call in main(): 120 MHz keeps clk_sys a
+// multiple of 12 MHz as required by the PIO-USB host port
+#define configCPU_CLOCK_HZ                      120000000
 #define configTICK_RATE_HZ                      ((TickType_t)1000)
 #define configMAX_PRIORITIES                    32
 #define configMINIMAL_STACK_SIZE                ((configSTACK_DEPTH_TYPE)256)

@@ -36,12 +36,29 @@ include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 # that the USB ISR posts to, so USB events are serviced immediately and the CPU stays free.
 set(TINYUSB_OPT_OS OPT_OS_FREERTOS)
 
+# Point TinyUSB's rp2040 family cmake at our vendored Pico-PIO-USB so it creates the
+# tinyusb_pico_pio_usb target during pico_sdk_init(). The SDK's TinyUSB submodule does not
+# ship Pico-PIO-USB itself, and the version its dependency script pins lacks RP2350 support,
+# hence the vendored copy (see third_party/README.md).
+set(PICO_PIO_USB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Pico-PIO-USB)
+
 project(nsbackend-pico C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 pico_sdk_init()
+
+# The SDK includes TinyUSB's rp2040 family.cmake, which normally creates the
+# tinyusb_pico_pio_usb target while the SDK initializes. Depending on evaluation order the
+# pio header generator may not have been available yet, so retry here and then hard-fail if
+# the target is still missing rather than producing a firmware without the USB host port.
+if(NOT TARGET tinyusb_pico_pio_usb)
+    check_and_add_pico_pio_usb_support()
+endif()
+if(NOT TARGET tinyusb_pico_pio_usb)
+    message(FATAL_ERROR "tinyusb_pico_pio_usb target unavailable; check PICO_PIO_USB_PATH (${PICO_PIO_USB_PATH})")
+endif()
 
 # Setup FreeRTOS Kernel path and import SMP port
 set(FREERTOS_KERNEL_PATH $ENV{FREERTOS_KERNEL_PATH})
@@ -79,6 +96,8 @@ set(APP_SOURCES
     src/status_led.cpp
     src/dual_logger.cpp
     src/serial_command_server.cpp
+    src/usb_host_input.cpp
+    third_party/tusb_xinput/xinput_host.c
     ${FATFS_DIR}/ff.c
     ${FATFS_DIR}/ffunicode.c
 )
@@ -120,11 +139,14 @@ target_include_directories(nsbackend-pico PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${FATFS_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tusb_xinput
 )
 
 target_link_libraries(nsbackend-pico PRIVATE
     pico_stdlib
     tinyusb_device
+    tinyusb_host
+    tinyusb_pico_pio_usb
     tinyusb_board
     FreeRTOS-Kernel
     FreeRTOS-Kernel-Heap4
