@@ -21,6 +21,9 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "hardware/dma.h"
+#include "hardware/pio.h"
+#include "pico/time.h"
 #include "tusb.h"
 #include "pio_usb_configuration.h"
 #include "xinput_host.h"
@@ -680,6 +683,57 @@ void UsbHostInput::run_host_task() {
 
     pio_usb_configuration_t pio_cfg = PIO_USB_DEFAULT_CONFIG;
     pio_cfg.pin_dp = config_.dp_pin;
+
+    // Pico-PIO-USB claims the PIO state machines, DMA channel, and hardware alarm named in
+    // its configuration outright and panics if any of them is already taken. Its defaults
+    // (PIO0 SM0-2, DMA channel 0, alarm 2) collide with the CYW43 Wi-Fi driver on W boards,
+    // which has already grabbed the first free PIO state machine and DMA channels by the
+    // time this task runs, so pick resources that are actually free at this point.
+
+    // The library needs three state machines on one PIO block and the whole 32-slot
+    // instruction memory (tx 5 + nrzi 10 + eop 17), with the tx program pinned at offset 0.
+    // Only a PIO block nobody else has touched qualifies.
+    int pio_num = -1;
+    for (uint i = 0; i < NUM_PIOS; ++i) {
+        PIO pio = pio_get_instance(i);
+        bool sms_free = true;
+        for (uint sm = 0; sm < NUM_PIO_STATE_MACHINES; ++sm) {
+            if (pio_sm_is_claimed(pio, sm)) {
+                sms_free = false;
+                break;
+            }
+        }
+        pio_program_t whole_memory = {};
+        whole_memory.length = PIO_INSTRUCTION_COUNT;
+        whole_memory.origin = -1;
+        if (sms_free && pio_can_add_program(pio, &whole_memory)) {
+            pio_num = static_cast<int>(i);
+            break;
+        }
+    }
+    if (pio_num < 0) {
+        LOG_E(TAG, "No free PIO block for the USB host port; pass-through disabled");
+        vTaskDelete(nullptr);
+        return;
+    }
+    pio_cfg.pio_tx_num = static_cast<uint8_t>(pio_num);
+    pio_cfg.pio_rx_num = static_cast<uint8_t>(pio_num);
+
+    // The library claims the DMA channel itself, so reserve one only long enough to learn
+    // its number and release it again; nothing else allocates DMA concurrently at this point.
+    int dma_ch = dma_claim_unused_channel(true);
+    dma_channel_unclaim(static_cast<uint>(dma_ch));
+    pio_cfg.tx_ch = static_cast<uint8_t>(dma_ch);
+
+    // The 1 ms SOF timer interrupt is delivered to the core that creates the alarm pool,
+    // which is why this happens here after pinning to core 1.
+    pio_cfg.alarm_pool = alarm_pool_create_with_unused_hardware_alarm(1);
+    if (pio_cfg.alarm_pool == nullptr) {
+        LOG_E(TAG, "No free hardware alarm for the USB host port; pass-through disabled");
+        vTaskDelete(nullptr);
+        return;
+    }
+
     if (!tuh_configure(1, TUH_CFGID_RPI_PIO_USB_CONFIGURATION, &pio_cfg)) {
         LOG_E(TAG, "tuh_configure() failed");
         vTaskDelete(nullptr);
@@ -690,7 +744,8 @@ void UsbHostInput::run_host_task() {
         vTaskDelete(nullptr);
         return;
     }
-    LOG_I(TAG, "USB host port ready on GP%u (D+) / GP%u (D-)", config_.dp_pin, config_.dp_pin + 1);
+    LOG_I(TAG, "USB host port ready on GP%u (D+) / GP%u (D-) using PIO%d, DMA channel %d",
+          config_.dp_pin, config_.dp_pin + 1, pio_num, dma_ch);
 
     while (true) {
         tuh_task();
