@@ -166,6 +166,23 @@ Things to know about this mode:
 - The console's IMU configuration is passed through to the attached controller: current system software enables the IMU in **mode 2** (subcommand 0x40 with argument 2), a newer sample layout than the classic mode 1 the Linux driver uses, and the sensitivity settings (subcommand 0x41) are forwarded as well. The attached controller is switched to whatever the console asked for and its IMU blocks are forwarded verbatim, one report per block with the controller's own timing, so motion matches the real controller in direction and speed. This has been verified on a Switch.
 - The attached Pro Controller's factory stick calibration is read from its SPI flash during init so its sticks are centred correctly.
 
+#### Background: the IMU and the Pro Controller protocol
+
+**IMU** stands for inertial measurement unit: the motion sensor chip inside the controller. It combines an **accelerometer**, which measures linear acceleration along three axes including gravity (so it knows which way is down and how the pad is tilted or shaken), and a **gyroscope**, which measures angular velocity around three axes (how fast the pad is being rotated). Games fuse the two: the gyroscope provides fast, precise rotation for aiming, and the accelerometer's gravity vector corrects the slow drift the gyroscope accumulates. "Gyro aiming" and "motion controls" both read this chip.
+
+The Pro Controller speaks a proprietary protocol on top of USB HID, documented mostly by the community (the dekuNukem *Nintendo_Switch_Reverse_Engineering* notes and the Linux `hid-nintendo` driver source). The parts this firmware relies on:
+
+- **USB commands** (output report `0x80`): handshake (`02`), set the internal link to 3 Mbps (`03`), stop the Bluetooth fallback timer (`04`), status/MAC query (`01`). The console also sends `05` and empty probe packets before the handshake.
+- **Subcommands** (output report `0x01`: sequence counter, 8 rumble bytes, subcommand id, arguments), each answered by input report `0x21` carrying an acknowledgement byte, the subcommand id and reply data. Used here: device info (`02`), set input report mode (`03`), trigger timings (`04`), shipment flag (`08`), SPI flash read (`10`, how the console fetches stick and IMU calibration and colours), NFC/IR MCU configuration (`21`), player lights (`30`), enable IMU (`40`), IMU sensitivity (`41`), enable vibration (`48`), voltage (`50`), Bluetooth pairing steps (`01`).
+- **Input report `0x30`**: timer, battery/connection byte, three button bytes, two packed 12-bit sticks, vibration status, then **36 IMU bytes**, padded to 64. The controller emits one about every 15 ms.
+
+The `enable IMU` subcommand's argument selects how those 36 bytes are laid out:
+
+- **Mode 1** (argument `1`): three samples taken 5 ms apart, each six little-endian 16-bit integers: accelerometer X, Y, Z then gyroscope X, Y, Z, as raw sensor counts. The receiver converts them with the calibration it read from SPI flash (per-axis origin and sensitivity). This is the classic, fully documented format, the one `hid-nintendo` requests, and the one this firmware's host side parses.
+- **Mode 2** (argument `2`): a newer layout introduced by later controller firmware and requested by current Switch system software. Its byte encoding is **not** described in the documentation this firmware was written from. What is known empirically: an official Pro Controller acknowledges the request, the console decodes the resulting blocks correctly, and feeding it mode-1 blocks instead produces erratic motion that never settles.
+
+Because mode 2 is opaque, the emulation never interprets or generates IMU data for the console. It forwards the console's mode and sensitivity requests to the attached controller and copies that controller's IMU blocks byte for byte, one report per block, together with the controller's own timer byte, so the console receives exactly the stream a directly connected controller would produce. Anything that would require the board to *create* motion data, such as text commands for gyro input, first needs the mode-2 encoding to be reverse-engineered (for example by capturing the same physical motion from a real controller in both modes and comparing).
+
 #### Known limitations
 
 - **IMU calibration**: the console is served the IMU calibration of the reference unit the emulation was captured from, not the attached controller's own. With a different controller attached, the console sees that controller's raw drift interpreted through the reference calibration. Recalibrating motion controls in the console's system settings compensates for it per session, but the console's calibration writes are acknowledged without being stored, so they do not survive a power cycle.
