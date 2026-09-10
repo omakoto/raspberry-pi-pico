@@ -97,6 +97,7 @@ set(APP_SOURCES
     src/dual_logger.cpp
     src/serial_command_server.cpp
     src/usb_host_input.cpp
+    src/fault_reporter.cpp
     third_party/tusb_xinput/xinput_host.c
     ${FATFS_DIR}/ff.c
     ${FATFS_DIR}/ffunicode.c
@@ -156,6 +157,7 @@ target_link_libraries(nsbackend-pico PRIVATE
     hardware_gpio
     hardware_i2c
     hardware_timer
+    hardware_watchdog
 )
 
 if(NSBACKEND_HAS_WIFI)
@@ -167,6 +169,10 @@ endif()
 # Widen TinyUSB's first device-descriptor read during enumeration; see
 # __wrap_hcd_setup_send / __wrap_hcd_edpt_xfer in src/usb_host_input.cpp for why.
 target_link_options(nsbackend-pico PRIVATE -Wl,--wrap=hcd_setup_send -Wl,--wrap=hcd_edpt_xfer)
+
+# Route pico-sdk panic() to the UART0 fault reporter (src/fault_reporter.cpp) instead of
+# the stock silent breakpoint
+target_compile_definitions(nsbackend-pico PRIVATE PICO_PANIC_FUNCTION=nsbackend_panic)
 
 pico_enable_stdio_uart(nsbackend-pico 0)
 pico_enable_stdio_usb(nsbackend-pico 0)

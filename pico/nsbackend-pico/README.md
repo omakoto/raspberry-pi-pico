@@ -268,6 +268,21 @@ Run the monitor script to view debug logs over USB CDC:
 ./02-monitor.sh /dev/ttyACM0
 ```
 
+### Crash reports on UART0
+
+A HardFault on either core, or a pico-sdk `panic()` (for example a PIO, DMA or alarm claim that collides with another driver), prints a diagnostic on **UART0 (GP12 TX, 115200 baud)** and reboots the board three seconds later, instead of stopping silently the way the stock SDK handlers do:
+
+```
+[E][Fault] HardFault on core 0
+  PC=0x1000a2c6 LR=0x1000a1f1 xPSR=0x61000000 EXC_RETURN=0xfffffffd
+  R0=... R1=... R2=... R3=... R12=...
+  CFSR=0x00008200 HFSR=0x40000000 MMFAR=... BFAR=0xfffffff0
+[E][Fault] panic on core 1: DMA channel 0 is already claimed
+[E][Fault] rebooting in 3 s
+```
+
+`PC` is the faulting instruction; look it up with `arm-none-eabi-addr2line -e build/nsbackend-pico.elf <PC>`. The `CFSR`/`BFAR` line only exists on RP2350 boards. FreeRTOS stack overflows and heap exhaustion are reported the same way (see `main.cpp`).
+
 ---
 
 ## 11. Controller Command Protocol
