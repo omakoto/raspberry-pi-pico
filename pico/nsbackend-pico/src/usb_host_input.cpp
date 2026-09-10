@@ -404,6 +404,7 @@ constexpr uint8_t SWPRO_OUT_SUBCMD   = 0x01;  // rumble + subcommand
 constexpr uint8_t SWPRO_OUT_USB_CMD  = 0x80;  // USB-transport commands
 // USB-transport commands (report 0x80) and their acks (report 0x81)
 constexpr uint8_t SWPRO_USB_HANDSHAKE = 0x02;
+constexpr uint8_t SWPRO_USB_BAUD_3M   = 0x03;  // internal bridge<->MCU link to 3 Mbps
 constexpr uint8_t SWPRO_USB_FORCE_USB = 0x04;  // stop the Bluetooth fallback timeout
 // Subcommands (in report 0x01) acknowledged by report 0x21
 constexpr uint8_t SWPRO_SUBCMD_SET_REPORT_MODE = 0x03;
@@ -415,9 +416,13 @@ constexpr uint8_t SWPRO_IN_FULL       = 0x30;  // 60 Hz standard report (also 0x
 constexpr uint8_t SWPRO_IN_SIMPLE     = 0x3F;  // "simple HID" mode: digital sticks only
 constexpr uint8_t SWPRO_IN_USB_ACK    = 0x81;
 
-// Init sequence, in order. Each step is resent on timeout and skipped after a few
-// tries so third-party pads that ignore a command still come up.
-enum class SwProStage : uint8_t { Handshake, ForceUsb, SetReportMode, SetPlayerLeds, Ready };
+// Init sequence, in order (the same one Linux's hid-nintendo uses). Each step is resent
+// on timeout and skipped after a few tries so third-party pads that ignore a command
+// still come up. The baud step matters for the official controller: its USB bridge talks
+// to the main MCU over an internal serial link, and after a host reboot the two sides can
+// be at different rates, in which case every subcommand is silently dropped until the
+// link is renegotiated.
+enum class SwProStage : uint8_t { Handshake, SetBaud, Handshake2, ForceUsb, SetReportMode, SetPlayerLeds, Ready };
 
 struct SwProCtl {
     SwProStage stage = SwProStage::Handshake;
@@ -619,7 +624,11 @@ void swpro_send_stage(HidSlot* slot) {
     bool sent = false;
     switch (c.stage) {
     case SwProStage::Handshake:
+    case SwProStage::Handshake2:
         sent = swpro_send_usb_cmd(slot, SWPRO_USB_HANDSHAKE);
+        break;
+    case SwProStage::SetBaud:
+        sent = swpro_send_usb_cmd(slot, SWPRO_USB_BAUD_3M);
         break;
     case SwProStage::ForceUsb:
         sent = swpro_send_usb_cmd(slot, SWPRO_USB_FORCE_USB);
@@ -760,7 +769,12 @@ void swpro_handle_report(HidSlot* slot, const uint8_t* r, uint16_t len) {
     SwProCtl& c = slot->swpro;
     switch (r[0]) {
     case SWPRO_IN_USB_ACK:
-        if (len >= 2 && c.stage == SwProStage::Handshake && r[1] == SWPRO_USB_HANDSHAKE) {
+        if (len < 2) break;
+        if (c.stage == SwProStage::Handshake && r[1] == SWPRO_USB_HANDSHAKE) {
+            swpro_enter_stage(slot, SwProStage::SetBaud);
+        } else if (c.stage == SwProStage::SetBaud && r[1] == SWPRO_USB_BAUD_3M) {
+            swpro_enter_stage(slot, SwProStage::Handshake2);
+        } else if (c.stage == SwProStage::Handshake2 && r[1] == SWPRO_USB_HANDSHAKE) {
             swpro_enter_stage(slot, SwProStage::ForceUsb);
             // FORCE_USB is not acknowledged, so move straight on to the subcommands
             swpro_enter_stage(slot, SwProStage::SetReportMode);
