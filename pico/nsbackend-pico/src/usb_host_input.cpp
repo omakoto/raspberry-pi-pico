@@ -5,6 +5,11 @@
  * (Pico-PIO-USB), and translates reports from attached controllers into
  * ControllerState updates:
  *  - XInput controllers are handled by the vendored tusb_xinput host class driver.
+ *  - Nintendo Switch Pro Controllers (and third-party pads in Switch mode, which use
+ *    the same VID/PID and protocol) speak Nintendo's proprietary HID protocol: they stay
+ *    silent over USB until the host performs a handshake and selects a report mode, and
+ *    their real report layout differs from what their HID descriptor declares. They get
+ *    a small init state machine and a hand-written parser for report 0x30 / 0x3F.
  *  - Generic HID gamepads are handled by parsing each device's HID report descriptor
  *    to locate the axes, hat switch, and buttons, so arbitrary DirectInput-style pads
  *    work without per-device quirks tables.
@@ -31,6 +36,9 @@
 #include "gamepad_hid.hpp"
 
 static const char* TAG = "UsbHost";
+// Host-controller hooks (hcd_port_connect_status, hcd_event_device_attach/remove) used
+// to re-kick enumeration; not part of the public tuh_* API but stable across releases
+#include "host/hcd.h"
 
 namespace {
 
@@ -385,10 +393,45 @@ void decode_hat(const uint8_t* report, uint16_t report_len, const HidField& f,
 // Connected pad slots
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Nintendo Switch Pro Controller protocol
+// ---------------------------------------------------------------------------
+
+constexpr uint16_t NINTENDO_VID = 0x057e;
+
+// Output report IDs
+constexpr uint8_t SWPRO_OUT_SUBCMD   = 0x01;  // rumble + subcommand
+constexpr uint8_t SWPRO_OUT_USB_CMD  = 0x80;  // USB-transport commands
+// USB-transport commands (report 0x80) and their acks (report 0x81)
+constexpr uint8_t SWPRO_USB_HANDSHAKE = 0x02;
+constexpr uint8_t SWPRO_USB_FORCE_USB = 0x04;  // stop the Bluetooth fallback timeout
+// Subcommands (in report 0x01) acknowledged by report 0x21
+constexpr uint8_t SWPRO_SUBCMD_SET_REPORT_MODE = 0x03;
+constexpr uint8_t SWPRO_SUBCMD_SET_PLAYER_LEDS = 0x30;
+constexpr uint8_t SWPRO_SUBCMD_ENABLE_IMU      = 0x40;  // for future gyro support
+// Input report IDs
+constexpr uint8_t SWPRO_IN_SUBCMD_ACK = 0x21;
+constexpr uint8_t SWPRO_IN_FULL       = 0x30;  // 60 Hz standard report (also 0x31-0x33)
+constexpr uint8_t SWPRO_IN_SIMPLE     = 0x3F;  // "simple HID" mode: digital sticks only
+constexpr uint8_t SWPRO_IN_USB_ACK    = 0x81;
+
+// Init sequence, in order. Each step is resent on timeout and skipped after a few
+// tries so third-party pads that ignore a command still come up.
+enum class SwProStage : uint8_t { Handshake, ForceUsb, SetReportMode, SetPlayerLeds, Ready };
+
+struct SwProCtl {
+    SwProStage stage = SwProStage::Handshake;
+    uint32_t last_tx_ms = 0;
+    uint8_t attempts = 0;
+    uint8_t packet_counter = 0;  // 4-bit sequence number required in report 0x01
+};
+
 struct HidSlot {
     bool used = false;
     uint8_t daddr = 0;
     uint8_t instance = 0;
+    bool switch_pro = false;  // speaks the Nintendo protocol instead of the parsed layout
+    SwProCtl swpro;
     HidGamepadLayout layout;
     PadState state;
 };
@@ -477,25 +520,335 @@ void merge_and_push() {
 }  // namespace
 
 // ---------------------------------------------------------------------------
+// Enumeration compatibility: full first device-descriptor read
+// ---------------------------------------------------------------------------
+
+// TinyUSB opens enumeration by reading only the first 8 bytes of the device descriptor
+// (to learn the EP0 packet size), whereas PCs and the Switch read the whole descriptor.
+// Some third-party pads (DragonRise 0079:181d "Switch compatible" pads, for example)
+// choke on that short read and drop off the bus right after SET_ADDRESS. TinyUSB offers
+// no hook for this, so the two host-controller calls that carry the request are wrapped
+// at link time (see --wrap in CMakeLists.txt) and the request is widened to the full 18
+// bytes: wLength in the SETUP packet, then the buffer length of the data stage that
+// follows. The data lands in TinyUSB's 512-byte enumeration buffer, and devices with an
+// 8-byte EP0 simply answer in three packets, which is what a PC host makes them do anyway.
+extern "C" bool __real_hcd_setup_send(uint8_t rhport, uint8_t daddr, const uint8_t setup_packet[8]);
+extern "C" bool __real_hcd_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t* buffer, uint16_t buflen);
+
+bool s_widen_first_desc_read = false;
+
+extern "C" bool __wrap_hcd_setup_send(uint8_t rhport, uint8_t daddr, const uint8_t setup_packet[8]) {
+    // GET_DESCRIPTOR(DEVICE) to address 0 with wLength 8: the enumeration opener
+    const bool is_short_dev_desc_read = daddr == 0 && setup_packet[0] == 0x80 && setup_packet[1] == 0x06 &&
+                                        setup_packet[3] == 0x01 && setup_packet[6] == 8 && setup_packet[7] == 0;
+    s_widen_first_desc_read = is_short_dev_desc_read;
+    if (!is_short_dev_desc_read) {
+        return __real_hcd_setup_send(rhport, daddr, setup_packet);
+    }
+    static uint8_t widened[8];
+    std::memcpy(widened, setup_packet, 8);
+    widened[6] = sizeof(tusb_desc_device_t);
+    return __real_hcd_setup_send(rhport, daddr, widened);
+}
+
+extern "C" bool __wrap_hcd_edpt_xfer(uint8_t rhport, uint8_t daddr, uint8_t ep_addr, uint8_t* buffer, uint16_t buflen) {
+    if (s_widen_first_desc_read && daddr == 0 && ep_addr == 0x80 && buflen == 8) {
+        buflen = sizeof(tusb_desc_device_t);
+        s_widen_first_desc_read = false;
+    }
+    return __real_hcd_edpt_xfer(rhport, daddr, ep_addr, buffer, buflen);
+}
+
+// ---------------------------------------------------------------------------
+// Enumeration retry
+// ---------------------------------------------------------------------------
+
+// TinyUSB retries a failed enumeration transfer three times and then abandons the
+// device for good, without resetting the port. Some pads (seen with a third-party
+// Switch controller waking from sleep) fail the first control transfer's status stage
+// and then ignore everything until they get a bus reset, so while a device is present
+// on the wire and nothing is mounted, periodically simulate a re-plug.
+constexpr uint32_t ENUM_RETRY_IDLE_MS = 1500;
+bool s_device_mounted = false;
+// Last time the host controller reported any activity (attach, removal, or a completed
+// transfer); an enumeration that is still making progress keeps this fresh.
+uint32_t s_last_host_activity_ms = 0;
+
+void enum_retry_poll() {
+    if (s_device_mounted || !hcd_port_connect_status(1)) return;
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (now - s_last_host_activity_ms < ENUM_RETRY_IDLE_MS) return;
+    s_last_host_activity_ms = now;
+    UH_LOG("Device present but not enumerated; resetting port and retrying");
+    // A control transfer the device never answered (endless NAKs) stays pending forever
+    // and would make TinyUSB reject every later control request, so abort it first.
+    for (uint8_t daddr = 0; daddr <= CFG_TUH_DEVICE_MAX; ++daddr) {
+        tuh_edpt_abort_xfer(daddr, 0);
+    }
+    hcd_event_device_remove(1, false);
+    hcd_event_device_attach(1, false);
+}
+
+// ---------------------------------------------------------------------------
+// Nintendo Switch Pro Controller: init sequence and report parsing
+// ---------------------------------------------------------------------------
+
+constexpr uint32_t SWPRO_STEP_TIMEOUT_MS = 150;
+constexpr uint8_t SWPRO_STEP_MAX_ATTEMPTS = 8;
+
+bool swpro_send_usb_cmd(HidSlot* slot, uint8_t cmd) {
+    return tuh_hid_send_report(slot->daddr, slot->instance, SWPRO_OUT_USB_CMD, &cmd, 1);
+}
+
+bool swpro_send_subcmd(HidSlot* slot, uint8_t subcmd, const uint8_t* args, uint8_t args_len) {
+    // Report 0x01 layout: packet counter, 8 bytes rumble (neutral), subcommand, arguments
+    uint8_t buf[10 + 8] = {0};
+    buf[0] = slot->swpro.packet_counter;
+    slot->swpro.packet_counter = (slot->swpro.packet_counter + 1) & 0x0F;
+    static const uint8_t neutral_rumble[8] = {0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40};
+    std::memcpy(&buf[1], neutral_rumble, sizeof(neutral_rumble));
+    buf[9] = subcmd;
+    args_len = std::min<uint8_t>(args_len, sizeof(buf) - 10);
+    std::memcpy(&buf[10], args, args_len);
+    return tuh_hid_send_report(slot->daddr, slot->instance, SWPRO_OUT_SUBCMD, buf, 10 + args_len);
+}
+
+// Sends the command for the current init stage; called on entry and on timeout
+void swpro_send_stage(HidSlot* slot) {
+    SwProCtl& c = slot->swpro;
+    bool sent = false;
+    switch (c.stage) {
+    case SwProStage::Handshake:
+        sent = swpro_send_usb_cmd(slot, SWPRO_USB_HANDSHAKE);
+        break;
+    case SwProStage::ForceUsb:
+        sent = swpro_send_usb_cmd(slot, SWPRO_USB_FORCE_USB);
+        break;
+    case SwProStage::SetReportMode: {
+        uint8_t mode = SWPRO_IN_FULL;
+        sent = swpro_send_subcmd(slot, SWPRO_SUBCMD_SET_REPORT_MODE, &mode, 1);
+        break;
+    }
+    case SwProStage::SetPlayerLeds: {
+        uint8_t leds = 0x01;  // player 1
+        sent = swpro_send_subcmd(slot, SWPRO_SUBCMD_SET_PLAYER_LEDS, &leds, 1);
+        break;
+    }
+    case SwProStage::Ready:
+        return;
+    }
+    c.last_tx_ms = to_ms_since_boot(get_absolute_time());
+    if (sent) {
+        c.attempts++;
+    }
+}
+
+void swpro_enter_stage(HidSlot* slot, SwProStage stage) {
+    slot->swpro.stage = stage;
+    slot->swpro.attempts = 0;
+    if (stage == SwProStage::Ready) {
+        UH_LOG("Switch Pro Controller %u/%u ready", slot->daddr, slot->instance);
+        return;
+    }
+    swpro_send_stage(slot);
+}
+
+// Resends or skips stalled init steps. Runs from the host task between tuh_task() calls.
+void swpro_poll() {
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    for (auto& slot : s_hid_slots) {
+        if (!slot.used || !slot.switch_pro || slot.swpro.stage == SwProStage::Ready) continue;
+        if (now - slot.swpro.last_tx_ms < SWPRO_STEP_TIMEOUT_MS) continue;
+        if (slot.swpro.attempts >= SWPRO_STEP_MAX_ATTEMPTS) {
+            // Unacknowledged step: move on, the pad may not implement it
+            swpro_enter_stage(&slot, static_cast<SwProStage>(static_cast<uint8_t>(slot.swpro.stage) + 1));
+        } else {
+            swpro_send_stage(&slot);
+        }
+    }
+}
+
+uint16_t swpro_buttons_from_full(const uint8_t* b) {
+    // b points at the three button bytes (report bytes 3..5): right, shared, left
+    uint16_t m = BTN_NONE;
+    if (b[0] & 0x01) m |= BTN_Y;
+    if (b[0] & 0x02) m |= BTN_X;
+    if (b[0] & 0x04) m |= BTN_B;
+    if (b[0] & 0x08) m |= BTN_A;
+    if (b[0] & 0x40) m |= BTN_R;
+    if (b[0] & 0x80) m |= BTN_ZR;
+    if (b[1] & 0x01) m |= BTN_MINUS;
+    if (b[1] & 0x02) m |= BTN_PLUS;
+    if (b[1] & 0x04) m |= BTN_RSTICK;
+    if (b[1] & 0x08) m |= BTN_LSTICK;
+    if (b[1] & 0x10) m |= BTN_HOME;
+    if (b[1] & 0x20) m |= BTN_CAPTURE;
+    if (b[2] & 0x40) m |= BTN_L;
+    if (b[2] & 0x80) m |= BTN_ZL;
+    return m;
+}
+
+// 12-bit stick sample -> [-1, +1]. Without reading the factory calibration from the
+// controller's SPI flash, assume the usual centre of 2048 and ~1400 counts of travel.
+float swpro_stick(uint32_t raw) {
+    float v = (static_cast<float>(raw) - 2048.0f) / 1400.0f;
+    return std::max(-1.0f, std::min(1.0f, v));
+}
+
+// Standard full report (0x30-0x33): [id][timer][battery|conn][btn r][btn shared][btn l]
+// [left stick 3 bytes][right stick 3 bytes][vibration][IMU samples from byte 13, when enabled]
+void swpro_parse_full(HidSlot* slot, const uint8_t* r, uint16_t len) {
+    if (len < 12) return;
+    PadState st;
+    st.buttons = swpro_buttons_from_full(&r[3]);
+    st.down  = (r[5] & 0x01) != 0;
+    st.up    = (r[5] & 0x02) != 0;
+    st.right = (r[5] & 0x04) != 0;
+    st.left  = (r[5] & 0x08) != 0;
+    uint32_t lx = r[6] | ((r[7] & 0x0F) << 8);
+    uint32_t ly = (r[7] >> 4) | (r[8] << 4);
+    uint32_t rx = r[9] | ((r[10] & 0x0F) << 8);
+    uint32_t ry = (r[10] >> 4) | (r[11] << 4);
+    // The controller reports Y growing upward; the Switch HID report grows downward
+    st.lx = swpro_stick(lx);
+    st.ly = -swpro_stick(ly);
+    st.rx = swpro_stick(rx);
+    st.ry = -swpro_stick(ry);
+    apply_radial_deadzone(st.lx, st.ly);
+    apply_radial_deadzone(st.rx, st.ry);
+    slot->state = st;
+    merge_and_push();
+}
+
+// Simple HID report (0x3F): [id][btn lo][btn hi][hat][4 x uint16 LE stick axes, 8-way only]
+void swpro_parse_simple(HidSlot* slot, const uint8_t* r, uint16_t len) {
+    if (len < 12) return;
+    PadState st;
+    uint16_t b = r[1] | (r[2] << 8);
+    if (b & 0x0001) st.buttons |= BTN_B;
+    if (b & 0x0002) st.buttons |= BTN_A;
+    if (b & 0x0004) st.buttons |= BTN_Y;
+    if (b & 0x0008) st.buttons |= BTN_X;
+    if (b & 0x0010) st.buttons |= BTN_L;
+    if (b & 0x0020) st.buttons |= BTN_R;
+    if (b & 0x0040) st.buttons |= BTN_ZL;
+    if (b & 0x0080) st.buttons |= BTN_ZR;
+    if (b & 0x0100) st.buttons |= BTN_MINUS;
+    if (b & 0x0200) st.buttons |= BTN_PLUS;
+    if (b & 0x0400) st.buttons |= BTN_LSTICK;
+    if (b & 0x0800) st.buttons |= BTN_RSTICK;
+    if (b & 0x1000) st.buttons |= BTN_HOME;
+    if (b & 0x2000) st.buttons |= BTN_CAPTURE;
+    HidField hat;
+    hat.present = true;
+    hat.bit_offset = 0;
+    hat.bit_size = 8;
+    hat.lmin = 0;
+    decode_hat(&r[3], 1, hat, st.up, st.down, st.left, st.right);
+    auto axis16 = [](const uint8_t* p) {
+        return (static_cast<float>(p[0] | (p[1] << 8)) - 32768.0f) / 32767.0f;
+    };
+    st.lx = axis16(&r[4]);
+    st.ly = axis16(&r[6]);
+    st.rx = axis16(&r[8]);
+    st.ry = axis16(&r[10]);
+    slot->state = st;
+    merge_and_push();
+}
+
+void swpro_handle_report(HidSlot* slot, const uint8_t* r, uint16_t len) {
+    SwProCtl& c = slot->swpro;
+    switch (r[0]) {
+    case SWPRO_IN_USB_ACK:
+        if (len >= 2 && c.stage == SwProStage::Handshake && r[1] == SWPRO_USB_HANDSHAKE) {
+            swpro_enter_stage(slot, SwProStage::ForceUsb);
+            // FORCE_USB is not acknowledged, so move straight on to the subcommands
+            swpro_enter_stage(slot, SwProStage::SetReportMode);
+        }
+        break;
+    case SWPRO_IN_SUBCMD_ACK:
+        // Byte 13 = ack (bit 7 set), byte 14 = subcommand being acknowledged
+        if (len >= 15 && (r[13] & 0x80)) {
+            if (c.stage == SwProStage::SetReportMode && r[14] == SWPRO_SUBCMD_SET_REPORT_MODE) {
+                swpro_enter_stage(slot, SwProStage::SetPlayerLeds);
+            } else if (c.stage == SwProStage::SetPlayerLeds && r[14] == SWPRO_SUBCMD_SET_PLAYER_LEDS) {
+                swpro_enter_stage(slot, SwProStage::Ready);
+            }
+        }
+        // 0x21 reports carry the same button/stick payload as 0x30
+        swpro_parse_full(slot, r, len);
+        break;
+    case SWPRO_IN_FULL:
+    case 0x31:
+    case 0x32:
+    case 0x33:
+        // Streaming full reports means the report mode is in effect, whether or not the
+        // pad acknowledged it (some third-party pads stream 0x30 without any handshake)
+        if (c.stage < SwProStage::SetPlayerLeds) {
+            swpro_enter_stage(slot, SwProStage::SetPlayerLeds);
+        }
+        swpro_parse_full(slot, r, len);
+        break;
+    case SWPRO_IN_SIMPLE:
+        swpro_parse_simple(slot, r, len);
+        break;
+    default:
+        break;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TinyUSB host callbacks (generic HID)
 // ---------------------------------------------------------------------------
 
 extern "C" {
 
+// Every host-controller event counts as activity for the enumeration retry logic
+void tuh_event_hook_cb(uint8_t rhport, uint32_t eventid, bool in_isr) {
+    (void)rhport;
+    (void)eventid;
+    (void)in_isr;
+    s_last_host_activity_ms = to_ms_since_boot(get_absolute_time());
+}
+
 void tuh_mount_cb(uint8_t daddr) {
     uint16_t vid = 0, pid = 0;
     tuh_vid_pid_get(daddr, &vid, &pid);
     UH_LOG("USB device attached: address %u, VID:PID %04x:%04x", daddr, vid, pid);
+    s_device_mounted = true;
 }
 
 void tuh_umount_cb(uint8_t daddr) {
     UH_LOG("USB device removed: address %u", daddr);
+    s_device_mounted = false;
 }
 
 void tuh_hid_mount_cb(uint8_t daddr, uint8_t idx, uint8_t const* desc_report, uint16_t desc_len) {
     uint8_t protocol = tuh_hid_interface_protocol(daddr, idx);
     if (protocol == HID_ITF_PROTOCOL_KEYBOARD || protocol == HID_ITF_PROTOCOL_MOUSE) {
         UH_LOG("Ignoring HID %s (address %u)", protocol == HID_ITF_PROTOCOL_KEYBOARD ? "keyboard" : "mouse", daddr);
+        return;
+    }
+
+    uint16_t vid = 0, pid = 0;
+    tuh_vid_pid_get(daddr, &vid, &pid);
+
+    if (vid == NINTENDO_VID) {
+        // Pro Controller, Joy-Con grip, NSO pads, and third-party pads in Switch mode:
+        // the HID descriptor does not describe the real reports, so use the Nintendo
+        // protocol instead of the generic parser
+        HidSlot* slot = find_hid_slot(daddr, idx, true);
+        if (slot == nullptr) {
+            LOG_W(TAG, "No free HID gamepad slot for device %u/%u", daddr, idx);
+            return;
+        }
+        slot->switch_pro = true;
+        slot->state = PadState{};
+        UH_LOG("Switch Pro Controller connected: %04x:%04x (%u/%u), starting handshake", vid, pid, daddr, idx);
+        if (!tuh_hid_receive_report(daddr, idx)) {
+            LOG_W(TAG, "Failed to request HID report from device %u/%u", daddr, idx);
+        }
+        swpro_enter_stage(slot, SwProStage::Handshake);
         return;
     }
 
@@ -513,8 +866,6 @@ void tuh_hid_mount_cb(uint8_t daddr, uint8_t idx, uint8_t const* desc_report, ui
     slot->layout = layout;
     slot->state = PadState{};
 
-    uint16_t vid = 0, pid = 0;
-    tuh_vid_pid_get(daddr, &vid, &pid);
     UH_LOG("HID gamepad connected: %04x:%04x (%u buttons, hat:%d, report id:%d)",
            vid, pid, layout.button_count, layout.hat.present ? 1 : 0,
            layout.has_report_id ? layout.report_id : -1);
@@ -536,6 +887,12 @@ void tuh_hid_umount_cb(uint8_t daddr, uint8_t idx) {
 void tuh_hid_report_received_cb(uint8_t daddr, uint8_t idx, uint8_t const* report, uint16_t len) {
     HidSlot* slot = find_hid_slot(daddr, idx, false);
     if (slot == nullptr || len == 0) {
+        return;
+    }
+
+    if (slot->switch_pro) {
+        swpro_handle_report(slot, report, len);
+        tuh_hid_receive_report(daddr, idx);
         return;
     }
 
@@ -746,9 +1103,14 @@ void UsbHostInput::run_host_task() {
     }
     LOG_I(TAG, "USB host port ready on GP%u (D+) / GP%u (D-) using PIO%d, DMA channel %d",
           config_.dp_pin, config_.dp_pin + 1, pio_num, dma_ch);
+    s_last_host_activity_ms = to_ms_since_boot(get_absolute_time());
 
     while (true) {
-        tuh_task();
+        // Wake periodically so stalled Switch Pro init steps can be retried even when
+        // the controller sends nothing (which is exactly the case before its handshake)
+        tuh_task_ext(20, false);
+        swpro_poll();
+        enum_retry_poll();
     }
 }
 

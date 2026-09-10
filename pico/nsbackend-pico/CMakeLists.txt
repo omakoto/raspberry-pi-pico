@@ -164,6 +164,10 @@ if(NSBACKEND_HAS_WIFI)
     )
 endif()
 
+# Widen TinyUSB's first device-descriptor read during enumeration; see
+# __wrap_hcd_setup_send / __wrap_hcd_edpt_xfer in src/usb_host_input.cpp for why.
+target_link_options(nsbackend-pico PRIVATE -Wl,--wrap=hcd_setup_send -Wl,--wrap=hcd_edpt_xfer)
+
 pico_enable_stdio_uart(nsbackend-pico 0)
 pico_enable_stdio_usb(nsbackend-pico 0)
 

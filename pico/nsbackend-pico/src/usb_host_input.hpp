@@ -7,6 +7,8 @@
  *
  * Supported controllers:
  *  - XInput: Xbox 360 / Xbox One / Xbox Series wired controllers (vendored tusb_xinput driver)
+ *  - Nintendo Switch Pro Controller and third-party pads in Switch mode (Nintendo's
+ *    proprietary HID protocol: USB handshake, report mode 0x30, packed 12-bit sticks)
  *  - Generic HID gamepads: DirectInput pads, DualShock 4, DualSense, 8BitDo in D-mode, etc.,
  *    decoded by parsing each device's HID report descriptor.
  *

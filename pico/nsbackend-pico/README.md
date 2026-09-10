@@ -11,7 +11,7 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 2. **USB CDC ACM Serial Console**: Exposes a virtual serial console (`/dev/ttyACM0`) for real-time logging, status monitoring, and controller command input.
 3. **USB MSC Flash Storage**: Exposes the internal 1MB FAT12 partition as a standard USB flash drive, allowing configuration editing of `config.toml` directly from your PC without re-flashing.
 4. **Physical GPIO Buttons**: Active-low physical pushbuttons with internal pull-ups, 15ms debouncing, and opposing D-pad direction cancellation.
-5. **USB-A Controller Pass-Through**: A secondary full-speed USB **host** port, bit-banged with PIO on GP16/GP17 and wired to a USB-A receptacle, lets you plug in a regular PC controller (Xbox 360/One/Series XInput pads, DualShock 4, DualSense, generic DirectInput HID gamepads) and use it to control the Switch directly.
+5. **USB-A Controller Pass-Through**: A secondary full-speed USB **host** port, bit-banged with PIO on GP16/GP17 and wired to a USB-A receptacle, lets you plug in a regular controller (Xbox 360/One/Series XInput pads, Nintendo Switch Pro Controller and Switch-mode third-party pads, DualShock 4, DualSense, generic DirectInput HID gamepads) and use it to control the Switch directly.
 6. **Dual Serial Command Server**: Concurrently accepts controller commands on hardware UART0 (GP12 TX / GP13 RX at 115,200 baud) and USB CDC ACM serial, while echoing logs to both channels.
 7. **Status LED State Machine**: Visual status indicators via onboard LED (GP25 on Pico/Pico 2, CYW43 wireless GPIO on Pico W/Pico 2 W).
 8. **Wireless Networking (Pico W / Pico 2 W only)**:
@@ -82,7 +82,8 @@ A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family*
 |  (4x4 on GP20/21) |           |  - 1MB Flash FAT12 DiskIO |
 +-------------------+           |  - PIO-USB Host (GP16/17) |
 |   PC Controller   | --------> |    * XInput (Xbox pads)   |
-| (USB-A, XInput/HID)|          |    * Generic HID gamepads |
+| (USB-A, XInput/HID)|          |    * Switch Pro Controller|
+|                   |           |    * Generic HID gamepads |
 +-------------------+           +---------------------------+
 ```
 
@@ -141,7 +142,10 @@ Keep the D+/D- wires short (a few cm) and equal length. The D+/D- GPIOs are conf
 ### Supported controllers
 
 - **XInput**: Xbox 360 / Xbox One / Xbox Series wired controllers (and the Xbox 360 wireless receiver), via the vendored [tusb_xinput](https://github.com/Ryzee119/tusb_xinput) host driver.
-- **Generic HID gamepads**: DualShock 4, DualSense, 8BitDo pads in D-input mode, and other DirectInput-style USB gamepads. The HID report descriptor is parsed at connect time, so most pads work without per-device quirks.
+- **Nintendo Switch Pro Controller** (official) and third-party controllers in Switch mode (e.g. 8BitDo, which present the same `057e:2009` identity). These use Nintendo's proprietary protocol: the firmware performs the USB handshake, switches the pad to full report mode 0x30, and decodes the packed 12-bit sticks; buttons map 1:1. The simple 0x3F report mode is also understood, and unacknowledged init steps are skipped so pads that only implement part of the protocol still work.
+- **Generic HID gamepads**: DualShock 4, DualSense, 8BitDo pads in D-input mode, wired "Switch compatible" third-party pads that use a plain HID report (e.g. DragonRise `0079:181d`), and other DirectInput-style USB gamepads. The HID report descriptor is parsed at connect time, so most pads work without per-device quirks.
+
+Two enumeration robustness measures are built in, because cheap pads are picky: the first device-descriptor read is widened from TinyUSB's 8 bytes to the full descriptor (some pads drop off the bus after a short read), and a device that stays on the wire without ever completing enumeration is re-reset and re-enumerated every 1.5 s of bus idle instead of being abandoned.
 
 ### Button mapping
 
