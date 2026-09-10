@@ -411,6 +411,7 @@ constexpr uint8_t SWPRO_USB_FORCE_USB = 0x04;  // stop the Bluetooth fallback ti
 constexpr uint8_t SWPRO_SUBCMD_SET_REPORT_MODE = 0x03;
 constexpr uint8_t SWPRO_SUBCMD_SET_PLAYER_LEDS = 0x30;
 constexpr uint8_t SWPRO_SUBCMD_ENABLE_IMU      = 0x40;
+constexpr uint8_t SWPRO_SUBCMD_IMU_SENSITIVITY = 0x41;
 // Input report IDs
 constexpr uint8_t SWPRO_IN_SUBCMD_ACK = 0x21;
 constexpr uint8_t SWPRO_IN_FULL       = 0x30;  // 60 Hz standard report (also 0x31-0x33)
@@ -440,6 +441,8 @@ struct SwProCtl {
     uint8_t attempts = 0;
     uint8_t packet_counter = 0;  // 4-bit sequence number required in report 0x01
     SwProAxisCal cal_lx, cal_ly, cal_rx, cal_ry;
+    uint32_t imu_cfg_applied = 0;  // motion-bridge IMU config version acknowledged by the pad
+    uint32_t imu_cfg_sent_ms = 0;
 };
 
 constexpr uint8_t SWPRO_SUBCMD_SPI_READ = 0x10;
@@ -693,7 +696,18 @@ void swpro_enter_stage(HidSlot* slot, SwProStage stage) {
 void swpro_poll() {
     uint32_t now = to_ms_since_boot(get_absolute_time());
     for (auto& slot : s_hid_slots) {
-        if (!slot.used || !slot.switch_pro || slot.swpro.stage == SwProStage::Ready) continue;
+        if (!slot.used || !slot.switch_pro) continue;
+        if (slot.swpro.stage == SwProStage::Ready) {
+            // IMU settings the console asked of the emulated controller are applied to the
+            // real one, resent every 150 ms until acknowledged (the pad drops some subcommands)
+            uint8_t cfg[IMU_CONFIG_SIZE];
+            uint32_t version = motion_bridge_get_imu_config(cfg);
+            if (version != 0 && version != slot.swpro.imu_cfg_applied && now - slot.swpro.imu_cfg_sent_ms >= SWPRO_STEP_TIMEOUT_MS) {
+                swpro_send_subcmd(&slot, SWPRO_SUBCMD_IMU_SENSITIVITY, cfg, IMU_CONFIG_SIZE);
+                slot.swpro.imu_cfg_sent_ms = now;
+            }
+            continue;
+        }
         if (now - slot.swpro.last_tx_ms < SWPRO_STEP_TIMEOUT_MS) continue;
         if (slot.swpro.attempts >= SWPRO_STEP_MAX_ATTEMPTS) {
             // Unacknowledged step: move on, the pad may not implement it
@@ -765,8 +779,9 @@ float swpro_stick(uint32_t raw, const SwProAxisCal& cal) {
 void swpro_parse_full(HidSlot* slot, const uint8_t* r, uint16_t len, bool has_imu) {
     if (len < 12) return;
     if (has_imu && len >= 13 + MOTION_BLOCK_SIZE) {
-        // Three accel+gyro samples in the controller's own layout, forwarded as-is
-        motion_bridge_write(&r[13]);
+        // Three accel+gyro samples in the controller's own layout, forwarded as-is together
+        // with the report timer so the device side can reproduce the controller's timing
+        motion_bridge_write(r[1], &r[13]);
     }
     PadState st;
     st.buttons = swpro_buttons_from_full(&r[3]);
@@ -850,6 +865,10 @@ void swpro_handle_report(HidSlot* slot, const uint8_t* r, uint16_t len) {
                 swpro_enter_stage(slot, SwProStage::EnableImu);
             } else if (c.stage == SwProStage::EnableImu && r[14] == SWPRO_SUBCMD_ENABLE_IMU) {
                 swpro_enter_stage(slot, SwProStage::ReadStickCal);
+            } else if (c.stage == SwProStage::Ready && r[14] == SWPRO_SUBCMD_IMU_SENSITIVITY) {
+                uint8_t cfg[IMU_CONFIG_SIZE];
+                c.imu_cfg_applied = motion_bridge_get_imu_config(cfg);
+                UH_LOG("Switch Pro Controller %u/%u IMU sensitivity applied (gyro %u accel %u)", slot->daddr, slot->instance, cfg[0], cfg[1]);
             } else if (c.stage == SwProStage::ReadStickCal && r[14] == SWPRO_SUBCMD_SPI_READ &&
                        r[15] == (SWPRO_SPI_STICK_CAL_ADDR & 0xFF) && r[16] == (SWPRO_SPI_STICK_CAL_ADDR >> 8)) {
                 if (len >= 20 + SWPRO_SPI_STICK_CAL_LEN) {

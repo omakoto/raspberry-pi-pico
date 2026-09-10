@@ -207,6 +207,7 @@ uint8_t s_player_leds = 0;
 uint8_t s_pending[REPORT_PAYLOAD];  // one queued reply (0x21 / 0x81 body)
 uint8_t s_pending_id = 0;
 uint32_t s_last_report_ms = 0;
+uint32_t s_last_motion_version = 0;  // motion block already forwarded
 
 uint8_t timer_byte() {
     return static_cast<uint8_t>(to_ms_since_boot(get_absolute_time()) / 5);
@@ -261,14 +262,20 @@ void fill_input_prefix(uint8_t* p) {
     p[11] = 0x09;  // vibrator report (as captured)
 }
 
-void fill_imu(uint8_t* p) {
-    if (!motion_bridge_read(p, MOTION_MAX_AGE_MS)) {
+// Fills the IMU block and returns the timer byte to report with it: the attached
+// controller's own timer when its samples are being forwarded, ours otherwise, so the
+// console's per-report timing matches the samples it receives
+uint8_t fill_imu(uint8_t* p) {
+    uint8_t timer = 0;
+    if (!motion_bridge_read(p, &timer, MOTION_MAX_AGE_MS)) {
         // Nothing attached or stale: report a controller resting flat (1 g on Z, no rotation)
         static const int16_t rest[6] = {0, 0, 4096, 0, 0, 0};
         for (int sample = 0; sample < 3; ++sample) {
             std::memcpy(&p[sample * 12], rest, sizeof(rest));
         }
+        return timer_byte();
     }
+    return timer;
 }
 
 void queue_reply(uint8_t report_id, const uint8_t* body, uint16_t len) {
@@ -357,7 +364,15 @@ void handle_subcmd_packet(const uint8_t* buf, uint16_t len) {
         reply_subcmd(0x80, subcmd, nullptr, 0);
         LOG_I(TAG, "Host %s the IMU", s_imu_enabled ? "enabled" : "disabled");
         break;
-    case 0x41:  // Set IMU sensitivity
+    case 0x41: {  // Set IMU sensitivity: hand the same settings to the attached controller
+        uint8_t cfg[IMU_CONFIG_SIZE] = {0x03, 0x00, 0x01, 0x01};  // controller defaults
+        std::memcpy(cfg, args, std::min<uint16_t>(args_len, IMU_CONFIG_SIZE));
+        motion_bridge_set_imu_config(cfg);
+        reply_subcmd(0x80, subcmd, nullptr, 0);
+        LOG_I(TAG, "Host set IMU sensitivity: gyro %u accel %u gyro-rate %u accel-filter %u",
+              cfg[0], cfg[1], cfg[2], cfg[3]);
+        break;
+    }
     case 0x48:  // Enable vibration
         reply_subcmd(0x80, subcmd, nullptr, 0);
         break;
@@ -499,15 +514,23 @@ void tick() {
 
     if (!s_streaming) return;
     uint32_t now = to_ms_since_boot(get_absolute_time());
-    if (now - s_last_report_ms < REPORT_PERIOD_MS) return;
+
+    // With an attached controller delivering IMU blocks, send exactly one report per block
+    // as soon as it arrives, so the console gets each sample once at the controller's own
+    // cadence (re-sending a block on our own clock would double or skip rotation). The
+    // fixed period only paces reports when no fresh motion is coming in.
+    uint32_t motion_version = motion_bridge_version();
+    bool fresh_motion = s_imu_enabled && motion_version != s_last_motion_version;
+    if (!fresh_motion && now - s_last_report_ms < REPORT_PERIOD_MS) return;
 
     uint8_t body[REPORT_PAYLOAD] = {0};
     fill_input_prefix(body);
     if (s_imu_enabled) {
-        fill_imu(&body[12]);
+        body[0] = fill_imu(&body[12]);
     }
     if (tud_hid_report(IN_FULL, body, REPORT_PAYLOAD)) {
         s_last_report_ms = now;
+        s_last_motion_version = motion_version;
     }
 }
 
