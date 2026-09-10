@@ -55,6 +55,22 @@ bool motion_bridge_read(uint8_t* out, uint8_t* timer, uint32_t max_age_ms) {
     return false;
 }
 
+volatile uint8_t s_mode = 0;
+volatile uint32_t s_mode_version = 0;
+
+void motion_bridge_set_imu_mode(uint8_t mode) {
+    s_mode = mode;
+    __asm volatile("dmb" ::: "memory");
+    s_mode_version = s_mode_version + 1;
+}
+
+uint32_t motion_bridge_get_imu_mode(uint8_t* mode) {
+    uint32_t version = s_mode_version;
+    __asm volatile("dmb" ::: "memory");
+    if (version != 0) *mode = s_mode;
+    return version;
+}
+
 uint32_t motion_bridge_version() {
     return s_version;
 }

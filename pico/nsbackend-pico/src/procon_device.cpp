@@ -9,6 +9,7 @@
 #include "procon_device.hpp"
 
 #include <cstring>
+#include <cstdio>
 #include <algorithm>
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
@@ -343,8 +344,8 @@ void handle_subcmd_packet(const uint8_t* buf, uint16_t len) {
     case 0x12:  // SPI sector erase
         reply_subcmd(0x80, subcmd, nullptr, 0);
         break;
-    case 0x21: {  // Set NFC/IR MCU configuration
-        uint8_t d[8] = {0x01, 0x00, 0xff, 0x00, 0x03, 0x00, 0x05, 0x01};
+    case 0x21: {  // Set NFC/IR MCU configuration: MCU status as reported by a real unit in standby
+        uint8_t d[8] = {0x01, 0x00, 0xff, 0x00, 0x08, 0x00, 0x1b, 0x01};
         reply_subcmd(0xA0, subcmd, d, sizeof(d));
         break;
     }
@@ -359,11 +360,15 @@ void handle_subcmd_packet(const uint8_t* buf, uint16_t len) {
     case 0x38:  // Set HOME light
         reply_subcmd(0x80, subcmd, nullptr, 0);
         break;
-    case 0x40:  // Enable IMU
-        s_imu_enabled = args_len >= 1 && args[0] != 0;
+    case 0x40: {  // Enable IMU: 0 = off, 1 = classic layout, 2 = newer layout (used by the console)
+        uint8_t mode = args_len >= 1 ? args[0] : 0;
+        s_imu_enabled = mode != 0;
+        // The attached controller is put into the same mode so its blocks pass through verbatim
+        motion_bridge_set_imu_mode(mode);
         reply_subcmd(0x80, subcmd, nullptr, 0);
-        LOG_I(TAG, "Host %s the IMU", s_imu_enabled ? "enabled" : "disabled");
+        LOG_I(TAG, "Host set IMU mode %u", mode);
         break;
+    }
     case 0x41: {  // Set IMU sensitivity: hand the same settings to the attached controller
         uint8_t cfg[IMU_CONFIG_SIZE] = {0x03, 0x00, 0x01, 0x01};  // controller defaults
         std::memcpy(cfg, args, std::min<uint16_t>(args_len, IMU_CONFIG_SIZE));
@@ -491,6 +496,8 @@ void on_output_report(const uint8_t* buf, uint16_t len) {
     case OUT_USB_CMD:
         handle_usb_cmd(buf, len);
         break;
+    case 0x00:
+        break;  // the console probes with empty 2-byte packets before the handshake
     default:
         LOG_W(TAG, "Unhandled output report 0x%02x (%u bytes)", buf[0], len);
         break;

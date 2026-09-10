@@ -26,6 +26,13 @@ bool motion_bridge_read(uint8_t* out, uint8_t* timer, uint32_t max_age_ms);
 // Number of blocks written so far; a change means a new block is available.
 uint32_t motion_bridge_version();
 
+// IMU mode requested by the console (subcommand 0x40 argument: 0 = off, 1 = classic
+// sample layout, 2 = the newer layout current consoles use). The attached controller is
+// switched to the same mode so its blocks can be forwarded verbatim.
+void motion_bridge_set_imu_mode(uint8_t mode);
+// Returns the mode version (0 = never set) and copies the mode when non-zero.
+uint32_t motion_bridge_get_imu_mode(uint8_t* mode);
+
 // IMU configuration requested by the console (subcommand 0x41 arguments: gyro range,
 // accelerometer range, gyro sample rate, accelerometer filter), to be applied to the
 // attached controller so both ends use the same scale. Written by the USB device task,

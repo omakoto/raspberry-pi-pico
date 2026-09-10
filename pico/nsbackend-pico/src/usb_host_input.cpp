@@ -441,8 +441,10 @@ struct SwProCtl {
     uint8_t attempts = 0;
     uint8_t packet_counter = 0;  // 4-bit sequence number required in report 0x01
     SwProAxisCal cal_lx, cal_ly, cal_rx, cal_ry;
-    uint32_t imu_cfg_applied = 0;  // motion-bridge IMU config version acknowledged by the pad
+    uint32_t imu_cfg_applied = 0;   // motion-bridge IMU config version acknowledged by the pad
     uint32_t imu_cfg_sent_ms = 0;
+    uint32_t imu_mode_applied = 0;  // motion-bridge IMU mode version acknowledged by the pad
+    uint32_t imu_mode_sent_ms = 0;
 };
 
 constexpr uint8_t SWPRO_SUBCMD_SPI_READ = 0x10;
@@ -698,8 +700,18 @@ void swpro_poll() {
     for (auto& slot : s_hid_slots) {
         if (!slot.used || !slot.switch_pro) continue;
         if (slot.swpro.stage == SwProStage::Ready) {
-            // IMU settings the console asked of the emulated controller are applied to the
-            // real one, resent every 150 ms until acknowledged (the pad drops some subcommands)
+            // IMU mode and settings the console asked of the emulated controller are applied
+            // to the real one, resent every 150 ms until acknowledged (the pad drops some
+            // subcommands). The mode goes first: it decides the block layout being forwarded.
+            uint8_t mode = 0;
+            uint32_t mode_version = motion_bridge_get_imu_mode(&mode);
+            if (mode_version != 0 && mode_version != slot.swpro.imu_mode_applied) {
+                if (now - slot.swpro.imu_mode_sent_ms >= SWPRO_STEP_TIMEOUT_MS) {
+                    swpro_send_subcmd(&slot, SWPRO_SUBCMD_ENABLE_IMU, &mode, 1);
+                    slot.swpro.imu_mode_sent_ms = now;
+                }
+                continue;
+            }
             uint8_t cfg[IMU_CONFIG_SIZE];
             uint32_t version = motion_bridge_get_imu_config(cfg);
             if (version != 0 && version != slot.swpro.imu_cfg_applied && now - slot.swpro.imu_cfg_sent_ms >= SWPRO_STEP_TIMEOUT_MS) {
@@ -865,6 +877,10 @@ void swpro_handle_report(HidSlot* slot, const uint8_t* r, uint16_t len) {
                 swpro_enter_stage(slot, SwProStage::EnableImu);
             } else if (c.stage == SwProStage::EnableImu && r[14] == SWPRO_SUBCMD_ENABLE_IMU) {
                 swpro_enter_stage(slot, SwProStage::ReadStickCal);
+            } else if (c.stage == SwProStage::Ready && r[14] == SWPRO_SUBCMD_ENABLE_IMU) {
+                uint8_t mode = 0;
+                c.imu_mode_applied = motion_bridge_get_imu_mode(&mode);
+                UH_LOG("Switch Pro Controller %u/%u IMU mode %u applied (ack 0x%02x)", slot->daddr, slot->instance, mode, r[13]);
             } else if (c.stage == SwProStage::Ready && r[14] == SWPRO_SUBCMD_IMU_SENSITIVITY) {
                 uint8_t cfg[IMU_CONFIG_SIZE];
                 c.imu_cfg_applied = motion_bridge_get_imu_config(cfg);
