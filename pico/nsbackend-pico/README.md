@@ -2,6 +2,8 @@
 
 A high-performance C++ port of **nsbackend** for the **Raspberry Pi Pico family** (**Pico**, **Pico 2**, **Pico W**, **Pico 2 W**), built on the **Raspberry Pi Pico SDK** and **FreeRTOS SMP**.
 
+This firmware is a drop-in **backend for [raspberry-switch-control](https://github.com/omakoto/raspberry-switch-control)**: it speaks the same text command protocol as that project's `nsbackend`, so its `nsfrontend` can drive a Nintendo Switch through this board instead of a Raspberry Pi, over Wi-Fi (TCP) or a serial link. See [Connecting from nsfrontend and terminals](#12-connecting-from-nsfrontend-and-terminals).
+
 ---
 
 ## 1. Overview
@@ -372,7 +374,63 @@ pu 0.15        # Hold D-pad UP for 150 milliseconds
 
 ---
 
-## 12. Latency Benchmarking
+## 12. Connecting from nsfrontend and terminals
+
+The board accepts the command protocol above on three channels: **TCP port 10100** (Pico W / Pico 2 W, advertised as `nscon.local` via mDNS), the **USB CDC console** (`/dev/ttyACM0` on Linux, only with the default Pokken identity), and **UART0** (GP12 TX / GP13 RX, 115200 baud, through a USB-serial adapter such as `/dev/ttyUSB0`). All three channels also carry the log output, and with `enable_echo = true` every command is echoed back with its name, e.g. `a [A]`.
+
+### From nsfrontend
+
+`nsfrontend` from [raspberry-switch-control](https://github.com/omakoto/raspberry-switch-control) reads a joystick and writes the command stream to whatever its `-o` option names, so point it at the board's TCP port with `nc`:
+
+```bash
+nsfrontend -j /dev/input/js0 -o >(nc nscon.local 10100)
+```
+
+or at a serial channel, after switching the device to raw mode once so the kernel does not translate or echo anything:
+
+```bash
+stty -F /dev/ttyACM0 115200 raw -echo      # USB CDC console (Pokken identity)
+nsfrontend -j /dev/input/js0 -o /dev/ttyACM0
+
+stty -F /dev/ttyUSB0 115200 raw -echo      # UART0 through a USB-serial adapter
+nsfrontend -j /dev/input/js0 -o /dev/ttyUSB0
+```
+
+Use the IP address instead of `nscon.local` if mDNS is not resolved on your machine; the address is printed in the boot log and by the `status` command.
+
+### Manually with nc
+
+```bash
+$ nc nscon.local 10100
+a                      # press A
+lx 0.75                # left stick three quarters right
+lx 0                   # release it
+pu 0.15                # hold D-pad up for 150 ms
+status                 # Wi-Fi state, IP address, free heap
+```
+
+For scripting, most `nc` builds need a flag to exit once the input ends (`-q 1` on Debian/Ubuntu's netcat-openbsd, `-N` on some others):
+
+```bash
+printf 'a
+b 0.2
+' | nc -q 1 nscon.local 10100
+```
+
+### Manually with picocom (or any serial terminal)
+
+```bash
+picocom -q -b 115200 /dev/ttyACM0     # USB CDC console, Pokken identity
+picocom -q -b 115200 /dev/ttyUSB0     # UART0 via adapter, any identity
+```
+
+Type the same commands (`a`, `lx 0.5`, `status`, `help`); each line is executed when you press Enter, and the log scrolls in the same window. `bootloader` reboots the board into BOOTSEL mode for flashing. Quit picocom with `Ctrl-A` then `Ctrl-X`. Other terminals (`minicom`, `screen /dev/ttyACM0 115200`, `tio`) work the same way; the only requirement is 115200 baud, 8N1, no flow control.
+
+In the Pro Controller identity (`switch_identity = "procon"`) the USB CDC console does not exist, so use TCP or UART0 there.
+
+---
+
+## 13. Latency Benchmarking
 
 To benchmark network round-trip latency over Wi-Fi:
 ```bash
