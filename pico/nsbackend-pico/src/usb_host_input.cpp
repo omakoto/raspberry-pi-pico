@@ -34,6 +34,7 @@
 #include "xinput_host.h"
 #include "dual_logger.hpp"
 #include "gamepad_hid.hpp"
+#include "motion_bridge.hpp"
 
 static const char* TAG = "UsbHost";
 // Host-controller hooks (hcd_port_connect_status, hcd_event_device_attach/remove) used
@@ -409,7 +410,7 @@ constexpr uint8_t SWPRO_USB_FORCE_USB = 0x04;  // stop the Bluetooth fallback ti
 // Subcommands (in report 0x01) acknowledged by report 0x21
 constexpr uint8_t SWPRO_SUBCMD_SET_REPORT_MODE = 0x03;
 constexpr uint8_t SWPRO_SUBCMD_SET_PLAYER_LEDS = 0x30;
-constexpr uint8_t SWPRO_SUBCMD_ENABLE_IMU      = 0x40;  // for future gyro support
+constexpr uint8_t SWPRO_SUBCMD_ENABLE_IMU      = 0x40;
 // Input report IDs
 constexpr uint8_t SWPRO_IN_SUBCMD_ACK = 0x21;
 constexpr uint8_t SWPRO_IN_FULL       = 0x30;  // 60 Hz standard report (also 0x31-0x33)
@@ -422,14 +423,28 @@ constexpr uint8_t SWPRO_IN_USB_ACK    = 0x81;
 // to the main MCU over an internal serial link, and after a host reboot the two sides can
 // be at different rates, in which case every subcommand is silently dropped until the
 // link is renegotiated.
-enum class SwProStage : uint8_t { Handshake, SetBaud, Handshake2, ForceUsb, SetReportMode, SetPlayerLeds, Ready };
+enum class SwProStage : uint8_t { Handshake, SetBaud, Handshake2, ForceUsb, SetReportMode, SetPlayerLeds, EnableImu, ReadStickCal, Ready };
+
+// One stick axis of the controller's factory calibration: raw 12-bit centre and the
+// travel above and below it. Without a calibration the parser assumes the nominal
+// centre with a conservative travel, which is where most pads sit anyway.
+struct SwProAxisCal {
+    uint16_t centre = 2048;
+    uint16_t max_above = 1400;
+    uint16_t min_below = 1400;
+};
 
 struct SwProCtl {
     SwProStage stage = SwProStage::Handshake;
     uint32_t last_tx_ms = 0;
     uint8_t attempts = 0;
     uint8_t packet_counter = 0;  // 4-bit sequence number required in report 0x01
+    SwProAxisCal cal_lx, cal_ly, cal_rx, cal_ry;
 };
+
+constexpr uint8_t SWPRO_SUBCMD_SPI_READ = 0x10;
+constexpr uint16_t SWPRO_SPI_STICK_CAL_ADDR = 0x603D;  // left stick 9 bytes, right stick 9 bytes
+constexpr uint8_t SWPRO_SPI_STICK_CAL_LEN = 18;
 
 struct HidSlot {
     bool used = false;
@@ -643,6 +658,18 @@ void swpro_send_stage(HidSlot* slot) {
         sent = swpro_send_subcmd(slot, SWPRO_SUBCMD_SET_PLAYER_LEDS, &leds, 1);
         break;
     }
+    case SwProStage::EnableImu: {
+        // Always on: the samples feed the Pro Controller emulation on the device side
+        uint8_t on = 0x01;
+        sent = swpro_send_subcmd(slot, SWPRO_SUBCMD_ENABLE_IMU, &on, 1);
+        break;
+    }
+    case SwProStage::ReadStickCal: {
+        // SPI flash read: address (LE32), length
+        uint8_t args[5] = {SWPRO_SPI_STICK_CAL_ADDR & 0xFF, SWPRO_SPI_STICK_CAL_ADDR >> 8, 0x00, 0x00, SWPRO_SPI_STICK_CAL_LEN};
+        sent = swpro_send_subcmd(slot, SWPRO_SUBCMD_SPI_READ, args, sizeof(args));
+        break;
+    }
     case SwProStage::Ready:
         return;
     }
@@ -697,17 +724,50 @@ uint16_t swpro_buttons_from_full(const uint8_t* b) {
     return m;
 }
 
-// 12-bit stick sample -> [-1, +1]. Without reading the factory calibration from the
-// controller's SPI flash, assume the usual centre of 2048 and ~1400 counts of travel.
-float swpro_stick(uint32_t raw) {
-    float v = (static_cast<float>(raw) - 2048.0f) / 1400.0f;
+// Two 12-bit values packed in three bytes, the layout of all stick calibration data
+void swpro_unpack12(const uint8_t* b, uint16_t& a, uint16_t& c) {
+    a = static_cast<uint16_t>(b[0] | ((b[1] & 0x0F) << 8));
+    c = static_cast<uint16_t>((b[1] >> 4) | (b[2] << 4));
+}
+
+// Applies the 18-byte factory stick calibration read from SPI 0x603D. Left stick order:
+// max above centre, centre, min below centre; right stick order: centre, min below, max
+// above. Unprogrammed flash reads 0xFFF and is ignored.
+void swpro_apply_stick_cal(HidSlot* slot, const uint8_t* d) {
+    SwProCtl& c = slot->swpro;
+    uint16_t v[12];
+    for (int i = 0; i < 6; ++i) {
+        swpro_unpack12(&d[i * 3], v[i * 2], v[i * 2 + 1]);
+    }
+    for (uint16_t x : v) {
+        if (x == 0 || x >= 0xFFF) {
+            UH_LOG("Switch Pro Controller %u/%u has no stick calibration; using defaults", slot->daddr, slot->instance);
+            return;
+        }
+    }
+    c.cal_lx = {v[2], v[0], v[4]};
+    c.cal_ly = {v[3], v[1], v[5]};
+    c.cal_rx = {v[6], v[10], v[8]};
+    c.cal_ry = {v[7], v[11], v[9]};
+    UH_LOG("Switch Pro Controller %u/%u stick calibration: L centre %u/%u, R centre %u/%u",
+           slot->daddr, slot->instance, c.cal_lx.centre, c.cal_ly.centre, c.cal_rx.centre, c.cal_ry.centre);
+}
+
+// 12-bit stick sample -> [-1, +1] using the axis calibration
+float swpro_stick(uint32_t raw, const SwProAxisCal& cal) {
+    float d = static_cast<float>(raw) - static_cast<float>(cal.centre);
+    float v = d > 0 ? d / static_cast<float>(cal.max_above) : d / static_cast<float>(cal.min_below);
     return std::max(-1.0f, std::min(1.0f, v));
 }
 
 // Standard full report (0x30-0x33): [id][timer][battery|conn][btn r][btn shared][btn l]
-// [left stick 3 bytes][right stick 3 bytes][vibration][IMU samples from byte 13, when enabled]
-void swpro_parse_full(HidSlot* slot, const uint8_t* r, uint16_t len) {
+// [left stick 3 bytes][right stick 3 bytes][vibration][3 IMU samples from byte 13, when enabled]
+void swpro_parse_full(HidSlot* slot, const uint8_t* r, uint16_t len, bool has_imu) {
     if (len < 12) return;
+    if (has_imu && len >= 13 + MOTION_BLOCK_SIZE) {
+        // Three accel+gyro samples in the controller's own layout, forwarded as-is
+        motion_bridge_write(&r[13]);
+    }
     PadState st;
     st.buttons = swpro_buttons_from_full(&r[3]);
     st.down  = (r[5] & 0x01) != 0;
@@ -719,10 +779,11 @@ void swpro_parse_full(HidSlot* slot, const uint8_t* r, uint16_t len) {
     uint32_t rx = r[9] | ((r[10] & 0x0F) << 8);
     uint32_t ry = (r[10] >> 4) | (r[11] << 4);
     // The controller reports Y growing upward; the Switch HID report grows downward
-    st.lx = swpro_stick(lx);
-    st.ly = -swpro_stick(ly);
-    st.rx = swpro_stick(rx);
-    st.ry = -swpro_stick(ry);
+    const SwProCtl& c = slot->swpro;
+    st.lx = swpro_stick(lx, c.cal_lx);
+    st.ly = -swpro_stick(ly, c.cal_ly);
+    st.rx = swpro_stick(rx, c.cal_rx);
+    st.ry = -swpro_stick(ry, c.cal_ry);
     apply_radial_deadzone(st.lx, st.ly);
     apply_radial_deadzone(st.rx, st.ry);
     slot->state = st;
@@ -786,11 +847,19 @@ void swpro_handle_report(HidSlot* slot, const uint8_t* r, uint16_t len) {
             if (c.stage == SwProStage::SetReportMode && r[14] == SWPRO_SUBCMD_SET_REPORT_MODE) {
                 swpro_enter_stage(slot, SwProStage::SetPlayerLeds);
             } else if (c.stage == SwProStage::SetPlayerLeds && r[14] == SWPRO_SUBCMD_SET_PLAYER_LEDS) {
+                swpro_enter_stage(slot, SwProStage::EnableImu);
+            } else if (c.stage == SwProStage::EnableImu && r[14] == SWPRO_SUBCMD_ENABLE_IMU) {
+                swpro_enter_stage(slot, SwProStage::ReadStickCal);
+            } else if (c.stage == SwProStage::ReadStickCal && r[14] == SWPRO_SUBCMD_SPI_READ &&
+                       r[15] == (SWPRO_SPI_STICK_CAL_ADDR & 0xFF) && r[16] == (SWPRO_SPI_STICK_CAL_ADDR >> 8)) {
+                if (len >= 20 + SWPRO_SPI_STICK_CAL_LEN) {
+                    swpro_apply_stick_cal(slot, &r[20]);
+                }
                 swpro_enter_stage(slot, SwProStage::Ready);
             }
         }
-        // 0x21 reports carry the same button/stick payload as 0x30
-        swpro_parse_full(slot, r, len);
+        // 0x21 reports carry the same button/stick payload as 0x30 (but no IMU block)
+        swpro_parse_full(slot, r, len, false);
         break;
     case SWPRO_IN_FULL:
     case 0x31:
@@ -801,7 +870,7 @@ void swpro_handle_report(HidSlot* slot, const uint8_t* r, uint16_t len) {
         if (c.stage < SwProStage::SetPlayerLeds) {
             swpro_enter_stage(slot, SwProStage::SetPlayerLeds);
         }
-        swpro_parse_full(slot, r, len);
+        swpro_parse_full(slot, r, len, true);
         break;
     case SWPRO_IN_SIMPLE:
         swpro_parse_simple(slot, r, len);

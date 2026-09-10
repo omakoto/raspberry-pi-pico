@@ -52,10 +52,14 @@ static void supervisor_task(void* param) {
     status_led.init();
     status_led.set_state(LedState::INITIALIZING);
 
-    // 3. Initialize TinyUSB Composite Interface (HID Gamepad + CDC Console + MSC Storage)
+    // 3. Initialize the Switch-facing USB device: HORI Pokken pad (composite with CDC console
+    //    and MSC storage) or a Nintendo Pro Controller (HID-only unless procon_composite)
+    std::string identity_name = config.get_string("switch_identity", "pokken");
+    GamepadIdentity identity = (identity_name == "procon") ? GamepadIdentity::ProCon : GamepadIdentity::Pokken;
+    bool procon_composite = config.get_bool("procon_composite", false);
     GamepadHid gamepad;
-    if (!gamepad.init()) {
-        LOG_E(TAG, "Failed to initialize USB Composite interface");
+    if (!gamepad.init(identity, procon_composite)) {
+        LOG_E(TAG, "Failed to initialize USB device interface");
     }
 
     // 4. Initialize Controller State Engine

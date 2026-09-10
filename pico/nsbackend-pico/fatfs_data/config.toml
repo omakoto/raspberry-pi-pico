@@ -13,6 +13,13 @@ wifi_password = "YOUR_WIFI_PASSWORD"
 # wifi_ssid1 = "BackupHotspot"
 # wifi_password1 = "HotspotPass"
 
+# Switch-facing USB identity: "pokken" (HORI Pokken pad, default) or "procon" (Nintendo
+# Pro Controller with motion pass-through from a Pro Controller on the USB-A port).
+# In procon mode the CDC console and the config drive are hidden unless procon_composite
+# is true, because a real Pro Controller is a single-function USB device.
+#switch_identity = "procon"
+#procon_composite = false
+
 # USB Host Port (USB-A controller pass-through over PIO-USB)
 # D+ connects to usb_host_dp_pin, D- to the next GPIO (default: GP16 D+, GP17 D-).
 usb_host_enabled = true

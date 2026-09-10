@@ -142,10 +142,28 @@ Keep the D+/D- wires short (a few cm) and equal length. The D+/D- GPIOs are conf
 ### Supported controllers
 
 - **XInput**: Xbox 360 / Xbox One / Xbox Series wired controllers (and the Xbox 360 wireless receiver), via the vendored [tusb_xinput](https://github.com/Ryzee119/tusb_xinput) host driver.
-- **Nintendo Switch Pro Controller** (official) and third-party controllers in Switch mode (e.g. 8BitDo, which present the same `057e:2009` identity). These use Nintendo's proprietary protocol: the firmware performs the USB handshake, switches the pad to full report mode 0x30, and decodes the packed 12-bit sticks; buttons map 1:1. The simple 0x3F report mode is also understood, and unacknowledged init steps are skipped so pads that only implement part of the protocol still work.
+- **Nintendo Switch Pro Controller** (official) and third-party controllers in Switch mode (e.g. 8BitDo, which present the same `057e:2009` identity). These use Nintendo's proprietary protocol: the firmware performs the USB handshake (including the baud renegotiation an official unit needs after a host reboot), switches the pad to full report mode 0x30, enables its IMU, reads its factory stick calibration, and decodes the packed 12-bit sticks; buttons map 1:1. The simple 0x3F report mode is also understood, and unacknowledged init steps are skipped so pads that only implement part of the protocol still work. Motion data is forwarded to the Switch when the board runs as a Pro Controller (see below).
 - **Generic HID gamepads**: DualShock 4, DualSense, 8BitDo pads in D-input mode, wired "Switch compatible" third-party pads that use a plain HID report (e.g. DragonRise `0079:181d`), and other DirectInput-style USB gamepads. The HID report descriptor is parsed at connect time, so most pads work without per-device quirks.
 
 Two enumeration robustness measures are built in, because cheap pads are picky: the first device-descriptor read is widened from TinyUSB's 8 bytes to the full descriptor (some pads drop off the bus after a short read), and a device that stays on the wire without ever completing enumeration is re-reset and re-enumerated every 1.5 s of bus idle instead of being abandoned.
+
+### Motion controls: Pro Controller identity
+
+The Switch only accepts motion data from a controller that speaks Nintendo's own protocol, so gyro pass-through requires the board to present itself as a **Nintendo Pro Controller** instead of the HORI Pokken pad. Enable it in `config.toml` (or the override file):
+
+```toml
+switch_identity = "procon"     # default: "pokken"
+#procon_composite = true       # keep the CDC console and config drive attached (see below)
+```
+
+In this mode the native USB port enumerates as VID `057e` / PID `2009` with descriptors captured from a real Pro Controller, answers the console's USB handshake, subcommands and SPI-flash calibration reads, and streams the full 0x30 input report at about 60 Hz. Buttons, D-pad and sticks come from the same merged controller state as before (TCP/serial commands, GPIO, keypad, USB-A pass-through), and the accelerometer/gyroscope samples are forwarded from a Pro Controller plugged into the USB-A port. Without one attached, a resting orientation is reported so games see no motion rather than garbage.
+
+Things to know about this mode:
+
+- A real Pro Controller is a single-function USB device, so by default the CDC console and the MSC config drive are **not** exposed. Logging still works on UART0. `procon_composite = true` adds them back for experiments, at the risk of the console rejecting the device.
+- Reflashing over USB therefore cannot use the CDC 1200-baud trick. `01-install.sh` falls back to sending `bootloader` over the UART0 command console when `NSBACKEND_UART` names the adapter's device (e.g. `NSBACKEND_UART=/dev/ttyUSB0 ./01-install.sh`); otherwise hold BOOTSEL while connecting.
+- On Linux the `hid-nintendo` kernel driver drives the emulated controller exactly as the console does and exposes a joystick device plus a separate "(IMU)" event device, which makes a convenient test bench: `evtest` on the IMU device shows the forwarded motion.
+- The attached Pro Controller's factory stick calibration is read from its SPI flash during init so its sticks are centred correctly; its IMU calibration is not yet read, so the console sees the drift characteristics of the reference unit the emulation was captured from. Rumble from the console is acknowledged but not forwarded.
 
 ### Button mapping
 

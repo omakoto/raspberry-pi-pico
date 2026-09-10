@@ -31,8 +31,9 @@ extern "C" {
 #define CFG_TUD_CDC                 1
 #define CFG_TUD_MSC                 1
 
-// HID Configuration
-#define CFG_TUD_HID_EP_BUFSIZE      16
+// HID Configuration: 64-byte endpoints are needed for the Pro Controller identity
+// (report 0x30 is a full 64-byte packet); the Pokken identity uses 16 of it
+#define CFG_TUD_HID_EP_BUFSIZE      64
 
 // CDC Configuration
 #define CFG_TUD_CDC_RX_BUFSIZE      1024

@@ -1,6 +1,8 @@
 /*
- * HORI Pokken Controller USB HID & Composite Device Interface.
- * Defines Switch button masks, report structure, and GamepadHid class.
+ * Switch-facing USB gamepad device interface.
+ * Defines Switch button masks, the Pokken report structure, and the GamepadHid class,
+ * which presents either a HORI Pokken Controller or (via procon_device) a Nintendo Pro
+ * Controller on the native USB port.
  */
 
 #pragma once
@@ -50,12 +52,21 @@ struct SwitchReport {
 
 static_assert(sizeof(SwitchReport) == 8, "Switch HID report must be exactly 8 bytes");
 
+// Which controller the native USB port impersonates toward the Switch
+enum class GamepadIdentity {
+    Pokken,  // HORI Pokken Controller: simple 8-byte HID report, no motion
+    ProCon,  // Nintendo Pro Controller: Nintendo protocol, IMU pass-through (see procon_device.hpp)
+};
+
 class GamepadHid {
 public:
     GamepadHid();
     ~GamepadHid();
 
-    bool init();
+    // composite only matters for ProCon: keep the CDC console and MSC drive interfaces
+    // alongside the HID interface (a real Pro Controller is HID-only)
+    bool init(GamepadIdentity identity = GamepadIdentity::Pokken, bool composite = false);
+    GamepadIdentity identity() const { return identity_; }
     bool is_mounted() const;
     void send_report(uint16_t buttons, uint8_t hat, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry);
 
@@ -72,6 +83,7 @@ private:
     SwitchReport last_report_;
     bool report_sent_;
     bool initialized_;
+    GamepadIdentity identity_;
 };
 
 // Requests an orderly disconnect and reboot into USB BOOTSEL mode

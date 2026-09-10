@@ -62,6 +62,23 @@ except Exception:
     fi
 done
 
+# 2b. Attempt to reboot via the UART0 command console (GP12/GP13). This is the only remote
+#     path when the firmware runs as a Pro Controller, which exposes no CDC console.
+#     Set NSBACKEND_UART to the host-side serial device of the UART adapter.
+if [[ -n "${NSBACKEND_UART:-}" && -e "${NSBACKEND_UART}" ]]; then
+    echo "Sending 'bootloader' over UART console ${NSBACKEND_UART}..."
+    python3 -c "
+import os, termios, sys
+fd = os.open('${NSBACKEND_UART}', os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+attrs = termios.tcgetattr(fd)
+attrs[0] = 0; attrs[1] = 0; attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL; attrs[3] = 0
+attrs[4] = termios.B115200; attrs[5] = termios.B115200
+termios.tcsetattr(fd, termios.TCSANOW, attrs)
+os.write(fd, b'bootloader\\r\\n')
+os.close(fd)
+" 2>/dev/null || true
+fi
+
 # 3. Wait up to 6 seconds for the device to appear in BOOTSEL mode
 echo "Waiting for Pico in BOOTSEL mode..."
 MOUNT_POINT=""

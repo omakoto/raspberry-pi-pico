@@ -98,6 +98,8 @@ set(APP_SOURCES
     src/serial_command_server.cpp
     src/usb_host_input.cpp
     src/fault_reporter.cpp
+    src/procon_device.cpp
+    src/motion_bridge.cpp
     third_party/tusb_xinput/xinput_host.c
     ${FATFS_DIR}/ff.c
     ${FATFS_DIR}/ffunicode.c
@@ -158,6 +160,7 @@ target_link_libraries(nsbackend-pico PRIVATE
     hardware_i2c
     hardware_timer
     hardware_watchdog
+    pico_unique_id
 )
 
 if(NSBACKEND_HAS_WIFI)

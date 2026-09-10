@@ -1,6 +1,8 @@
 /*
- * HORI Pokken Controller USB HID & Composite Device Implementation.
- * Provides TinyUSB composite descriptors and report transmission.
+ * Switch-facing USB gamepad device implementation.
+ * Provides the HORI Pokken composite descriptors and report transmission, and routes
+ * descriptors, output reports and the report stream to procon_device when the firmware
+ * is configured to impersonate a Nintendo Pro Controller.
  */
 
 #include "gamepad_hid.hpp"
@@ -11,6 +13,7 @@
 #include "tusb.h"
 #include "pico/bootrom.h"
 #include "dual_logger.hpp"
+#include "procon_device.hpp"
 
 static const char* TAG = "GamepadHid";
 
@@ -101,6 +104,11 @@ static const char* string_descriptors[] = {
 
 static uint16_t s_desc_str[64];
 static GamepadHid* s_gamepad_instance = nullptr;
+static GamepadIdentity s_identity = GamepadIdentity::Pokken;
+
+static bool is_procon() {
+    return s_identity == GamepadIdentity::ProCon;
+}
 
 // ---------------------------------------------------------------------------
 // TinyUSB Standard Descriptor & Device Callbacks
@@ -109,11 +117,13 @@ static GamepadHid* s_gamepad_instance = nullptr;
 extern "C" {
 
 uint8_t const* tud_descriptor_device_cb(void) {
+    if (is_procon()) return procon::device_descriptor();
     return (uint8_t const*)&desc_device;
 }
 
 uint8_t const* tud_descriptor_configuration_cb(uint8_t index) {
     (void)index;
+    if (is_procon()) return procon::configuration_descriptor();
     return desc_configuration;
 }
 
@@ -125,10 +135,15 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
         std::memcpy(&s_desc_str[1], string_descriptors[0], 2);
         char_count = 1;
     } else {
-        if (index >= sizeof(string_descriptors) / sizeof(string_descriptors[0])) {
+        const char* str = nullptr;
+        if (is_procon()) {
+            str = procon::string_descriptor(index);
+        } else if (index < sizeof(string_descriptors) / sizeof(string_descriptors[0])) {
+            str = string_descriptors[index];
+        }
+        if (str == nullptr) {
             return nullptr;
         }
-        const char* str = string_descriptors[index];
         char_count = std::strlen(str);
         if (char_count > 63) {
             char_count = 63;
@@ -144,11 +159,15 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 
 uint8_t const* tud_hid_descriptor_report_cb(uint8_t instance) {
     (void)instance;
+    if (is_procon()) return procon::report_descriptor();
     return switch_hid_report_descriptor;
 }
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) {
     (void)instance; (void)report_id;
+    if (is_procon()) {
+        return 0;  // the Pro Controller protocol runs over the interrupt endpoints only
+    }
     if (report_type == HID_REPORT_TYPE_INPUT) {
         SwitchReport rep = {
             .buttons = BTN_NONE,
@@ -170,7 +189,21 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 }
 
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
-    (void)instance; (void)report_id; (void)report_type; (void)buffer; (void)bufsize;
+    (void)instance; (void)report_type;
+    if (!is_procon()) {
+        return;
+    }
+    // Data from the OUT endpoint arrives as the raw packet (report_id 0, ID in buffer[0]);
+    // a control SET_REPORT may strip the ID, so put it back for the parser
+    if (report_id == 0 || (bufsize > 0 && buffer[0] == report_id)) {
+        procon::on_output_report(buffer, bufsize);
+    } else {
+        uint8_t packet[CFG_TUD_HID_EP_BUFSIZE];
+        packet[0] = report_id;
+        uint16_t n = std::min<uint16_t>(bufsize, CFG_TUD_HID_EP_BUFSIZE - 1);
+        std::memcpy(&packet[1], buffer, n);
+        procon::on_output_report(packet, n + 1);
+    }
 }
 
 void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* p_line_coding) {
@@ -180,12 +213,14 @@ void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const* p_line_coding)
 }
 
 void tud_mount_cb(void) {
+    if (is_procon()) procon::on_mount();
     if (s_gamepad_instance) {
         s_gamepad_instance->on_mount();
     }
 }
 
 void tud_umount_cb(void) {
+    if (is_procon()) procon::on_umount();
     if (s_gamepad_instance) {
         s_gamepad_instance->on_umount();
     }
@@ -210,7 +245,8 @@ void reboot_to_bootsel() {
 // GamepadHid Class Implementation
 // ---------------------------------------------------------------------------
 
-GamepadHid::GamepadHid() : current_report_{}, last_report_{}, report_sent_(false), initialized_(false) {
+GamepadHid::GamepadHid()
+    : current_report_{}, last_report_{}, report_sent_(false), initialized_(false), identity_(GamepadIdentity::Pokken) {
     current_report_ = {
         .buttons = BTN_NONE,
         .hat = HAT_CENTER,
@@ -234,7 +270,9 @@ void GamepadHid::run_usb_task() {
         // Sleep on the TinyUSB event queue that the USB ISR posts to, so USB transactions are
         // serviced with no polling latency. The 10ms cap only bounds how long a BOOTSEL reboot
         // request waits when the bus is idle.
-        tud_task_ext(10, false);
+        // In Pro Controller mode the periodic report needs a finer wake-up so its 15 ms
+        // cadence is kept even when the bus is otherwise idle.
+        tud_task_ext(is_procon() ? 5 : 10, false);
 
         if (s_bootsel_reboot_requested) {
             // Allow in-flight USB transactions (such as control ACK or serial echo) to complete
@@ -243,6 +281,11 @@ void GamepadHid::run_usb_task() {
             tud_disconnect();
             vTaskDelay(pdMS_TO_TICKS(150));
             reset_usb_boot(0, 0);
+        }
+
+        if (is_procon()) {
+            procon::tick();
+            continue;
         }
 
         // Transmit initial neutral report once host finishes mounting and endpoint is ready
@@ -256,9 +299,16 @@ void GamepadHid::run_usb_task() {
     }
 }
 
-bool GamepadHid::init() {
-    LOG_I(TAG, "Initializing TinyUSB Composite Device (Switch Gamepad HID + CDC + MSC)...");
+bool GamepadHid::init(GamepadIdentity identity, bool composite) {
+    identity_ = identity;
+    s_identity = identity;
     s_gamepad_instance = this;
+    if (identity == GamepadIdentity::ProCon) {
+        LOG_I(TAG, "Initializing TinyUSB device as Nintendo Pro Controller%s...", composite ? " (+ CDC + MSC)" : "");
+        procon::init(composite);
+    } else {
+        LOG_I(TAG, "Initializing TinyUSB Composite Device (Switch Gamepad HID + CDC + MSC)...");
+    }
 
     if (!tusb_init()) {
         LOG_E(TAG, "tusb_init() failed");
@@ -292,6 +342,19 @@ void GamepadHid::send_report(uint16_t buttons, uint8_t hat, uint8_t lx, uint8_t 
     };
     current_report_ = report;
 
+    if (is_procon()) {
+        // The Pro Controller stream is generated periodically by the USB task
+        procon::InputState in;
+        in.buttons = buttons;
+        in.hat = hat;
+        in.lx = lx;
+        in.ly = ly;
+        in.rx = rx;
+        in.ry = ry;
+        procon::set_input(in);
+        return;
+    }
+
     if (!report_sent_ || std::memcmp(&report, &last_report_, sizeof(SwitchReport)) != 0) {
         if (tud_mounted() && tud_hid_ready()) {
             if (tud_hid_report(0, &report, sizeof(SwitchReport))) {
@@ -311,6 +374,7 @@ void GamepadHid::on_umount() {
 }
 
 void GamepadHid::on_report_complete() {
+    if (is_procon()) return;
     // If state changed while the previous transfer was in flight, transmit updated report
     if (!report_sent_ || std::memcmp(&current_report_, &last_report_, sizeof(SwitchReport)) != 0) {
         if (tud_mounted() && tud_hid_ready()) {
