@@ -39,6 +39,24 @@ To ensure wiring diagrams and hardware connections are unambiguous and easy to f
 
 ---
 
+## Scripting Convention
+
+All projects in this repository adhere to a standardized numbered workflow script convention:
+
+| Script | Purpose | Description |
+| :--- | :--- | :--- |
+| `00-build.sh` | **Build Firmware** | Builds the application binary and any filesystem/storage images (e.g., CMake + Ninja for Pico SDK, `idf.py build` for ESP-IDF). Automatically sets up necessary SDK environments or paths. |
+| `01-install.sh` | **Flash Board** | Flashes the compiled binaries and configuration images to the target board. Ensures build artifacts exist (invoking `00-build.sh` if needed) and auto-detects connected devices/ports or guides the user into bootloader mode. |
+| `02-monitor.sh` | **Monitor Serial** | Connects to the serial console output (`/dev/ttyACM*` or `/dev/ttyUSB*`). **The monitor script must be a symlink to [`tools/monitor.sh`](tools/monitor.sh)** (e.g., `ln -s ../../tools/monitor.sh 02-monitor.sh`), which auto-detects active serial ports and connects via available terminal tools (`picocom`, `tio`, `minicom`, Python miniterm, or `screen`). |
+
+### CircuitPython Projects
+
+For CircuitPython projects where scripts are executed directly without an explicit compile step:
+- Scripts are run via [`circuitpython/bin/circuit-run`](circuitpython/bin/circuit-run) (or via shebang `#!/usr/bin/env circuit-run`), which copies the script and any tagged `#file:` dependencies to the board volume as `code.py`.
+- `circuit-run` automatically invokes [`tools/monitor.sh`](tools/monitor.sh) upon completion to stream serial output from the board.
+
+---
+
 ## Directory Overview
 
 - **[`pico/`](pico/)**: Native C++ firmware projects for Raspberry Pi Pico / Pico 2 / Pico W / Pico 2 W built with Pico SDK, some on FreeRTOS SMP (e.g., [`nsbackend-pico`](pico/nsbackend-pico), [`otg-lan-test`](pico/otg-lan-test)).

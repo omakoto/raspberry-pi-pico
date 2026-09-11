@@ -21,7 +21,7 @@ Every project in this directory follows a standardized script convention:
 | :--- | :--- | :--- |
 | [`00-build.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/2026-09-06-w5500-lan-test/00-build.sh) | **Build Firmware** | Automatically sources `${IDF_PATH}/export.sh` (or `~/esp-idf/export.sh`), unsets stale virtualenv variables, builds the application binary, and compiles FATFS filesystem images. |
 | [`01-install.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/2026-09-06-w5500-lan-test/01-install.sh) | **Flash Board** | Ensures binaries exist (triggering `00-build.sh` if needed), auto-detects active serial ports (`/dev/ttyACM*` or `/dev/ttyUSB*`), and flashes bootloader, partition table, app binary, and FATFS storage partition to the chip. Accepts optional port argument: `./01-install.sh /dev/ttyUSB0`. |
-| [`02-monitor.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/esp32/2026-09-06-w5500-lan-test/02-monitor.sh) | **Monitor Serial** | Connects to the console output over USB-UART bridge or native USB Serial/JTAG using `idf.py monitor`. Accepts optional port argument: `./02-monitor.sh /dev/ttyUSB0`. Exit with `Ctrl + ]`. |
+| [`02-monitor.sh`](file:///home/omakoto/cbin/src/raspberry-pi-pico/tools/monitor.sh) | **Monitor Serial** | Symlink to [`tools/monitor.sh`](../tools/monitor.sh) (`ln -s ../../tools/monitor.sh 02-monitor.sh`). Auto-detects active serial ports (`/dev/ttyACM*` or `/dev/ttyUSB*`) and connects using available terminal utilities (`picocom`, `tio`, `minicom`, Python miniterm, or `screen`). Accepts optional port argument: `./02-monitor.sh /dev/ttyUSB0`. |
 
 ---
 

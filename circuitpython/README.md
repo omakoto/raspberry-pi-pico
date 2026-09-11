@@ -4,12 +4,15 @@ This directory contains CircuitPython projects, scripts, and helper utilities fo
 
 *Note: Unless specified otherwise, the default target hardware for scripts in this directory is the Raspberry Pi Pico 2 W.*
 
-## How monitor stdout
+## How to Monitor Output
+
+To monitor the serial console output of a connected device, use [`tools/monitor.sh`](../tools/monitor.sh):
 
 ```bash
-picocom -b 115200 /dev/ttyACM0
-# ctrl-a q to quit
+../../tools/monitor.sh
 ```
+
+When running scripts using [`circuitpython/bin/circuit-run`](bin/circuit-run) (or via the shebang), `circuit-run` automatically copies the script to the board and launches `monitor.sh`.
 
 ## Code Conventions
 
