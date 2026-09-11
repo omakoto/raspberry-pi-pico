@@ -8,7 +8,7 @@
 #include "status_led.hpp"
 #include "gamepad_hid.hpp"
 #include "controller_state.hpp"
-#include "gpio_buttons.hpp"
+#include "i2c_keypad.hpp"
 #include "wifi_manager.hpp"
 #include "mdns_service.hpp"
 #include "tcp_server.hpp"
@@ -58,9 +58,22 @@ extern "C" void app_main(void) {
     ControllerState controller(gamepad);
     controller.reset_all();
 
-    // Initialize Physical GPIO Buttons
-    GpioButtonManager gpio_buttons(controller);
-    gpio_buttons.init();
+    // Initialize I2C Matrix Keypad (PCF8574 / PCF8574A)
+    I2cKeypadConfig keypad_config;
+    keypad_config.enabled = config.get_bool("i2c_keypad_enabled", true);
+    keypad_config.log_enabled = log_enabled;
+    keypad_config.sda_pin = static_cast<gpio_num_t>(config.get_int("i2c_sda_pin", GPIO_NUM_5));
+    keypad_config.scl_pin = static_cast<gpio_num_t>(config.get_int("i2c_scl_pin", GPIO_NUM_6));
+    keypad_config.address = static_cast<uint8_t>(config.get_int("i2c_address", 0x20));
+    keypad_config.reverse_row = config.get_bool("i2c_reverse_row", true);
+    keypad_config.reverse_col = config.get_bool("i2c_reverse_col", true);
+    keypad_config.debounce_ms = static_cast<uint32_t>(config.get_int("i2c_debounce_ms", 20));
+
+    I2cKeypadManager keypad(controller, keypad_config);
+    if (keypad_config.enabled) {
+        keypad.init();
+        keypad.start();
+    }
 
     // Start Serial Command Server (accepts commands on UART0 D6/D7 and USB CDC immediately)
     SerialCommandServer serial_server(controller, log_enabled, enable_echo);

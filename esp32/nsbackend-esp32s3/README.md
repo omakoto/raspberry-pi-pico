@@ -13,7 +13,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 4. **Wi-Fi Multi-AP Manager**: Connects to configured Wi-Fi access points with automatic scan-based fallback and background reconnection.
 5. **mDNS Service**: Advertises the device hostname as `nscon.local` with service `_nscon._tcp` on port `10100`.
 6. **TCP Command Server**: Listens on port `10100` for streaming controller commands from frontend clients (`nsfrontend` or interactive pipelines), parsing directional sticks, button presses, and auto-release timers.
-7. **Physical GPIO Buttons**: Supports hardware buttons with internal pull-ups, debouncing, and opposing D-pad direction cancellation.
+7. **I2C Matrix Keypad**: Supports 4x4 matrix keypads over I2C via PCF8574/PCF8574A expander (SDA on GPIO 5 / D4, SCL on GPIO 6 / D5), translating key presses into Switch button and D-pad inputs with debouncing.
 8. **Status LED**: Indicates system lifecycle states via onboard user LED patterns.
 9. **FATFS Configuration**: Loads Wi-Fi credentials and runtime settings from `config.toml` and optional `config-override.toml` on the FATFS partition.
 10. **Dual Serial Command Server**: Accepts controller commands on hardware UART0 (D6 TX / D7 RX at 115,200 baud) and USB CDC serial immediately from boot, while broadcasting logs to both ports.
@@ -24,19 +24,14 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 
 | Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
 | :--- | :---: | :---: | :---: | :--- |
-| **Button A** | `GPIO1` | Row A, Pin 4 (silk `1`) | `D0` (Pin 1) | Active-low, internal pull-up |
-| **D-pad DOWN** | `GPIO2` | Row A, Pin 5 (silk `2`) | `D1` (Pin 2) | Active-low, internal pull-up |
-| **D-pad LEFT** | `GPIO3` | Row B, Pin 13 (silk `3`) | `D2` (Pin 3) | Active-low, internal pull-up |
-| **D-pad RIGHT** | `GPIO4` | Row B, Pin 4 (silk `4`) | `D3` (Pin 4) | Active-low, internal pull-up |
-| **D-pad UP** | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | Active-low, internal pull-up |
-| **Button B** | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | Active-low, internal pull-up |
+| **I2C SDA** | `GPIO5` | Row B, Pin 5 (silk `5`) | `D4` (Pin 5) | I2C data line for PCF8574 matrix keypad |
+| **I2C SCL** | `GPIO6` | Row B, Pin 6 (silk `6`) | `D5` (Pin 6) | I2C clock line for PCF8574 matrix keypad |
 | **UART0 TX** | `GPIO43` | Row A, Pin 2 (silk `TX`) | `D6` (Pin 7) | Hardware UART0 TX (115,200 baud) / Dual serial log |
 | **UART0 RX** | `GPIO44` | Row A, Pin 3 (silk `RX`) | `D7` (Pin 8) | Hardware UART0 RX (115,200 baud) / Serial command input |
-| **Buttons L + R** | `GPIO9` | Row B, Pin 15 (silk `9`) | `D10` (Pin 11) | Active-low, triggers L and R simultaneously |
 | **Status LED** | `GPIO21` | Row A, Pin 18 (silk `21`) | Onboard Yellow LED | Active-low user indicator |
-| **USB D-** | `GPIO19` | Row A, Pin 20 (silk `19`) | Native USB-C connector | Native USB OTG data negative |
-| **USB D+** | `GPIO20` | Row A, Pin 19 (silk `20`) | Native USB-C connector | Native USB OTG data positive |
-| **3.3V Power** | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | 3.3V DC power rail for external buttons |
+| **USB D-** | `GPIO19` | Row A, Pin 20 (silk `19`) | Native USB-C connector | Native USB OTG data negative (to Switch) |
+| **USB D+** | `GPIO20` | Row A, Pin 19 (silk `20`) | Native USB-C connector | Native USB OTG data positive (to Switch) |
+| **3.3V Power** | `3V3` | Row B, Pin 1 or 2 (silk `3V3`) | `3V3` (Pin 12) | 3.3V DC power rail for I2C keypad module |
 | **Ground** | `GND` | Row A, Pin 1/21/22 or Row B, Pin 22 (silk `G`) | `GND` (Pin 13) | Common digital ground |
 
 ---
@@ -67,36 +62,75 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 +-------------------+           |  - Controller State Engine|
                                 |  - Composite TinyUSB:     |
 +-------------------+           |    * HID Gamepad          |
-|  Physical Buttons | --------> |    * CDC Serial Console   |
-|   (D0-D5, D10)    |           |    * MSC Storage (FATFS)  |
+| I2C Matrix Keypad | --------> |    * CDC Serial Console   |
+| (4x4 on GPIO 5/6) |           |    * MSC Storage (FATFS)  |
 +-------------------+           |  - Wi-Fi Multi-AP & mDNS  |
-                                |  - GPIO Button Manager    |
-                                |  - FATFS Config Reader    |
+|  UART0 / USB CDC  | --------> |  - I2C Keypad Manager     |
+|   Serial Console  |           |  - Dual Logger (UART/CDC) |
++-------------------+           |  - FATFS Config Reader    |
                                 +---------------------------+
 ```
 
 ### Module Responsibilities
-- **`main/main.cpp`**: Application lifecycle orchestrator, initializes storage, Wi-Fi, USB, GPIO, and TCP services.
+- **`main/main.cpp`**: Application lifecycle orchestrator, initializes storage, Wi-Fi, USB, I2C keypad, and TCP services.
 - **`main/config_manager.hpp/.cpp`**: Mounts Wear Levelling FATFS filesystem and parses `config.toml` / `config-override.toml`.
 - **`main/status_led.hpp/.cpp`**: Manages LED state machine (`INITIALIZING`, `WAITING_CLIENT`, `CLIENT_CONNECTED`).
 - **`main/gamepad_hid.hpp/.cpp`**: Initializes TinyUSB composite stack (HORI Pokken Gamepad HID + CDC Serial + MSC Flash Storage).
-- **`main/controller_state.hpp/.cpp`**: Maintains button bitmasks, analog stick coordinates, auto-release timers, and merges GPIO button state.
-- **`main/gpio_buttons.hpp/.cpp`**: Monitors physical GPIO pins with 15ms software debouncing and applies inputs to `ControllerState`.
+- **`main/controller_state.hpp/.cpp`**: Maintains button bitmasks, analog stick coordinates, auto-release timers, and merges I2C keypad inputs.
+- **`main/i2c_keypad.hpp/.cpp`**: Scans 4x4 matrix keypads over I2C via PCF8574/PCF8574A with software debouncing and applies inputs to `ControllerState`.
 - **`main/wifi_manager.hpp/.cpp`**: Implements multi-AP candidate selection, Wi-Fi scanning, and reconnection logic.
 - **`main/mdns_service.hpp/.cpp`**: Initializes ESP-IDF mDNS responder for `nscon.local`.
 - **`main/tcp_server.hpp/.cpp`**: Socket server running FreeRTOS task to accept client connections and parse streaming controller commands.
+- **`main/serial_command_server.hpp/.cpp`**: Accepts commands over hardware UART0 and TinyUSB CDC ACM.
+- **`main/dual_logger.hpp/.cpp`**: Routes logging output to both UART0 and TinyUSB CDC ACM.
 
 ---
 
-## 5. Implementation Status
+## 5. I2C Matrix Keypad (PCF8574 / PCF8574A)
+
+Supports standard 4x4 matrix keypads interfaced through an I2C PCF8574 / PCF8574A expander module.
+
+### Hardware Connections
+- **SDA**: `GPIO5` (`D4` on XIAO ESP32-S3 / Row B Pin 5 on DevKitC-1, configurable via `i2c_sda_pin`)
+- **SCL**: `GPIO6` (`D5` on XIAO ESP32-S3 / Row B Pin 6 on DevKitC-1, configurable via `i2c_scl_pin`)
+- **VCC**: 3.3V
+- **GND**: GND
+- **I2C Address**: `0x20` (standard PCF8574) or `0x38` (PCF8574A, auto-detected fallback)
+
+### Key Assignment
+| Keypad Key | Target Controller Input | Logged Command | Description |
+| :---: | :---: | :---: | :--- |
+| **`2`** | **D-pad UP** | `pu [Up]` | Directional Pad UP |
+| **`4`** | **D-pad LEFT** | `pl [Left]` | Directional Pad LEFT |
+| **`6`** | **D-pad RIGHT** | `pr [Right]` | Directional Pad RIGHT |
+| **`8`** | **D-pad DOWN** | `pd [Down]` | Directional Pad DOWN |
+| **`1`** | **L1** (`BTN_L`) | `l1 [L]` | Left bumper |
+| **`3`** | **R1** (`BTN_R`) | `r1 [R]` | Right bumper |
+| **`7`** | **L2** (`BTN_ZL`) | `l2 [ZL]` | Left trigger (ZL) |
+| **`9`** | **R2** (`BTN_ZR`) | `r2 [ZR]` | Right trigger (ZR) |
+| **`*`** | **Minus** (`BTN_MINUS`) | `m [Minus]` | Select / Minus |
+| **`#`** | **Plus** (`BTN_PLUS`) | `p [Plus]` | Start / Plus |
+| **`0`** | **Home** (`BTN_HOME`) | `h [Home]` | Home button |
+| **`A`** | **A** (`BTN_A`) | `a [A]` | Button A |
+| **`B`** | **B** (`BTN_B`) | `b [B]` | Button B |
+| **`C`** | **X** (`BTN_X`) | `x [X]` | Button X |
+| **`D`** | **Y** (`BTN_Y`) | `y [Y]` | Button Y |
+
+> [!NOTE]
+> **USB-A Controller Passthrough Difference from Pico**:
+> Unlike Raspberry Pi Pico (which uses RP2040/RP2350's hardware PIO state machines and DMA to bitbang a secondary Full-Speed USB Host port on GPIO 16/17 while native USB connects to the Switch), the ESP32-S3 possesses a single hardware USB-OTG controller (fixed to GPIO 19/20) and lacks PIO hardware. Because that USB-OTG controller is fully utilized in Device mode emulating the Nintendo Switch gamepad, USB-A host passthrough is not supported on the ESP32-S3.
+
+---
+
+## 6. Implementation Status
 
 - [x] **Phase 1: Project Skeleton & Build Setup**
   - CMake build system, custom `partitions.csv` (8MB Flash with SPIFFS), `sdkconfig.defaults` (TinyUSB, FreeRTOS 1kHz tick rate, LwIP).
 - [x] **Phase 2: Configuration & Storage Layer**
   - Implemented `ConfigManager` reading `config.toml` and optional `config-override.toml` from SPIFFS partition.
-- [x] **Phase 3: Status LED & GPIO Hardware Buttons**
+- [x] **Phase 3: Status LED & I2C Matrix Keypad**
   - Implemented `StatusLed` FreeRTOS task with 3-state blinking patterns.
-  - Implemented `GpioButtonManager` with 15ms debouncing and active-low input handling for D0–D5, D10.
+  - Implemented `I2cKeypadManager` with 20ms debouncing and active scanning on SDA (GPIO 5 / D4) and SCL (GPIO 6 / D5).
 - [x] **Phase 4: TinyUSB HID Gamepad Driver**
   - Configured TinyUSB HORI Pokken Controller (`VID: 0x0f0d`, `PID: 0x0092`) 8-byte report descriptor and atomic report dispatching.
 - [x] **Phase 5: Wi-Fi Multi-AP Manager & mDNS**
@@ -110,7 +144,7 @@ A high-performance C++ port of **nsbackend-pico** for the **ESP32-S3** (targetin
 
 ---
 
-## 6. Development Environment Setup
+## 7. Development Environment Setup
 
 To set up the ESP-IDF build environment on Ubuntu / Debian:
 
@@ -154,7 +188,7 @@ sudo usermod -a -G dialout $USER
 
 ---
 
-## 7. Building & Flashing
+## 8. Building & Flashing
 
 ### 1. Configure Wi-Fi in `fatfs_data/config.toml`
 Edit `fatfs_data/config.toml` (or set `$ESP32_CONFIG_TOML` to an external `config-override.toml` path) before building:
@@ -183,7 +217,7 @@ Put the board into Bootloader mode (Hold **B**, press & release **R**, release *
 
 ---
 
-## 8. Serial Console Monitoring
+## 9. Serial Console Monitoring
 
 Because Composite USB is enabled, the ESP32-S3 exposes `/dev/ttyACM0` for console output alongside the USB HID gamepad.
 
@@ -203,7 +237,7 @@ tio /dev/ttyACM0
 
 ---
 
-## 9. Running `nsfrontend` & Sending Commands
+## 10. Running `nsfrontend` & Sending Commands
 
 Once the ESP32-S3 is connected to Wi-Fi, you can stream controller inputs from your PC to the device (`nscon.local:10100`):
 

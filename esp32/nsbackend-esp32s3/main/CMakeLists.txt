@@ -5,7 +5,7 @@ idf_component_register(
         "status_led.cpp"
         "gamepad_hid.cpp"
         "controller_state.cpp"
-        "gpio_buttons.cpp"
+        "i2c_keypad.cpp"
         "wifi_manager.cpp"
         "mdns_service.cpp"
         "tcp_server.cpp"
