@@ -34,8 +34,8 @@ This firmware is a drop-in **backend for [raspberry-switch-control](https://gith
 | **D-pad UP** | GP4 | `GPIO4` | Pin 6 | Active-low, internal pull-up |
 | **Button B** | GP5 | `GPIO5` | Pin 7 | Active-low, internal pull-up |
 | **Buttons L + R** | GP10 | `GPIO10` | Pin 14 | Active-low, triggers L and R simultaneously |
-| **USB Host D+** | GP16 | `GPIO16` | Pin 21 | USB-A receptacle D+ (green), PIO-USB host port (configurable via `usb_host_dp_pin`) |
-| **USB Host D-** | GP17 | `GPIO17` | Pin 22 | USB-A receptacle D- (white), always `usb_host_dp_pin` + 1 |
+| **USB Host D+** | GP16 | `GPIO16` | Pin 21 | USB-A receptacle D+ (green), PIO-USB host port (configurable via `usb_host_dp_pin`; requires 15 kΩ pull-down to GND) |
+| **USB Host D-** | GP17 | `GPIO17` | Pin 22 | USB-A receptacle D- (white), always `usb_host_dp_pin` + 1 (requires 15 kΩ pull-down to GND) |
 | **USB Host VBUS** | VBUS | `VBUS` | Pin 40 | 5V from the Pico's USB supply to the USB-A receptacle VBUS (red) |
 | **UART0 TX** | GP12 | `GPIO12` | Pin 16 | 115,200 baud, 8N1 / Serial log output |
 | **UART0 RX** | GP13 | `GPIO13` | Pin 17 | 115,200 baud, 8N1 / Serial command input |
@@ -132,12 +132,16 @@ Because the Pico's native USB port is occupied by the Switch-facing composite de
 
 ### Wiring the USB-A receptacle
 
-| USB-A Pin | Wire Color | Connect To | Physical Pin # |
-| :--- | :--- | :--- | :--- |
-| VBUS (1) | Red | VBUS (5V) | Pin 40 |
-| D- (2) | White | GP17 | Pin 22 |
-| D+ (3) | Green | GP16 | Pin 21 |
-| GND (4) | Black | GND | Pin 38 (or any GND) |
+| USB-A Pin | Wire Color | Connect To | Physical Pin # | Details / Required Components |
+| :--- | :--- | :--- | :--- | :--- |
+| VBUS (1) | Red | VBUS (5V) | Pin 40 | 5V supply to attached controller |
+| D- (2) | White | GP17 | Pin 22 | Requires **15 kΩ pull-down resistor to GND** |
+| D+ (3) | Green | GP16 | Pin 21 | Requires **15 kΩ pull-down resistor to GND** |
+| GND (4) | Black | GND | Pin 38 (or any GND) | Digital ground |
+
+> [!IMPORTANT]
+> **External 15 kΩ Pull-Down Resistors Required:**
+> Standard USB host (downstream) ports require 15 kΩ pull-down resistors to GND on both D+ and D- per the USB specification. While the RP2040 could sometimes manage with weak internal pull-downs, the **RP2350 (Pico 2 / Pico 2 W)** suffers from hardware erratum RP2350-E9 (input pad leakage current), causing D+ and D- to latch high at ~2.1V without external pull-downs. Wire a **15 kΩ** (or 10 kΩ–15 kΩ) resistor from GP16 to GND and another from GP17 to GND.
 
 Keep the D+/D- wires short (a few cm) and equal length. The D+/D- GPIOs are configurable via `usb_host_dp_pin` (D- is always D+ + 1). A small USB hub between the port and the controller also works.
 
