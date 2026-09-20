@@ -1,6 +1,6 @@
 /*
  * Serial Command Server for nsbackend-pico.
- * Listens for incoming commands on UART0 (GP12/GP13) and USB CDC ACM console.
+ * Listens for incoming commands on UART0 (GP16/GP17) and USB CDC ACM console.
  */
 
 #pragma once

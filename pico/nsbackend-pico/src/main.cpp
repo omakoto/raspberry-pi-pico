@@ -90,13 +90,13 @@ static void supervisor_task(void* param) {
     // 7. Initialize USB Host Port (PIO-USB on USB-A receptacle, controller pass-through)
     UsbHostInputConfig usb_host_config;
     usb_host_config.enabled = config.get_bool("usb_host_enabled", true);
-    usb_host_config.dp_pin = static_cast<uint8_t>(config.get_int("usb_host_dp_pin", 16));
+    usb_host_config.dp_pin = static_cast<uint8_t>(config.get_int("usb_host_dp_pin", 18));
     usb_host_config.deadzone_percent = config.get_int("usb_host_deadzone_percent", 10);
     usb_host_config.log_enabled = log_enabled;
     UsbHostInput usb_host(controller, usb_host_config);
     usb_host.init();
 
-    // 8. Start Serial Command Server (accepts commands on UART0 GP12/GP13 and USB CDC)
+    // 8. Start Serial Command Server (accepts commands on UART0 GP16/GP17 and USB CDC)
     SerialCommandServer serial_server(controller, log_enabled, enable_echo);
     serial_server.start();
 
@@ -148,7 +148,7 @@ static void supervisor_task(void* param) {
     }
 #else
     status_led.set_state(LedState::WAITING_CLIENT);
-    LOG_I(TAG, "nsbackend-pico running on non-W board (Serial UART0 GP12/GP13 & USB CDC active)");
+    LOG_I(TAG, "nsbackend-pico running on non-W board (Serial UART0 GP16/GP17 & USB CDC active)");
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

@@ -62,7 +62,7 @@ except Exception:
     fi
 done
 
-# 2b. Attempt to reboot via the UART0 command console (GP12/GP13). This is the only remote
+# 2b. Attempt to reboot via the UART0 command console (GP16/GP17). This is the only remote
 #     path when the firmware runs as a Pro Controller, which exposes no CDC console.
 #     Set NSBACKEND_UART to the host-side serial device of the UART adapter.
 if [[ -n "${NSBACKEND_UART:-}" && -e "${NSBACKEND_UART}" ]]; then

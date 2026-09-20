@@ -1,6 +1,6 @@
 /*
  * Serial Command Server Implementation for nsbackend-pico.
- * Reads commands from UART0 (GP12/GP13) and USB CDC ACM.
+ * Reads commands from UART0 (GP16/GP17) and USB CDC ACM.
  */
 
 #include "serial_command_server.hpp"
@@ -37,15 +37,15 @@ bool SerialCommandServer::start() {
         return true;
     }
 
-    // Configure UART0 on GP12 (TX) and GP13 (RX)
+    // Configure UART0 on GP16 (TX) and GP17 (RX)
     uart_init(uart0, 115200);
-    gpio_set_function(12, GPIO_FUNC_UART);
-    gpio_set_function(13, GPIO_FUNC_UART);
+    gpio_set_function(16, GPIO_FUNC_UART);
+    gpio_set_function(17, GPIO_FUNC_UART);
     uart_set_hw_flow(uart0, false, false);
     uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
     uart_set_fifo_enabled(uart0, true);
 
-    LOG_I(TAG, "UART0 command listener configured (115200 baud, GP12-TX / GP13-RX)");
+    LOG_I(TAG, "UART0 command listener configured (115200 baud, GP16-TX / GP17-RX)");
 
     running_ = true;
     BaseType_t ret = xTaskCreate(task_entry, "serial_cmd_task", 2048, this, tskIDLE_PRIORITY + 3, &task_handle_);

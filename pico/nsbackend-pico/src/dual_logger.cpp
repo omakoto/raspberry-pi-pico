@@ -37,7 +37,7 @@ static void cdc_write_crlf(const char* buf, size_t len) {
     tud_cdc_n_write_flush(0);
 }
 
-// Translates newline characters to CRLF line endings for hardware UART0 output on GP12
+// Translates newline characters to CRLF line endings for hardware UART0 output on GP16
 static void uart_write_crlf(const char* buf, size_t len) {
     if (len == 0) {
         return;
@@ -73,7 +73,7 @@ static void dual_vprintf(const char* fmt, va_list args) {
     int len = std::vsnprintf(stack_buf, sizeof(stack_buf), fmt, args);
     if (len > 0) {
         if (len < static_cast<int>(sizeof(stack_buf))) {
-            // 1. Output to hardware UART0 on GP12
+            // 1. Output to hardware UART0 on GP16
             uart_write_crlf(stack_buf, static_cast<size_t>(len));
             // 2. Output to USB CDC ACM when host is mounted
             if (tud_mounted() && (taken || !scheduler_running)) {
@@ -82,7 +82,7 @@ static void dual_vprintf(const char* fmt, va_list args) {
         } else {
             std::vector<char> dyn_buf(len + 1);
             std::vsnprintf(dyn_buf.data(), dyn_buf.size(), fmt, args_copy);
-            // 1. Output to hardware UART0 on GP12
+            // 1. Output to hardware UART0 on GP16
             uart_write_crlf(dyn_buf.data(), static_cast<size_t>(len));
             // 2. Output to USB CDC ACM when host is mounted
             if (tud_mounted() && (taken || !scheduler_running)) {
@@ -102,10 +102,10 @@ void dual_logger_init() {
         s_log_mutex = xSemaphoreCreateMutex();
     }
 
-    // Configure hardware UART0 on GP12 (TX) and GP13 (RX) at 115200 baud 8N1
+    // Configure hardware UART0 on GP16 (TX) and GP17 (RX) at 115200 baud 8N1
     uart_init(uart0, 115200);
-    gpio_set_function(12, GPIO_FUNC_UART);
-    gpio_set_function(13, GPIO_FUNC_UART);
+    gpio_set_function(16, GPIO_FUNC_UART);
+    gpio_set_function(17, GPIO_FUNC_UART);
     uart_set_hw_flow(uart0, false, false);
     uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
     uart_set_fifo_enabled(uart0, true);
@@ -119,7 +119,7 @@ void dual_println(const std::string& str) {
         taken = (xSemaphoreTake(s_log_mutex, pdMS_TO_TICKS(500)) == pdTRUE);
     }
 
-    // 1. Output to hardware UART0 on GP12
+    // 1. Output to hardware UART0 on GP16
     uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(str.c_str()), str.length());
     uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>("\r\n"), 2);
 

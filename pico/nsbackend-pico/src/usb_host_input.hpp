@@ -24,7 +24,7 @@
 struct UsbHostInputConfig {
     bool enabled = true;
     // GPIO carrying USB D+; D- must be wired to dp_pin + 1
-    uint8_t dp_pin = 16;
+    uint8_t dp_pin = 18;
     // Radial stick deadzone in percent of full deflection (0-99)
     int deadzone_percent = 10;
     bool log_enabled = true;

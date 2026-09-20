@@ -21,10 +21,10 @@ wifi_password = "YOUR_WIFI_PASSWORD"
 #procon_composite = false
 
 # USB Host Port (USB-A controller pass-through over PIO-USB)
-# D+ connects to usb_host_dp_pin, D- to the next GPIO (default: GP16 D+, GP17 D-).
+# D+ connects to usb_host_dp_pin, D- to the next GPIO (default: GP18 D+, GP19 D-).
 # Note: External 15 kΩ pull-down resistors to GND are required on both D+ and D-.
 usb_host_enabled = true
-usb_host_dp_pin = 16
+usb_host_dp_pin = 18
 # Stick deadzone in percent of full deflection
 usb_host_deadzone_percent = 10
 

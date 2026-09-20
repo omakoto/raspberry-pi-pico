@@ -13,8 +13,8 @@ This firmware is a drop-in **backend for [raspberry-switch-control](https://gith
 2. **USB CDC ACM Serial Console**: Exposes a virtual serial console (`/dev/ttyACM0`) for real-time logging, status monitoring, and controller command input.
 3. **USB MSC Flash Storage**: Exposes the internal 1MB FAT12 partition as a standard USB flash drive, allowing configuration editing of `config.toml` directly from your PC without re-flashing.
 4. **Physical GPIO Buttons**: Active-low physical pushbuttons with internal pull-ups, 15ms debouncing, and opposing D-pad direction cancellation.
-5. **USB-A Controller Pass-Through**: A secondary full-speed USB **host** port, bit-banged with PIO on GP16/GP17 and wired to a USB-A receptacle, lets you plug in a regular controller (Xbox 360/One/Series XInput pads, Nintendo Switch Pro Controller and Switch-mode third-party pads, DualShock 4, DualSense, generic DirectInput HID gamepads) and use it to control the Switch directly.
-6. **Dual Serial Command Server**: Concurrently accepts controller commands on hardware UART0 (GP12 TX / GP13 RX at 115,200 baud) and USB CDC ACM serial, while echoing logs to both channels.
+5. **USB-A Controller Pass-Through**: A secondary full-speed USB **host** port, bit-banged with PIO on GP18/GP19 and wired to a USB-A receptacle, lets you plug in a regular controller (Xbox 360/One/Series XInput pads, Nintendo Switch Pro Controller and Switch-mode third-party pads, DualShock 4, DualSense, generic DirectInput HID gamepads) and use it to control the Switch directly.
+6. **Dual Serial Command Server**: Concurrently accepts controller commands on hardware UART0 (GP16 TX / GP17 RX at 115,200 baud) and USB CDC ACM serial, while echoing logs to both channels.
 7. **Status LED State Machine**: Visual status indicators via onboard LED (GP25 on Pico/Pico 2, CYW43 wireless GPIO on Pico W/Pico 2 W).
 8. **Wireless Networking (Pico W / Pico 2 W only)**:
    - **Multi-AP Wi-Fi Manager**: Automatic connection to configured access points with background scanning and seamless auto-reconnect.
@@ -34,11 +34,11 @@ This firmware is a drop-in **backend for [raspberry-switch-control](https://gith
 | **D-pad UP** | GP4 | `GPIO4` | Pin 6 | Active-low, internal pull-up |
 | **Button B** | GP5 | `GPIO5` | Pin 7 | Active-low, internal pull-up |
 | **Buttons L + R** | GP10 | `GPIO10` | Pin 14 | Active-low, triggers L and R simultaneously |
-| **USB Host D+** | GP16 | `GPIO16` | Pin 21 | USB-A receptacle D+ (green), PIO-USB host port (configurable via `usb_host_dp_pin`; requires 15 kΩ pull-down to GND) |
-| **USB Host D-** | GP17 | `GPIO17` | Pin 22 | USB-A receptacle D- (white), always `usb_host_dp_pin` + 1 (requires 15 kΩ pull-down to GND) |
+| **USB Host D+** | GP18 | `GPIO18` | Pin 24 | USB-A receptacle D+ (green), PIO-USB host port (configurable via `usb_host_dp_pin`; requires 15 kΩ pull-down to GND) |
+| **USB Host D-** | GP19 | `GPIO19` | Pin 25 | USB-A receptacle D- (white), always `usb_host_dp_pin` + 1 (requires 15 kΩ pull-down to GND) |
 | **USB Host VBUS** | VBUS | `VBUS` | Pin 40 | 5V from the Pico's USB supply to the USB-A receptacle VBUS (red) |
-| **UART0 TX** | GP12 | `GPIO12` | Pin 16 | 115,200 baud, 8N1 / Serial log output |
-| **UART0 RX** | GP13 | `GPIO13` | Pin 17 | 115,200 baud, 8N1 / Serial command input |
+| **UART0 TX** | GP16 | `GPIO16` | Pin 21 | 115,200 baud, 8N1 / Serial log output |
+| **UART0 RX** | GP17 | `GPIO17` | Pin 22 | 115,200 baud, 8N1 / Serial command input |
 | **I2C0 SDA** | GP20 | `GPIO20` | Pin 26 | PCF8574 Keypad SDA (configurable via `i2c_sda_pin`) |
 | **I2C0 SCL** | GP21 | `GPIO21` | Pin 27 | PCF8574 Keypad SCL (configurable via `i2c_scl_pin`) |
 | **Status LED** | GP25 / CYW43 | Board LED | Onboard | GP25 on Pico / Pico 2; CYW43 WL GPIO on Pico W / Pico 2 W |
@@ -82,7 +82,7 @@ This firmware is a drop-in **backend for [raspberry-switch-control](https://gith
 +-------------------+           |  - CYW43 Wi-Fi & lwIP mDNS|
 | I2C Matrix Keypad | --------> |  - FreeRTOS SMP (Dual Core|
 |  (4x4 on GP20/21) |           |  - 1MB Flash FAT12 DiskIO |
-+-------------------+           |  - PIO-USB Host (GP16/17) |
++-------------------+           |  - PIO-USB Host (GP18/19) |
 |   PC Controller   | --------> |    * XInput (Xbox pads)   |
 | (USB-A, XInput/HID)|          |    * Switch Pro Controller|
 |                   |           |    * Generic HID gamepads |
@@ -135,13 +135,13 @@ Because the Pico's native USB port is occupied by the Switch-facing composite de
 | USB-A Pin | Wire Color | Connect To | Physical Pin # | Details / Required Components |
 | :--- | :--- | :--- | :--- | :--- |
 | VBUS (1) | Red | VBUS (5V) | Pin 40 | 5V supply to attached controller |
-| D- (2) | White | GP17 | Pin 22 | Requires **15 kΩ pull-down resistor to GND** |
-| D+ (3) | Green | GP16 | Pin 21 | Requires **15 kΩ pull-down resistor to GND** |
+| D- (2) | White | GP19 | Pin 25 | Requires **15 kΩ pull-down resistor to GND** |
+| D+ (3) | Green | GP18 | Pin 24 | Requires **15 kΩ pull-down resistor to GND** |
 | GND (4) | Black | GND | Pin 38 (or any GND) | Digital ground |
 
 > [!IMPORTANT]
 > **External 15 kΩ Pull-Down Resistors Required:**
-> Standard USB host (downstream) ports require 15 kΩ pull-down resistors to GND on both D+ and D- per the USB specification. While the RP2040 could sometimes manage with weak internal pull-downs, the **RP2350 (Pico 2 / Pico 2 W)** suffers from hardware erratum RP2350-E9 (input pad leakage current), causing D+ and D- to latch high at ~2.1V without external pull-downs. Wire a **15 kΩ** (or 10 kΩ–15 kΩ) resistor from GP16 to GND and another from GP17 to GND.
+> Standard USB host (downstream) ports require 15 kΩ pull-down resistors to GND on both D+ and D- per the USB specification. While the RP2040 could sometimes manage with weak internal pull-downs, the **RP2350 (Pico 2 / Pico 2 W)** suffers from hardware erratum RP2350-E9 (input pad leakage current), causing D+ and D- to latch high at ~2.1V without external pull-downs. Wire a **15 kΩ** (or 10 kΩ–15 kΩ) resistor from GP18 to GND and another from GP19 to GND.
 
 Keep the D+/D- wires short (a few cm) and equal length. The D+/D- GPIOs are configurable via `usb_host_dp_pin` (D- is always D+ + 1). A small USB hub between the port and the controller also works.
 
@@ -304,7 +304,7 @@ i2c_debounce_ms = 20
 
 # USB Host Port (USB-A controller pass-through)
 usb_host_enabled = true
-usb_host_dp_pin = 16
+usb_host_dp_pin = 18
 usb_host_deadzone_percent = 10
 ```
 
@@ -321,7 +321,7 @@ Run the monitor script to view debug logs over USB CDC:
 
 ### Crash reports on UART0
 
-A HardFault on either core, or a pico-sdk `panic()` (for example a PIO, DMA or alarm claim that collides with another driver), prints a diagnostic on **UART0 (GP12 TX, 115200 baud)** and reboots the board three seconds later, instead of stopping silently the way the stock SDK handlers do:
+A HardFault on either core, or a pico-sdk `panic()` (for example a PIO, DMA or alarm claim that collides with another driver), prints a diagnostic on **UART0 (GP16 TX, 115200 baud)** and reboots the board three seconds later, instead of stopping silently the way the stock SDK handlers do:
 
 ```
 [E][Fault] HardFault on core 0
@@ -380,7 +380,7 @@ pu 0.15        # Hold D-pad UP for 150 milliseconds
 
 ## 12. Connecting from nsfrontend and terminals
 
-The board accepts the command protocol above on three channels: **TCP port 10100** (Pico W / Pico 2 W, advertised as `nscon.local` via mDNS), the **USB CDC console** (`/dev/ttyACM0` on Linux, only with the default Pokken identity), and **UART0** (GP12 TX / GP13 RX, 115200 baud, through a USB-serial adapter such as `/dev/ttyUSB0`). All three channels also carry the log output, and with `enable_echo = true` every command is echoed back with its name, e.g. `a [A]`.
+The board accepts the command protocol above on three channels: **TCP port 10100** (Pico W / Pico 2 W, advertised as `nscon.local` via mDNS), the **USB CDC console** (`/dev/ttyACM0` on Linux, only with the default Pokken identity), and **UART0** (GP16 TX / GP17 RX, 115200 baud, through a USB-serial adapter such as `/dev/ttyUSB0`). All three channels also carry the log output, and with `enable_echo = true` every command is echoed back with its name, e.g. `a [A]`.
 
 ### From nsfrontend
 
