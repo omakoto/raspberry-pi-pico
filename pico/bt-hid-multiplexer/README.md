@@ -43,6 +43,8 @@ Matches the pinout specification from [`circuitpython/ssd1306/`](../../circuitpy
 | **SSD1306 OLED** | GND | `GND` | Pin 3 or 8 | Common Ground |
 | **Push Button** | Button Pin | `GP6` | Pin 9 | Active LOW (internal pull-up) |
 | **Push Button** | Ground Pin | `GND` | Pin 8 or 13 | Connects pin to GND when pressed |
+| **UART0 TX** | Serial Out | `GP16` | Pin 21 | 115,200 baud, 8N1 / Console & log output |
+| **UART0 RX** | Serial In | `GP17` | Pin 22 | 115,200 baud, 8N1 / Console command input |
 | **Host PC USB** | USB D+ / D- | Micro-USB | — | Upstream USB composite device |
 
 ---
@@ -57,17 +59,28 @@ Target outputs are generated in `build/`:
 - `build/bt-hid-multiplexer.uf2`
 - `build/bt-hid-multiplexer.elf`
 
-### 2. Flash to Pico 2 W
-Hold the **BOOTSEL** button on your Pico 2 W while plugging it into USB, then run:
+### 2. Automated 1-Click Flashing
+`01-install.sh` automatically drops the running board into BOOTSEL mode via USB CDC 1200-baud pulse or UART console and flashes the new binary:
 ```bash
 ./01-install.sh
 ```
+*(No physical buttons or mode switching required!)* If flashing over a dedicated USB-to-UART adapter on GP16/GP17, you can specify:
+```bash
+MULTIPLEXER_UART=/dev/ttyUSB0 ./01-install.sh
+```
 
-### 3. Diagnostic Serial Monitor
-Monitor connection diagnostics, BLE discovery events, and passkeys over USB CDC serial:
+### 3. Diagnostic Serial Console (USB CDC / UART0)
+Interactive serial console and logger running concurrently on USB CDC (`/dev/ttyACM*`) and hardware UART0 (GP16/GP17 at 115,200 baud):
 ```bash
 ./02-monitor.sh
 ```
+Commands supported on either console:
+- `bootloader` / `bootsel`: Drops board directly into USB BOOTSEL ROM for updates
+- `pair` / `scan`: Initiates 60-second BLE discovery pairing window
+- `stop`: Halts BLE scanning
+- `status`: Displays uptime, connection state, device name, and active layer
+- `reset`: Clears all bonded devices and resets keymap to default
+- `help`: Lists all console commands
 
 ---
 

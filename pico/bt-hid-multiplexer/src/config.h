@@ -15,6 +15,12 @@
 // Push button for BLE pairing and status toggle
 #define PIN_PAIR_BUTTON         6
 
+// Hardware UART0 Console (matches nsbackend-pico pinout)
+#define UART_PORT               uart0
+#define PIN_UART_TX             16 // GP16 (Physical Pin 21)
+#define PIN_UART_RX             17 // GP17 (Physical Pin 22)
+#define UART_BAUDRATE           115200
+
 // Multi-device limits
 #define MAX_BLE_DEVICES         4
 #define MAX_KEYBOARDS           4

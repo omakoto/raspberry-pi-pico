@@ -30,6 +30,7 @@ set(APP_SOURCES
     src/storage.cpp
     src/multiplexer.cpp
     src/ble_hid_host.cpp
+    src/dual_console.cpp
 )
 
 add_executable(bt-hid-multiplexer ${APP_SOURCES})
@@ -64,6 +65,8 @@ target_link_libraries(bt-hid-multiplexer PRIVATE
     hardware_flash
     hardware_sync
     hardware_timer
+    hardware_uart
+    pico_bootrom
     pico_unique_id
 )
 

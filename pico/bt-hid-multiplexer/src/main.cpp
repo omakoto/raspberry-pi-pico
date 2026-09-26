@@ -13,6 +13,7 @@
 #include "vial_server.h"
 #include "ble_hid_host.h"
 #include "usb_descriptors.h"
+#include "dual_console.h"
 
 // Track LED heartbeat state
 static bool s_led_state = false;
@@ -28,6 +29,7 @@ static void show_toast(const char *msg, uint32_t duration_ms = 3000) {
 
 int main() {
     stdio_init_all();
+    dual_console_init();
 
     // 1. Initialize Display early for startup feedback
     SSD1306::init();
@@ -66,8 +68,9 @@ int main() {
     while (true) {
         uint32_t now = to_ms_since_boot(get_absolute_time());
 
-        // Service TinyUSB Device stack
+        // Service TinyUSB Device stack and Dual Console (USB CDC + Hardware UART0)
         tud_task();
+        dual_console_update();
 
         // Check Push Button Events
         ButtonEvent btn_ev = ButtonHandler::update();
