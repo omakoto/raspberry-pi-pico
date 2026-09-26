@@ -4,10 +4,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+class Stream;
+
 class VialServer {
 public:
     static void init();
     static void poll();
+    static void processSerialCommand(const char *cmd_line, Stream &stream);
     static void processSerialCommand(const char *cmd_line);
 
 private:

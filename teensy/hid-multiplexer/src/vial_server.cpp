@@ -2,6 +2,7 @@
 #include "virtual_matrix.h"
 #include "vial_layout.h"
 #include "multiplexer.h"
+#include "usb_host_manager.h"
 #include "logger.h"
 #include <Arduino.h>
 #include "usb_rawhid.h"
@@ -33,11 +34,14 @@ static void checkStream(Stream &stream, char *buf, uint8_t &pos, size_t max_len)
         if (c == '\r' || c == '\n') {
             if (pos > 0) {
                 buf[pos] = '\0';
-                VialServer::processSerialCommand(buf);
+                VialServer::processSerialCommand(buf, stream);
                 pos = 0;
             }
         } else if (pos < max_len - 1) {
-            buf[pos++] = c;
+            // Only accept printable ASCII in command buffer
+            if (c >= 32 && c <= 126) {
+                buf[pos++] = c;
+            }
         }
     }
 }
@@ -47,10 +51,9 @@ void VialServer::init() {
 }
 
 void VialServer::poll() {
+#if defined(RAWHID_INTERFACE)
     uint8_t rx_buf[32];
     uint8_t tx_buf[32];
-
-#if defined(RAWHID_INTERFACE)
     // Check for incoming 32-byte Raw HID packet from WebHID (vial.rocks / usevia.app)
     int n = RawHID.recv(rx_buf, 0);
     if (n > 0) {
@@ -194,6 +197,29 @@ void VialServer::handleVialCommand(const uint8_t *in_buf, uint8_t *out_buf) {
 }
 
 void VialServer::processSerialCommand(const char *cmd_line) {
+    processSerialCommand(cmd_line, Serial);
+}
+
+void VialServer::processSerialCommand(const char *cmd_line, Stream &stream) {
+    if (cmd_line == nullptr) return;
+
+    // Skip leading spaces
+    while (*cmd_line && *cmd_line == ' ') cmd_line++;
+    if (*cmd_line == '\0') return;
+
+    // Guard against potential serial echo loops by ignoring log output prefixes
+    if (strncmp(cmd_line, "Unknown command:", 16) == 0 ||
+        strncmp(cmd_line, "---", 3) == 0 ||
+        cmd_line[0] == '[' ||
+        strstr(cmd_line, "Keyboard") != nullptr ||
+        strstr(cmd_line, "Mouse") != nullptr ||
+        strstr(cmd_line, "EHCI") != nullptr ||
+        strstr(cmd_line, "Host") != nullptr ||
+        strstr(cmd_line, "Resource") != nullptr ||
+        strstr(cmd_line, "Initiating") != nullptr) {
+        return;
+    }
+
     if (strncmp(cmd_line, "bootloader", 10) == 0 || strncmp(cmd_line, "reboot", 6) == 0) {
         logger_println("[System] Rebooting into HalfKay bootloader...");
         logger_flush();
@@ -201,7 +227,9 @@ void VialServer::processSerialCommand(const char *cmd_line) {
         _reboot_Teensyduino_();
     } else if (strncmp(cmd_line, "help", 4) == 0) {
         logger_println("\n--- Teensy HID Multiplexer Commands ---");
-        logger_println("  status               - Show active layer, USB status, uptime");
+        logger_println("  status               - Show layer, host LEDs, and USB Host diagnostics");
+        logger_println("  devices              - Show detailed USB Host device and endpoint diagnostics");
+        logger_println("  usb_reset            - Power-cycle VBUS and reset USB Host bus");
         logger_println("  bootloader / reboot  - Enter HalfKay bootloader for flashing");
         logger_println("  dump <layer>         - Dump keycodes for layer 0-3");
         logger_println("  remap <L> <R> <C> <K>- Remap (Layer, Row, Col, HexKeycode)");
@@ -213,6 +241,11 @@ void VialServer::processSerialCommand(const char *cmd_line) {
         logger_printf("[Status] Host CapsLock: %s, NumLock: %s\n", 
             (Multiplexer::getHostLeds() & 2) ? "ON" : "OFF",
             (Multiplexer::getHostLeds() & 1) ? "ON" : "OFF");
+        UsbHostManager::printDiagnostics();
+    } else if (strncmp(cmd_line, "devices", 7) == 0) {
+        UsbHostManager::printDiagnostics();
+    } else if (strncmp(cmd_line, "usb_reset", 9) == 0) {
+        UsbHostManager::resetBus();
     } else if (strncmp(cmd_line, "reset", 5) == 0) {
         VirtualMatrix::resetKeymap();
         logger_println("[Status] Keymap reset to 1:1 defaults.");
@@ -237,6 +270,7 @@ void VialServer::processSerialCommand(const char *cmd_line) {
             logger_println("Usage: remap <Layer> <Row> <Col> <HexKeycode>");
         }
     } else {
-        logger_printf("Unknown command: %s (type 'help' for options)\n", cmd_line);
+        // Send unknown command notification only to the stream that received it
+        stream.printf("Unknown command: %s (type 'help' for options)\r\n", cmd_line);
     }
 }
