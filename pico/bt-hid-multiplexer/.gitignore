@@ -1,0 +1,8 @@
+# Build output directory
+build/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*~
