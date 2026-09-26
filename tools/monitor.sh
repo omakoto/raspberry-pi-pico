@@ -6,13 +6,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-PORT=""
+PORT="${TEENSY_UART:-}"
 BAUD=115200
 
-# Check if port is provided as the first positional argument
-if [[ $# -gt 0 && "${1}" =~ ^/dev/tty ]]; then
-    PORT="$1"
-    shift
+# Check if port is provided via --uart or positional argument
+if [[ $# -gt 0 ]]; then
+    if [[ "$1" == "--uart" && $# -gt 1 ]]; then
+        PORT="$2"
+        shift 2
+    elif [[ "${1}" =~ ^/dev/tty ]]; then
+        PORT="$1"
+        shift
+    fi
 fi
 
 # Auto-detect serial port if not explicitly specified
@@ -27,7 +32,7 @@ fi
 
 if [[ -z "$PORT" ]]; then
     echo "Error: No serial port specified or auto-detected (/dev/ttyACM* or /dev/ttyUSB*)." >&2
-    echo "Usage: $0 [/dev/ttyACM0] [options]" >&2
+    echo "Usage: $0 [--uart /dev/ttyUSB0] [/dev/ttyACM0] [options]" >&2
     exit 1
 fi
 
