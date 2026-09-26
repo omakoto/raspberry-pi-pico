@@ -41,6 +41,14 @@ if [[ $DO_CLEAN -eq 1 ]]; then
     pio run -e "$BOARD" -t clean
 fi
 
+# Ensure Teensyduino core has the WebHID EP7 RawHID patch applied
+CORE_DESC="$HOME/.platformio/packages/framework-arduinoteensy/cores/teensy4/usb_desc.h"
+PATCH_FILE="$SCRIPT_DIR/patches/teensy4_usb_desc_ep7_rawhid.patch"
+if [[ -f "$CORE_DESC" && -f "$PATCH_FILE" ]] && ! grep -q "WebHID VIAL" "$CORE_DESC"; then
+    echo "Applying EP7 WebHID RawHID patch to Teensyduino core ($CORE_DESC)..."
+    patch -p1 -d "$HOME/.platformio/packages/framework-arduinoteensy" < "$PATCH_FILE"
+fi
+
 echo "Building hid-multiplexer for board '${BOARD}'..."
 pio run -e "$BOARD" "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
 

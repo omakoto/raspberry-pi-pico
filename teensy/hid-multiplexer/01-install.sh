@@ -82,11 +82,19 @@ if ! is_bootloader_present; then
         for _ in {1..6}; do
             sleep 0.5
             if is_bootloader_present; then
-                echo "Teensy HalfKay bootloader detected!"
+                echo "Teensy HalfKay bootloader detected! Allowing USB to settle..."
+                sleep 1.5
                 break
             fi
         done
     fi
+fi
+
+TEENSY_LOADER_CLI=""
+if command -v teensy_loader_cli >/dev/null 2>&1; then
+    TEENSY_LOADER_CLI="$(command -v teensy_loader_cli)"
+elif [[ -x "$HOME/.platformio/packages/tool-teensy/teensy_loader_cli" ]]; then
+    TEENSY_LOADER_CLI="$HOME/.platformio/packages/tool-teensy/teensy_loader_cli"
 fi
 
 if ! is_bootloader_present; then
@@ -102,4 +110,24 @@ if ! is_bootloader_present; then
 fi
 
 echo "Flashing hid-multiplexer to Teensy '${BOARD}'..."
-pio run -e "$BOARD" -t upload "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
+flash_success=0
+for attempt in 1 2 3; do
+    if [[ -n "$TEENSY_LOADER_CLI" ]] && is_bootloader_present; then
+        if "$TEENSY_LOADER_CLI" --mcu=TEENSY41 -v -w "$FIRMWARE_HEX"; then
+            flash_success=1
+            break
+        fi
+    else
+        if pio run -e "$BOARD" -t upload "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; then
+            flash_success=1
+            break
+        fi
+    fi
+    echo "Flash attempt $attempt failed. Retrying in 1s..."
+    sleep 1
+done
+
+if [[ $flash_success -ne 1 ]]; then
+    echo "Error: Failed to flash Teensy after multiple attempts." >&2
+    exit 1
+fi

@@ -47,6 +47,7 @@ A high-performance USB HID keyboard and mouse multiplexer firmware for **Teensy 
                         | Interface 0/1: CDC Serial     |
                         | Interface 2:   HID Keyboard   |
                         | Interface 3:   HID Mouse      |
+                        | Interface 4:   Vendor RawHID  | (WebHID for vial.rocks)
                         | Interface 5:   Media Keys     |
                         +-------------------------------+
 ```
@@ -157,7 +158,24 @@ The multiplexer maintains a 4-layer dynamic keymap in non-volatile flash storage
 
 ---
 
-## 6. VMware Virtualization Support & Troubleshooting
+## 6. Graphical Keymap Customization via WebHID (https://vial.rocks)
+
+The firmware integrates a native **VIAL/VIA WebHID server** running on USB Endpoint 7 (`0xFF60:0x0061` Vendor RawHID interface). This enables configuring the keymaps, layers, and macros in real-time through the official web-based configurator without installing software:
+
+### How to Connect
+1. Plug the Teensy 4.1 USB cable into the target computer running Linux, macOS, or Windows.
+2. In any Chromium-based browser (Google Chrome, Microsoft Edge, Brave, Chromium), navigate to **[https://vial.rocks/](https://vial.rocks/)** (or [https://usevia.app/](https://usevia.app/)).
+3. Click **"Start"** or **"Authorize device"**.
+4. In the browser's WebHID permission popup, select **`Teensy HID Multiplexer`** (Vendor ID `0x16C0`, Product ID `0x0487`) and click **"Connect"**.
+5. The graphical keyboard layout loads immediately. You can:
+   - Click any key on the visual layout to reassign it to standard characters, function keys, modifiers, media controls, or mouse buttons.
+   - Configure dynamic layer switching keys (`MO(1)`, `TG(2)`, `TO(0)`).
+   - Test keypresses in the built-in Matrix Key Tester tab.
+6. Changes take effect instantly in real-time and are saved to non-volatile EEPROM storage across power cycles.
+
+---
+
+## 7. VMware Virtualization Support & Troubleshooting
 
 ### Why VMware Hides the Teensy
 When the Teensy boots into `hid-multiplexer` firmware, it enumerates as a USB composite device declaring USB CDC Serial alongside USB HID Keyboard and Mouse interfaces (`-DUSB_SERIAL_HID`). By default, VMware's USB Arbitrator automatically captures any USB device containing an HID Keyboard (Interface Class 0x03, Protocol 1) or Mouse (Interface Class 0x03, Protocol 2) to protect host input integrity, hiding the entire device (including its CDC serial port) from the guest VM.
