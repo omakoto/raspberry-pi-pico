@@ -24,6 +24,7 @@ public:
     // High-level UI status screen
     static void renderStatus(bool ble_connected, const char *dev_name, int active_layer, 
                              bool pairing_active, uint32_t passkey, const char *toast_msg);
+    static void renderBootSplash(const char *board_desc, const char *version_desc);
 
 private:
     static uint8_t buffer_[OLED_WIDTH * OLED_HEIGHT / 8];

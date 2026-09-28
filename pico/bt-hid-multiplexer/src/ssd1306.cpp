@@ -249,3 +249,28 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
 
     show();
 }
+
+void SSD1306::renderBootSplash(const char *board_desc, const char *version_desc) {
+    clear(false);
+
+    // Header banner with inverted text
+    rect(0, 0, OLED_WIDTH, 11, true, true);
+    drawString("PICO BLE MULTIPLEXER", 14, 2, false, false);
+
+    // Prominent title
+    drawString("BLE MULTIPLEX", 12, 16, true, true);
+
+    // Hardware target and firmware version
+    if (board_desc) {
+        drawString(board_desc, 6, 36, true, false);
+    }
+    if (version_desc) {
+        drawString(version_desc, 6, 46, true, false);
+    }
+
+    // Status footer
+    line(0, 54, OLED_WIDTH - 1, 54, true);
+    drawString("System Ready", 6, 56, true, false);
+
+    show();
+}

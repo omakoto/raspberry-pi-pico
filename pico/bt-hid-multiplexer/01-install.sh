@@ -88,6 +88,11 @@ for _ in {1..12}; do
         break
     fi
 
+    # Check for unmounted BOOTSEL block device and mount via udisksctl
+    if [[ -e "/dev/disk/by-label/RPI-RP2" ]] && command -v udisksctl >/dev/null 2>&1; then
+        udisksctl mount -b /dev/disk/by-label/RPI-RP2 >/dev/null 2>&1 || true
+    fi
+
     # Check mounted directories
     for dir in /media/*/* /run/media/*/* /mnt/*; do
         if [[ -d "$dir" && (-f "$dir/INFO_UF2.TXT" || -f "$dir/info_uf2.txt") ]]; then

@@ -19,6 +19,7 @@
 // Concurrent connection limits (support up to 4 BLE HID peripherals)
 #define MAX_NR_GATT_CLIENTS 4
 #define MAX_NR_HCI_CONNECTIONS 4
+#define MAX_NR_HIDS_CLIENTS 4
 #define MAX_NR_L2CAP_CHANNELS 8
 #define MAX_NR_L2CAP_SERVICES 4
 #define MAX_NR_SM_LOOKUP_ENTRIES 4

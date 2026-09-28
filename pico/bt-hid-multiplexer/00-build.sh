@@ -15,7 +15,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 export PICO_SDK_PATH="${PICO_SDK_PATH:-$HOME/pico-sdk}"
 
-BOARD="pico2_w"
+BOARD="${PICO_BOARD:-}"
 DO_CLEAN=0
 EXTRA_ARGS=()
 
@@ -41,6 +41,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$SCRIPT_DIR"
+
+if [[ -z "$BOARD" ]]; then
+    if [[ -f "build/CMakeCache.txt" ]]; then
+        BOARD="$(grep -E '^PICO_BOARD:' build/CMakeCache.txt | cut -d= -f2 || true)"
+    fi
+    BOARD="${BOARD:-pico_w}"
+fi
 
 if [[ $DO_CLEAN -eq 1 && -d "build" ]]; then
     echo "Cleaning build directory..."

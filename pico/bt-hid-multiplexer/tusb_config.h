@@ -21,8 +21,8 @@ extern "C" {
 #define CFG_TUD_HID_EP_BUFSIZE      64
 
 // CDC Configuration
-#define CFG_TUD_CDC_RX_BUFSIZE      512
-#define CFG_TUD_CDC_TX_BUFSIZE      1024
+#define CFG_TUD_CDC_RX_BUFSIZE      1024
+#define CFG_TUD_CDC_TX_BUFSIZE      2048
 #define CFG_TUD_CDC_EP_BUFSIZE      64
 
 #ifdef __cplusplus

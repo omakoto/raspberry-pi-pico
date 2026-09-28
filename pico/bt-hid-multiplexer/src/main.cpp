@@ -33,10 +33,12 @@ int main() {
 
     // 1. Initialize Display early for startup feedback
     SSD1306::init();
-    SSD1306::clear(false);
-    SSD1306::drawString("PICO 2W MULTIPLEXER", 4, 16, true, true);
-    SSD1306::drawString("Initializing hardware...", 4, 38, true, false);
-    SSD1306::show();
+#if PICO_RP2350
+    const char *board_name = "Board: Pico 2 W (RP2350)";
+#else
+    const char *board_name = "Board: Pico W (RP2040)";
+#endif
+    SSD1306::renderBootSplash(board_name, "Firmware: v1.0.0");
 
     // 2. Initialize GPIO button
     ButtonHandler::init();
@@ -60,10 +62,12 @@ int main() {
 
     // 7. Initialize BLE HID Central Host (powers on radio)
     BleHidHost::init();
-    printf("[System] Pico 2 W BLE HID Multiplexer ready.\n");
+    print_welcome_banner();
 
+    // Hold boot splash screen on display for 2.0 seconds from startup
+    const uint32_t splash_end_ms = to_ms_since_boot(get_absolute_time()) + 2000;
     s_last_heartbeat_ms = to_ms_since_boot(get_absolute_time());
-    s_last_display_update_ms = s_last_heartbeat_ms;
+    s_last_display_update_ms = splash_end_ms;
 
     while (true) {
         uint32_t now = to_ms_since_boot(get_absolute_time());
@@ -102,8 +106,8 @@ int main() {
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, s_led_state);
         }
 
-        // Periodic SSD1306 UI Display Refresh (10 Hz)
-        if (now - s_last_display_update_ms >= STATUS_UPDATE_INTERVAL_MS) {
+        // Periodic SSD1306 UI Display Refresh (10 Hz, starts after splash screen ends)
+        if (now >= splash_end_ms && (now - s_last_display_update_ms >= STATUS_UPDATE_INTERVAL_MS)) {
             s_last_display_update_ms = now;
 
             const char *toast = (now < s_toast_expiry_ms) ? s_toast_msg : "";
