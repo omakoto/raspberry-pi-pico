@@ -76,6 +76,9 @@ int main() {
         tud_task();
         dual_console_update();
 
+        // Flush any remaining accumulated mouse/trackpad movement
+        Multiplexer::flushMouse();
+
         // Check Push Button Events
         ButtonEvent btn_ev = ButtonHandler::update();
         if (btn_ev == BUTTON_EVENT_SHORT_PRESS) {

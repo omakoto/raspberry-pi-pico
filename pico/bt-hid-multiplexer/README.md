@@ -1,17 +1,18 @@
-# Raspberry Pi Pico 2 W BLE HID Multiplexer
+# Raspberry Pi Pico 2 W / Pico W BLE HID Multiplexer
 
-A high-performance Bluetooth Low Energy (BLE) Human Interface Device (HID) Multiplexer and Dynamic Keymap Engine for the **Raspberry Pi Pico 2 W** (RP2350 + CYW43439).
+A high-performance Bluetooth Low Energy (BLE) Human Interface Device (HID) Multiplexer and Dynamic Keymap Engine for the **Raspberry Pi Pico 2 W** (RP2350 + CYW43439) and **Raspberry Pi Pico W** (RP2040 + CYW43439).
 
-This project connects wireless BLE keyboards and mice and aggregates them into a **single unified Composite USB HID device** (Keyboard + Mouse + VIAL WebHID) connected to your computer.
+This project connects wireless BLE keyboards, mice, and integrated trackpads and aggregates them into a **single unified Composite USB HID device** (Keyboard + Mouse + VIAL WebHID) connected to your computer.
 
 ---
 
 ## Features
 
 - **BLE Central / HOGP Host:**
-  - Connects to Bluetooth Low Energy keyboards and mice (HID over GATT Profile).
+  - Connects to Bluetooth Low Energy keyboards, mice, and composite keyboard+trackpad peripherals (HID over GATT Profile).
+  - **Integrated Trackpad Support:** Supports multi-touch trackpads (e.g. ProtoArc XK01 TP) with 16-bit relative X/Y motion vectors, vertical scroll wheel, and horizontal pan.
   - Multi-device rollover aggregation: simultaneously merges modifier keys and keypresses across multiple keyboards without ghosting or stuck keys.
-  - Rate-decoupled mouse vector aggregation (X, Y, scroll wheel, and 5 buttons) up to 1000 Hz.
+  - Rate-decoupled mouse and trackpad vector aggregation (X, Y, scroll wheel, pan, and 5 buttons) up to 1000 Hz.
   - Automatically reconnects to bonded devices across power cycles via non-volatile flash storage.
 - **SSD1306 OLED Display (128×64 I2C):**
   - Displays connection status, connected peripheral names, active keymap layer, and USB connection health.
@@ -79,6 +80,8 @@ Commands supported on either console:
 - `pair` / `scan`: Initiates 60-second BLE discovery pairing window
 - `stop`: Halts BLE scanning
 - `status`: Displays uptime, connection state, device name, and active layer
+- `bonds`: Dumps bonded peripheral database and cache
+- `desc` / `descriptor`: Dumps stored BLE HID report descriptor
 - `reset`: Clears all bonded devices and resets keymap to default
 - `help`: Lists all console commands
 

@@ -10,6 +10,7 @@ Multiplexer::MouseDeviceState Multiplexer::mice_[MAX_MICE];
 int32_t Multiplexer::accum_dx_ = 0;
 int32_t Multiplexer::accum_dy_ = 0;
 int8_t  Multiplexer::accum_wheel_ = 0;
+int8_t  Multiplexer::accum_pan_ = 0;
 uint8_t Multiplexer::merged_mouse_buttons_ = 0;
 
 uint8_t Multiplexer::host_leds_ = 0;
@@ -22,6 +23,7 @@ void Multiplexer::init() {
     accum_dx_ = 0;
     accum_dy_ = 0;
     accum_wheel_ = 0;
+    accum_pan_ = 0;
     merged_mouse_buttons_ = 0;
     host_leds_ = 0;
     last_synced_leds_ = 0xFF;
@@ -133,7 +135,7 @@ void Multiplexer::flushKeyboard() {
     kbd_dirty_ = false;
 }
 
-void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel) {
+void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, int8_t pan) {
     if (dev_idx >= MAX_MICE) return;
 
     mice_[dev_idx].connected = true;
@@ -142,6 +144,7 @@ void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int8_t dx,
     accum_dx_ += dx;
     accum_dy_ += dy;
     accum_wheel_ += wheel;
+    accum_pan_ += pan;
 
     flushMouse();
 }
@@ -164,22 +167,24 @@ void Multiplexer::flushMouse() {
         }
     }
 
-    if (accum_dx_ == 0 && accum_dy_ == 0 && accum_wheel_ == 0 && merged_buttons == merged_mouse_buttons_) {
+    if (accum_dx_ == 0 && accum_dy_ == 0 && accum_wheel_ == 0 && accum_pan_ == 0 && merged_buttons == merged_mouse_buttons_) {
         return;
     }
 
-    // Clamp delta movement
+    // Clamp delta movement to signed 8-bit limits (-127 to 127) for the standard USB mouse report
     int8_t report_dx = (accum_dx_ > 127) ? 127 : ((accum_dx_ < -127) ? -127 : (int8_t)accum_dx_);
     int8_t report_dy = (accum_dy_ > 127) ? 127 : ((accum_dy_ < -127) ? -127 : (int8_t)accum_dy_);
     int8_t report_wheel = accum_wheel_;
+    int8_t report_pan = accum_pan_;
 
     accum_dx_ -= report_dx;
     accum_dy_ -= report_dy;
     accum_wheel_ = 0;
+    accum_pan_ = 0;
     merged_mouse_buttons_ = merged_buttons;
 
     // Transmit standard 5-byte mouse report (buttons, dx, dy, wheel, pan) matching descriptor
-    tud_hid_n_mouse_report(0, REPORT_ID_MOUSE, merged_buttons, report_dx, report_dy, report_wheel, 0);
+    tud_hid_n_mouse_report(0, REPORT_ID_MOUSE, merged_buttons, report_dx, report_dy, report_wheel, report_pan);
 }
 
 void Multiplexer::setHostLeds(uint8_t leds) {

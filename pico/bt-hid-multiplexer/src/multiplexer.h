@@ -14,7 +14,7 @@ public:
     static void purgeKeyboard(uint8_t dev_idx);
 
     // Ingest events from BLE mice
-    static void handleMouseReport(uint8_t dev_idx, uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel);
+    static void handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx, int16_t dy, int8_t wheel, int8_t pan = 0);
     static void purgeMouse(uint8_t dev_idx);
 
     // Rate-decoupled flush to USB HID host
@@ -46,6 +46,7 @@ private:
     static int32_t accum_dx_;
     static int32_t accum_dy_;
     static int8_t  accum_wheel_;
+    static int8_t  accum_pan_;
     static uint8_t merged_mouse_buttons_;
 
     // Host LED state

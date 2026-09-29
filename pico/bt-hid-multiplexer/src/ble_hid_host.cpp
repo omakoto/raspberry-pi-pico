@@ -454,6 +454,21 @@ void BleHidHost::sendHostLeds(uint8_t leds) {
     }
 }
 
+void BleHidHost::dumpDescriptor() {
+    if (!s_connected || s_hids_cid == 0) {
+        printf("[BLE Host] No active HIDS connection to dump descriptor.\n");
+        return;
+    }
+    const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(s_hids_cid, 0);
+    uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(s_hids_cid, 0);
+    printf("[BLE Host] Stored HID Report Descriptor (len %u):\n", desc_len);
+    if (desc && desc_len > 0) {
+        printf_hexdump(desc, desc_len);
+    } else {
+        printf("[BLE Host] No HID descriptor available in storage\n");
+    }
+}
+
 void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
     (void)size;
@@ -534,23 +549,51 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             }
 
             printf("[BLE Host] HID Report (id %u, len %u):", report_id, data_len);
-            for (uint16_t i = 0; i < data_len && i < 16; i++) {
+            for (uint16_t i = 0; i < data_len; i++) {
                 printf(" %02X", data[i]);
             }
             printf("\n");
 
-            if (data_len == 8) {
-                // Standard Keyboard report: [modifiers, reserved, key1..6]
-                Multiplexer::handleKeyboardReport(0, data[0], &data[2], 6);
-            } else if (data_len == 7) {
-                // Keyboard report without reserved byte: [modifiers, key1..6]
-                Multiplexer::handleKeyboardReport(0, data[0], &data[1], 6);
-            } else if (data_len >= 3 && data_len <= 5) {
-                // Mouse report: [buttons, dx, dy, optional wheel]
-                int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
-                Multiplexer::handleMouseReport(0, data[0], (int8_t)data[1], (int8_t)data[2], wheel);
+            // Route incoming reports by report_id to prevent collision between keyboard and trackpad/mouse
+            if (report_id == 1 || (report_id == 0 && (data_len == 8 || data_len == 7))) {
+                if (data_len == 8) {
+                    // Standard Keyboard report with modifier, reserved byte, and 6 keycodes
+                    Multiplexer::handleKeyboardReport(0, data[0], &data[2], 6);
+                } else if (data_len == 7) {
+                    // Keyboard report with modifier and 6 keycodes (omitting reserved byte)
+                    Multiplexer::handleKeyboardReport(0, data[0], &data[1], 6);
+                } else {
+                    printf("[BLE Host] Unhandled keyboard report format (id %u, data_len %u)\n", report_id, data_len);
+                }
+            } else if (report_id == 2) {
+                if (data_len == 7) {
+                    // ProtoArc 16-bit relative trackpad report: [buttons, dx_l, dx_h, dy_l, dy_h, wheel, pan]
+                    uint8_t buttons = data[0];
+                    int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
+                    int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
+                    int8_t wheel = (int8_t)data[5];
+                    int8_t pan = (int8_t)data[6];
+                    Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, pan);
+                } else if (data_len == 6) {
+                    // 16-bit displacement with vertical wheel: [buttons, dx_l, dx_h, dy_l, dy_h, wheel]
+                    uint8_t buttons = data[0];
+                    int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
+                    int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
+                    int8_t wheel = (int8_t)data[5];
+                    Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, 0);
+                } else if (data_len >= 3 && data_len <= 5) {
+                    // Standard 8-bit displacement: [buttons, dx, dy, optional wheel, optional pan]
+                    uint8_t buttons = data[0];
+                    int16_t dx = (int8_t)data[1];
+                    int16_t dy = (int8_t)data[2];
+                    int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
+                    int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
+                    Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, pan);
+                } else {
+                    printf("[BLE Host] Unhandled Mouse/Trackpad report format (id %u, data_len %u)\n", report_id, data_len);
+                }
             } else {
-                printf("[BLE Host] Unhandled HID Report format (id %u, data_len %u)\n", report_id, data_len);
+                printf("[BLE Host] Unhandled HID Report (id %u, data_len %u)\n", report_id, data_len);
             }
             break;
         }
