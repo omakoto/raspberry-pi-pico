@@ -15,6 +15,7 @@ public:
     static uint32_t getActivePasskey();
     static void clearPasskey();
     static void clearBonds();
+    static void dumpBonds();
     static void sendHostLeds(uint8_t leds);
 
     // Callbacks for BTstack run loop

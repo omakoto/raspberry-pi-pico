@@ -178,13 +178,8 @@ void Multiplexer::flushMouse() {
     accum_wheel_ = 0;
     merged_mouse_buttons_ = merged_buttons;
 
-    uint8_t report[4];
-    report[0] = merged_buttons;
-    report[1] = (uint8_t)report_dx;
-    report[2] = (uint8_t)report_dy;
-    report[3] = (uint8_t)report_wheel;
-
-    tud_hid_n_report(0, REPORT_ID_MOUSE, report, sizeof(report));
+    // Transmit standard 5-byte mouse report (buttons, dx, dy, wheel, pan) matching descriptor
+    tud_hid_n_mouse_report(0, REPORT_ID_MOUSE, merged_buttons, report_dx, report_dy, report_wheel, 0);
 }
 
 void Multiplexer::setHostLeds(uint8_t leds) {

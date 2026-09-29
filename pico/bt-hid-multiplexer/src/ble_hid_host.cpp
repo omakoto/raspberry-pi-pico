@@ -2,22 +2,43 @@
 #include "multiplexer.h"
 #include "config.h"
 #include "btstack.h"
+#include "btstack_tlv.h"
 #include "ble/gatt-service/hids_client.h"
 #include "ble/le_device_db.h"
 #include "pico/time.h"
 #include <stdio.h>
 #include <string.h>
 
+// TAG to store remote device address, type, and name in TLV
+#define TLV_TAG_HOGD ((((uint32_t) 'H') << 24 ) | (((uint32_t) 'O') << 16) | (((uint32_t) 'G') << 8) | 'D')
+
+struct BondedDeviceRecord {
+    bd_addr_t addr;
+    bd_addr_type_t addr_type;
+    char name[32];
+};
+
 static bool s_is_scanning = false;
+static bool s_is_connecting = false;
 static bool s_connected = false;
 static uint32_t s_active_passkey = 0;
 static char s_connected_dev_name[32] = {0};
+
+// Cached bonded peripheral info in RAM to avoid flash reads in packet handlers
+static bool s_has_bonded_device = false;
+static BondedDeviceRecord s_bonded_device;
 
 static bd_addr_t s_remote_addr;
 static bd_addr_type_t s_remote_addr_type = BD_ADDR_TYPE_LE_PUBLIC;
 static hci_con_handle_t s_con_handle = HCI_CON_HANDLE_INVALID;
 static uint16_t s_hids_cid = 0;
 static hid_protocol_mode_t s_protocol_mode = HID_PROTOCOL_MODE_REPORT;
+
+// Timer and handler for targeted auto-reconnect fallback
+static btstack_timer_source_t s_reconnect_timer;
+static void onReconnectTimeout(btstack_timer_source_t *ts);
+static void tryAutoReconnectOrScan();
+static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name);
 
 // Report descriptor buffer sized to accommodate complex composite peripherals (keyboard + touchpad)
 static uint8_t s_hid_descriptor_storage[2048];
@@ -129,13 +150,13 @@ struct SeenDevice {
     uint16_t appearance;
     char name[32];
 };
-static SeenDevice s_seen_devices[16];
+static SeenDevice s_seen_devices[64];
 static uint8_t s_seen_idx = 0;
 
 // Updates seen device records across advertisement and scan response packets,
 // and throttles discovery log messages per device address
 static bool update_and_should_log_device(const bd_addr_t addr, uint32_t now, AdvDeviceInfo *info) {
-    for (uint8_t i = 0; i < 16; ++i) {
+    for (uint8_t i = 0; i < 64; ++i) {
         if (bd_addr_cmp(addr, s_seen_devices[i].addr) == 0) {
             if (info->name[0] != '\0') {
                 memcpy(s_seen_devices[i].name, info->name, sizeof(s_seen_devices[i].name));
@@ -168,10 +189,149 @@ static bool update_and_should_log_device(const bd_addr_t addr, uint32_t now, Adv
     s_seen_devices[s_seen_idx].has_hid_service = info->has_hid_service;
     s_seen_devices[s_seen_idx].appearance = info->appearance;
     memcpy(s_seen_devices[s_seen_idx].name, info->name, sizeof(s_seen_devices[s_seen_idx].name));
-    s_seen_idx = (s_seen_idx + 1) % 16;
+    s_seen_idx = (s_seen_idx + 1) % 64;
     return true;
 }
 
+
+// Load bonded device record from TLV storage
+static bool load_bonded_device(BondedDeviceRecord *record) {
+    const btstack_tlv_t *tlv_impl = nullptr;
+    void *tlv_context = nullptr;
+    btstack_tlv_get_instance(&tlv_impl, &tlv_context);
+    if (!tlv_impl) return false;
+
+    int len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOGD, (uint8_t *)record, sizeof(BondedDeviceRecord));
+    return (len == (int)sizeof(BondedDeviceRecord));
+}
+
+// Persist bonded device record in TLV storage
+static void save_bonded_device(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
+    const btstack_tlv_t *tlv_impl = nullptr;
+    void *tlv_context = nullptr;
+    btstack_tlv_get_instance(&tlv_impl, &tlv_context);
+    if (!tlv_impl) return;
+
+    BondedDeviceRecord record;
+    bd_addr_copy(record.addr, addr);
+    record.addr_type = addr_type;
+    if (name && name[0] != '\0') {
+        strncpy(record.name, name, sizeof(record.name) - 1);
+        record.name[sizeof(record.name) - 1] = '\0';
+    } else {
+        snprintf(record.name, sizeof(record.name), "%s", bd_addr_to_str(addr));
+    }
+
+    tlv_impl->store_tag(tlv_context, TLV_TAG_HOGD, (const uint8_t *)&record, sizeof(record));
+    printf("[BLE Host] Saved bonded device to TLV: '%s' (%s, type %u)\n",
+           record.name, bd_addr_to_str(record.addr), record.addr_type);
+}
+
+// Remove bonded device record from TLV storage
+static void delete_bonded_device() {
+    const btstack_tlv_t *tlv_impl = nullptr;
+    void *tlv_context = nullptr;
+    btstack_tlv_get_instance(&tlv_impl, &tlv_context);
+    if (tlv_impl) {
+        tlv_impl->delete_tag(tlv_context, TLV_TAG_HOGD);
+        printf("[BLE Host] Removed bonded device record from TLV.\n");
+    }
+}
+
+// Check whether a device address matches a known bonded device in RAM cache or le_device_db
+static bool is_bonded_device_addr(const bd_addr_t addr) {
+    if (s_has_bonded_device && bd_addr_cmp(addr, s_bonded_device.addr) == 0) {
+        return true;
+    }
+    for (int i = 0; i < le_device_db_max_count(); i++) {
+        int addr_type = 0;
+        bd_addr_t db_addr;
+        le_device_db_info(i, &addr_type, db_addr, nullptr);
+        if (addr_type != BD_ADDR_TYPE_UNKNOWN && bd_addr_cmp(addr, db_addr) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Timeout handler for targeted auto-reconnect or connection attempts
+static void onReconnectTimeout(btstack_timer_source_t *ts) {
+    (void)ts;
+    if (s_is_connecting) {
+        printf("[BLE Host] Connection attempt timed out. Resuming discovery scan...\n");
+        s_is_connecting = false;
+        s_connected_dev_name[0] = '\0';
+        gap_connect_cancel();
+        BleHidHost::startScan();
+    }
+}
+
+// Centralized connection routine with 10-second timeout
+static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
+    if (s_is_connecting || s_connected) return;
+
+    btstack_run_loop_remove_timer(&s_reconnect_timer);
+    gap_stop_scan();
+    s_is_scanning = false;
+    s_is_connecting = true;
+
+    bd_addr_copy(s_remote_addr, addr);
+    s_remote_addr_type = addr_type;
+    if (name && name[0] != '\0') {
+        strncpy(s_connected_dev_name, name, sizeof(s_connected_dev_name) - 1);
+        s_connected_dev_name[sizeof(s_connected_dev_name) - 1] = '\0';
+    } else {
+        snprintf(s_connected_dev_name, sizeof(s_connected_dev_name), "%s", bd_addr_to_str(addr));
+    }
+
+    printf("[BLE Host] Connecting to '%s' (%s, type %u)...\n",
+           s_connected_dev_name, bd_addr_to_str(s_remote_addr), (unsigned)s_remote_addr_type);
+
+    // Set 10-second timeout for outgoing connection
+    btstack_run_loop_set_timer(&s_reconnect_timer, 10000);
+    btstack_run_loop_set_timer_handler(&s_reconnect_timer, &onReconnectTimeout);
+    btstack_run_loop_add_timer(&s_reconnect_timer);
+
+    gap_connect(s_remote_addr, s_remote_addr_type);
+}
+
+// Start continuous scanning for bonded peripheral reconnection or new HID devices
+static void tryAutoReconnectOrScan() {
+    btstack_run_loop_remove_timer(&s_reconnect_timer);
+
+    if (s_has_bonded_device) {
+        printf("[BLE Host] Bonded peripheral stored: '%s' (%s). Scanning for reconnection...\n",
+               s_bonded_device.name, bd_addr_to_str(s_bonded_device.addr));
+    } else {
+        printf("[BLE Host] No bonded device stored. Starting discovery scan...\n");
+    }
+    BleHidHost::startScan();
+}
+
+static void load_bonded_device_cache() {
+    s_has_bonded_device = load_bonded_device(&s_bonded_device);
+    if (!s_has_bonded_device) {
+        // Fall back to le_device_db if TLV tag not yet written
+        for (int i = 0; i < le_device_db_max_count(); i++) {
+            int addr_type = 0;
+            bd_addr_t addr;
+            le_device_db_info(i, &addr_type, addr, nullptr);
+            if (addr_type != BD_ADDR_TYPE_UNKNOWN) {
+                s_has_bonded_device = true;
+                bd_addr_copy(s_bonded_device.addr, addr);
+                s_bonded_device.addr_type = (bd_addr_type_t)addr_type;
+                snprintf(s_bonded_device.name, sizeof(s_bonded_device.name), "%s", bd_addr_to_str(addr));
+                break;
+            }
+        }
+    }
+    if (s_has_bonded_device) {
+        printf("[BLE Host] Loaded bonded device: '%s' (%s, type %u)\n",
+               s_bonded_device.name, bd_addr_to_str(s_bonded_device.addr), (unsigned)s_bonded_device.addr_type);
+    } else {
+        printf("[BLE Host] No bonded device stored.\n");
+    }
+}
 
 void BleHidHost::init() {
     l2cap_init();
@@ -196,15 +356,23 @@ void BleHidHost::init() {
     gap_set_scan_parameters(1, 48, 48);
 
     s_is_scanning = false;
+    s_is_connecting = false;
     s_connected = false;
     s_active_passkey = 0;
     s_con_handle = HCI_CON_HANDLE_INVALID;
     s_connected_dev_name[0] = '\0';
 
+    load_bonded_device_cache();
+
     hci_power_control(HCI_POWER_ON);
 }
 
 void BleHidHost::startScan() {
+    btstack_run_loop_remove_timer(&s_reconnect_timer);
+    if (s_is_connecting) {
+        s_is_connecting = false;
+        gap_connect_cancel();
+    }
     if (s_is_scanning) return;
     printf("[BLE Host] Starting scan for BLE HID peripherals...\n");
     s_is_scanning = true;
@@ -216,6 +384,7 @@ void BleHidHost::startScan() {
 }
 
 void BleHidHost::stopScan() {
+    btstack_run_loop_remove_timer(&s_reconnect_timer);
     if (!s_is_scanning) return;
     printf("[BLE Host] Stopping BLE scan.\n");
     s_is_scanning = false;
@@ -231,7 +400,7 @@ bool BleHidHost::isConnected() {
 }
 
 const char* BleHidHost::getConnectedDeviceName() {
-    return s_connected_dev_name;
+    return (s_connected && s_connected_dev_name[0] != '\0') ? s_connected_dev_name : "None";
 }
 
 uint32_t BleHidHost::getActivePasskey() {
@@ -244,11 +413,36 @@ void BleHidHost::clearPasskey() {
 
 void BleHidHost::clearBonds() {
     printf("[BLE Host] Clearing all bonded devices.\n");
-    for (int i = le_device_db_count() - 1; i >= 0; i--) {
+    s_has_bonded_device = false;
+    memset(&s_bonded_device, 0, sizeof(s_bonded_device));
+    s_connected_dev_name[0] = '\0';
+    delete_bonded_device();
+    for (int i = 0; i < le_device_db_max_count(); i++) {
         le_device_db_remove(i);
     }
     if (s_con_handle != HCI_CON_HANDLE_INVALID) {
         gap_disconnect(s_con_handle);
+    }
+}
+
+void BleHidHost::dumpBonds() {
+    printf("[BLE Host] Bonded cache: %s\n", s_has_bonded_device ? s_bonded_device.name : "None");
+    if (s_has_bonded_device) {
+        printf("  Address: %s (type %u)\n", bd_addr_to_str(s_bonded_device.addr), (unsigned)s_bonded_device.addr_type);
+    }
+    printf("[BLE Host] le_device_db (max %d):\n", le_device_db_max_count());
+    int valid = 0;
+    for (int i = 0; i < le_device_db_max_count(); i++) {
+        int addr_type = 0;
+        bd_addr_t addr;
+        le_device_db_info(i, &addr_type, addr, nullptr);
+        if (addr_type != BD_ADDR_TYPE_UNKNOWN) {
+            printf("  Slot %d: %s (type %u)\n", i, bd_addr_to_str(addr), (unsigned)addr_type);
+            valid++;
+        }
+    }
+    if (valid == 0) {
+        printf("  (no bonded devices in le_device_db)\n");
     }
 }
 
@@ -276,6 +470,25 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 printf("[BLE Host] HID Service Connected successfully! (mode: %u, instances: %u)\n", mode, instances);
                 s_connected = true;
                 s_active_passkey = 0;
+
+                // Update bonded device in RAM cache and persist to TLV
+                s_has_bonded_device = true;
+                bd_addr_copy(s_bonded_device.addr, s_remote_addr);
+                s_bonded_device.addr_type = s_remote_addr_type;
+                strncpy(s_bonded_device.name, s_connected_dev_name, sizeof(s_bonded_device.name) - 1);
+                s_bonded_device.name[sizeof(s_bonded_device.name) - 1] = '\0';
+                save_bonded_device(s_remote_addr, s_remote_addr_type, s_connected_dev_name);
+
+                // Dump raw HID Report Descriptor to inspect report IDs and features
+                const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(s_hids_cid, 0);
+                uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(s_hids_cid, 0);
+                printf("[BLE Host] HID Report Descriptor (len %u):\n", desc_len);
+                if (desc && desc_len > 0) {
+                    printf_hexdump(desc, desc_len);
+                } else {
+                    printf("[BLE Host] No HID descriptor available\n");
+                }
+
                 // Explicitly ensure report notifications are enabled across all discovered input reports
                 hids_client_enable_notifications(s_hids_cid);
             } else {
@@ -376,6 +589,14 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
                 printf("[BLE Host] Pairing complete: SUCCESS\n");
                 s_active_passkey = 0;
                 connect_hids = true;
+
+                // Cache and persist bonded device immediately on pairing completion
+                s_has_bonded_device = true;
+                bd_addr_copy(s_bonded_device.addr, s_remote_addr);
+                s_bonded_device.addr_type = s_remote_addr_type;
+                strncpy(s_bonded_device.name, s_connected_dev_name, sizeof(s_bonded_device.name) - 1);
+                s_bonded_device.name[sizeof(s_bonded_device.name) - 1] = '\0';
+                save_bonded_device(s_remote_addr, s_remote_addr_type, s_connected_dev_name);
             } else {
                 printf("[BLE Host] Pairing complete: FAILED (status 0x%02X)\n", status);
                 s_active_passkey = 0;
@@ -386,10 +607,17 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
             break;
         }
 
-        case SM_EVENT_REENCRYPTION_COMPLETE:
-            printf("[BLE Host] Re-encryption complete.\n");
-            connect_hids = true;
+        case SM_EVENT_REENCRYPTION_COMPLETE: {
+            uint8_t status = sm_event_reencryption_complete_get_status(packet);
+            if (status == ERROR_CODE_SUCCESS) {
+                printf("[BLE Host] Re-encryption complete: SUCCESS\n");
+                connect_hids = true;
+            } else {
+                printf("[BLE Host] Re-encryption failed (status 0x%02X). Requesting fresh pairing...\n", status);
+                sm_request_pairing(s_con_handle);
+            }
             break;
+        }
 
         default:
             break;
@@ -414,7 +642,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
         case BTSTACK_EVENT_STATE:
             if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING) {
                 printf("[BLE Host] BTstack HCI State: WORKING\n");
-                startScan();
+                tryAutoReconnectOrScan();
             }
             break;
 
@@ -443,39 +671,36 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 }
             }
 
-            if (is_target_hid_device(info)) {
-                gap_stop_scan();
-                s_is_scanning = false;
-
-                bd_addr_copy(s_remote_addr, addr);
-                s_remote_addr_type = (bd_addr_type_t)addr_type;
-                if (info.name[0] != '\0') {
-                    strncpy(s_connected_dev_name, info.name, sizeof(s_connected_dev_name) - 1);
-                    s_connected_dev_name[sizeof(s_connected_dev_name) - 1] = '\0';
-                } else {
-                    snprintf(s_connected_dev_name, sizeof(s_connected_dev_name), "%s", bd_addr_to_str(addr));
-                }
-
-                printf("[BLE Host] Target HID device found: '%s' (%s). Connecting...\n",
-                       s_connected_dev_name, bd_addr_to_str(s_remote_addr));
-                gap_connect(s_remote_addr, s_remote_addr_type);
+            bool is_bonded = is_bonded_device_addr(addr);
+            if (is_bonded || is_target_hid_device(info)) {
+                const char *dev_name = (info.name[0] != '\0') ? info.name :
+                                       (is_bonded ? s_bonded_device.name : "");
+                printf("[BLE Host] %s found: '%s' (%s)\n",
+                       is_bonded ? "Bonded device" : "Target HID device",
+                       dev_name[0] != '\0' ? dev_name : bd_addr_to_str(addr),
+                       bd_addr_to_str(addr));
+                connectToDevice(addr, (bd_addr_type_t)addr_type, dev_name);
             }
             break;
         }
 
         case HCI_EVENT_DISCONNECTION_COMPLETE:
-            printf("[BLE Host] Device disconnected. Resuming scan...\n");
+            printf("[BLE Host] Device disconnected. Resuming scan/reconnect...\n");
+            btstack_run_loop_remove_timer(&s_reconnect_timer);
             s_con_handle = HCI_CON_HANDLE_INVALID;
             s_connected = false;
+            s_is_connecting = false;
             s_active_passkey = 0;
             s_connected_dev_name[0] = '\0';
             Multiplexer::purgeKeyboard(0);
             Multiplexer::purgeMouse(0);
-            startScan();
+            tryAutoReconnectOrScan();
             break;
 
         case HCI_EVENT_META_GAP:
             if (hci_event_gap_meta_get_subevent_code(packet) == GAP_SUBEVENT_LE_CONNECTION_COMPLETE) {
+                btstack_run_loop_remove_timer(&s_reconnect_timer);
+                s_is_connecting = false;
                 uint8_t status = gap_subevent_le_connection_complete_get_status(packet);
                 if (status != ERROR_CODE_SUCCESS) {
                     printf("[BLE Host] LE Connection failed (status 0x%02X). Resuming scan...\n", status);

@@ -170,6 +170,9 @@ static void handle_command(const char *cmd) {
         dual_printf("  Active Layer: %u\r\n", VirtualMatrix::getActiveLayer());
         dual_printf("  Scanning:     %s\r\n", BleHidHost::isScanning() ? "Active" : "Idle");
         dual_printf("  Passkey PIN:  %lu\r\n", (unsigned long)BleHidHost::getActivePasskey());
+        BleHidHost::dumpBonds();
+    } else if (strcmp(cmd, "bonds") == 0) {
+        BleHidHost::dumpBonds();
     } else if (strcmp(cmd, "reset") == 0) {
         dual_println("Clearing BLE bonds and resetting virtual matrix...");
         BleHidHost::clearBonds();
@@ -181,6 +184,7 @@ static void handle_command(const char *cmd) {
         dual_println("  pair / scan - Start 60-second BLE discovery pairing");
         dual_println("  stop        - Stop active BLE discovery scan");
         dual_println("  status      - Display connection status, layer, and uptime");
+        dual_println("  bonds       - Dump bonded peripheral database and cache");
         dual_println("  reset       - Clear all BLE bonds and reset keymap to default");
         dual_println("  help        - Show this help summary");
     } else {

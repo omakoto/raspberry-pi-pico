@@ -50,6 +50,7 @@ target_compile_options(bt-hid-multiplexer PRIVATE
 
 target_compile_definitions(bt-hid-multiplexer PRIVATE
     CYW43_LWIP=0
+    PICO_FLASH_ASSUME_CORE1_SAFE=1
 )
 
 # Link essential Pico SDK and driver libraries
