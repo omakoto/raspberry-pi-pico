@@ -40,6 +40,16 @@ static void onReconnectTimeout(btstack_timer_source_t *ts);
 static void tryAutoReconnectOrScan();
 static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name);
 
+// Timer to allow Link Layer connection anchors to stabilize before sending pairing/security requests
+static btstack_timer_source_t s_pairing_timer;
+static void onPairingDelayTimeout(btstack_timer_source_t *ts) {
+    (void)ts;
+    if (s_con_handle != HCI_CON_HANDLE_INVALID && !s_connected) {
+        printf("[BLE Host] Link Layer established. Requesting security/pairing...\n");
+        sm_request_pairing(s_con_handle);
+    }
+}
+
 // Report descriptor buffer sized to accommodate complex composite peripherals (keyboard + touchpad)
 static uint8_t s_hid_descriptor_storage[2048];
 static btstack_packet_callback_registration_t s_hci_event_callback_registration;
@@ -76,9 +86,11 @@ static bool name_matches_hid_keywords(const char *name) {
             strstr(lower, "keyboard") != NULL ||
             strstr(lower, "kbd")      != NULL ||
             strstr(lower, "keychron") != NULL ||
-            strstr(lower, "trackpad") != NULL ||
-            strstr(lower, "touchpad") != NULL ||
-            strstr(lower, "mouse")    != NULL ||
+            strstr(lower, "trackpad")  != NULL ||
+            strstr(lower, "touchpad")  != NULL ||
+            strstr(lower, "trackball") != NULL ||
+            strstr(lower, "nape")      != NULL ||
+            strstr(lower, "mouse")     != NULL ||
             strstr(lower, "xk01")     != NULL ||
             strstr(lower, "k380")     != NULL ||
             strstr(lower, "k480")     != NULL ||
@@ -355,6 +367,9 @@ void BleHidHost::init() {
     // Active continuous scanning (type 1) to fetch Scan Response packets containing HID UUIDs and names
     gap_set_scan_parameters(1, 48, 48);
 
+    // Initial connection parameters: 30ms scan window/interval, 15-30ms conn interval, 4s supervision timeout
+    gap_set_connection_parameters(48, 48, 12, 24, 0, 400, 0, 0);
+
     s_is_scanning = false;
     s_is_connecting = false;
     s_connected = false;
@@ -369,6 +384,7 @@ void BleHidHost::init() {
 
 void BleHidHost::startScan() {
     btstack_run_loop_remove_timer(&s_reconnect_timer);
+    btstack_run_loop_remove_timer(&s_pairing_timer);
     if (s_is_connecting) {
         s_is_connecting = false;
         gap_connect_cancel();
@@ -385,6 +401,7 @@ void BleHidHost::startScan() {
 
 void BleHidHost::stopScan() {
     btstack_run_loop_remove_timer(&s_reconnect_timer);
+    btstack_run_loop_remove_timer(&s_pairing_timer);
     if (!s_is_scanning) return;
     printf("[BLE Host] Stopping BLE scan.\n");
     s_is_scanning = false;
@@ -413,6 +430,7 @@ void BleHidHost::clearPasskey() {
 
 void BleHidHost::clearBonds() {
     printf("[BLE Host] Clearing all bonded devices.\n");
+    btstack_run_loop_remove_timer(&s_pairing_timer);
     s_has_bonded_device = false;
     memset(&s_bonded_device, 0, sizeof(s_bonded_device));
     s_connected_dev_name[0] = '\0';
@@ -554,19 +572,31 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             }
             printf("\n");
 
-            // Route incoming reports by report_id to prevent collision between keyboard and trackpad/mouse
-            if (report_id == 1 || (report_id == 0 && (data_len == 8 || data_len == 7))) {
-                if (data_len == 8) {
-                    // Standard Keyboard report with modifier, reserved byte, and 6 keycodes
-                    Multiplexer::handleKeyboardReport(0, data[0], &data[2], 6);
-                } else if (data_len == 7) {
-                    // Keyboard report with modifier and 6 keycodes (omitting reserved byte)
-                    Multiplexer::handleKeyboardReport(0, data[0], &data[1], 6);
-                } else {
-                    printf("[BLE Host] Unhandled keyboard report format (id %u, data_len %u)\n", report_id, data_len);
-                }
-            } else if (report_id == 2) {
-                if (data_len == 7) {
+            // Route incoming reports by length and report ID:
+            // 8-byte reports: Standard keyboard [modifier, reserved, k0..k5]
+            // 3-5 byte reports: Standard 8-bit mouse/trackpad [buttons, dx, dy, optional wheel, optional pan]
+            // 6-byte reports: 16-bit mouse displacement with wheel [buttons, dx_l, dx_h, dy_l, dy_h, wheel]
+            // 7-byte reports: ProtoArc 16-bit relative trackpad on report_id 2, or 7-byte keyboard [modifier, k0..k5]
+            if (data_len == 8) {
+                // Standard Keyboard report with modifier, reserved byte, and 6 keycodes
+                Multiplexer::handleKeyboardReport(0, data[0], &data[2], 6);
+            } else if (data_len >= 3 && data_len <= 5) {
+                // Standard 8-bit displacement: [buttons, dx, dy, optional wheel, optional pan]
+                uint8_t buttons = data[0];
+                int16_t dx = (int8_t)data[1];
+                int16_t dy = (int8_t)data[2];
+                int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
+                int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
+                Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, pan);
+            } else if (data_len == 6) {
+                // 16-bit displacement with vertical wheel: [buttons, dx_l, dx_h, dy_l, dy_h, wheel]
+                uint8_t buttons = data[0];
+                int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
+                int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
+                int8_t wheel = (int8_t)data[5];
+                Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, 0);
+            } else if (data_len == 7) {
+                if (report_id == 2) {
                     // ProtoArc 16-bit relative trackpad report: [buttons, dx_l, dx_h, dy_l, dy_h, wheel, pan]
                     uint8_t buttons = data[0];
                     int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
@@ -574,24 +604,19 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     int8_t wheel = (int8_t)data[5];
                     int8_t pan = (int8_t)data[6];
                     Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, pan);
-                } else if (data_len == 6) {
-                    // 16-bit displacement with vertical wheel: [buttons, dx_l, dx_h, dy_l, dy_h, wheel]
-                    uint8_t buttons = data[0];
-                    int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
-                    int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
-                    int8_t wheel = (int8_t)data[5];
-                    Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, 0);
-                } else if (data_len >= 3 && data_len <= 5) {
-                    // Standard 8-bit displacement: [buttons, dx, dy, optional wheel, optional pan]
-                    uint8_t buttons = data[0];
-                    int16_t dx = (int8_t)data[1];
-                    int16_t dy = (int8_t)data[2];
-                    int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
-                    int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
-                    Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, pan);
                 } else {
-                    printf("[BLE Host] Unhandled Mouse/Trackpad report format (id %u, data_len %u)\n", report_id, data_len);
+                    // Keyboard report with modifier and 6 keycodes (omitting reserved byte)
+                    Multiplexer::handleKeyboardReport(0, data[0], &data[1], 6);
                 }
+            } else if (data_len == 9) {
+                // Keychron Nape Pro 16-bit mouse/trackball with 16-bit wheel and pan:
+                // [buttons, dx_l, dx_h, dy_l, dy_h, wheel_l, wheel_h, pan_l, pan_h]
+                uint8_t buttons = data[0];
+                int16_t dx    = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
+                int16_t dy    = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
+                int16_t wheel = (int16_t)((uint16_t)data[5] | ((uint16_t)data[6] << 8));
+                int16_t pan   = (int16_t)((uint16_t)data[7] | ((uint16_t)data[8] << 8));
+                Multiplexer::handleMouseReport(0, buttons, dx, dy, (int8_t)wheel, (int8_t)pan);
             } else {
                 printf("[BLE Host] Unhandled HID Report (id %u, data_len %u)\n", report_id, data_len);
             }
@@ -608,9 +633,12 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
     (void)size;
     if (packet_type != HCI_EVENT_PACKET) return;
 
+    uint8_t sm_event = hci_event_packet_get_type(packet);
+    printf("[BLE Host] SM Event: 0x%02X\n", sm_event);
+
     bool connect_hids = false;
 
-    switch (hci_event_packet_get_type(packet)) {
+    switch (sm_event) {
         case SM_EVENT_JUST_WORKS_REQUEST:
             printf("[BLE Host] Just Works pairing requested. Confirming...\n");
             sm_just_works_confirm(sm_event_just_works_request_get_handle(packet));
@@ -628,6 +656,7 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
 
         case SM_EVENT_PAIRING_COMPLETE: {
             uint8_t status = sm_event_pairing_complete_get_status(packet);
+            uint8_t reason = sm_event_pairing_complete_get_reason(packet);
             if (status == ERROR_CODE_SUCCESS) {
                 printf("[BLE Host] Pairing complete: SUCCESS\n");
                 s_active_passkey = 0;
@@ -641,7 +670,7 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
                 s_bonded_device.name[sizeof(s_bonded_device.name) - 1] = '\0';
                 save_bonded_device(s_remote_addr, s_remote_addr_type, s_connected_dev_name);
             } else {
-                printf("[BLE Host] Pairing complete: FAILED (status 0x%02X)\n", status);
+                printf("[BLE Host] Pairing complete: FAILED (status 0x%02X, reason 0x%02X)\n", status, reason);
                 s_active_passkey = 0;
                 if (s_con_handle != HCI_CON_HANDLE_INVALID) {
                     gap_disconnect(s_con_handle);
@@ -727,9 +756,11 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             break;
         }
 
-        case HCI_EVENT_DISCONNECTION_COMPLETE:
-            printf("[BLE Host] Device disconnected. Resuming scan/reconnect...\n");
+        case HCI_EVENT_DISCONNECTION_COMPLETE: {
+            uint8_t reason = hci_event_disconnection_complete_get_reason(packet);
+            printf("[BLE Host] Device disconnected (reason 0x%02X). Resuming scan/reconnect...\n", reason);
             btstack_run_loop_remove_timer(&s_reconnect_timer);
+            btstack_run_loop_remove_timer(&s_pairing_timer);
             s_con_handle = HCI_CON_HANDLE_INVALID;
             s_connected = false;
             s_is_connecting = false;
@@ -739,6 +770,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             Multiplexer::purgeMouse(0);
             tryAutoReconnectOrScan();
             break;
+        }
 
         case HCI_EVENT_META_GAP:
             if (hci_event_gap_meta_get_subevent_code(packet) == GAP_SUBEVENT_LE_CONNECTION_COMPLETE) {
@@ -747,6 +779,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 uint8_t status = gap_subevent_le_connection_complete_get_status(packet);
                 if (status != ERROR_CODE_SUCCESS) {
                     printf("[BLE Host] LE Connection failed (status 0x%02X). Resuming scan...\n", status);
+                    btstack_run_loop_remove_timer(&s_pairing_timer);
                     s_con_handle = HCI_CON_HANDLE_INVALID;
                     s_connected = false;
                     s_active_passkey = 0;
@@ -754,8 +787,11 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     break;
                 }
                 s_con_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
-                printf("[BLE Host] LE Connection established (handle 0x%04X). Requesting security/pairing...\n", s_con_handle);
-                sm_request_pairing(s_con_handle);
+                printf("[BLE Host] LE Connection established (handle 0x%04X). Scheduling security/pairing in 200ms...\n", s_con_handle);
+                btstack_run_loop_remove_timer(&s_pairing_timer);
+                btstack_run_loop_set_timer(&s_pairing_timer, 200);
+                btstack_run_loop_set_timer_handler(&s_pairing_timer, &onPairingDelayTimeout);
+                btstack_run_loop_add_timer(&s_pairing_timer);
             }
             break;
 

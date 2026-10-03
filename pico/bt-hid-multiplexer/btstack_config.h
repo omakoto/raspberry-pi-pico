@@ -42,6 +42,7 @@
 
 // Security and cryptography
 #define ENABLE_SOFTWARE_AES128
+#define ENABLE_LE_SECURE_CONNECTIONS
 #define ENABLE_MICRO_ECC_FOR_LE_SECURE_CONNECTIONS
 
 // Hardware abstraction
