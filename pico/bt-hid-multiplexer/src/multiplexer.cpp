@@ -90,6 +90,9 @@ void Multiplexer::purgeKeyboard(uint8_t dev_idx) {
 }
 
 void Multiplexer::flushKeyboard() {
+    if (!kbd_dirty_) {
+        return;
+    }
     if (!tud_hid_n_ready(0)) {
         return;
     }
@@ -106,9 +109,8 @@ void Multiplexer::flushKeyboard() {
             uint8_t raw = keyboards_[d].keys[k];
             if (raw == 0) continue;
 
-            uint16_t mapped = 0;
-            // Lookup key through virtual matrix
-            VirtualMatrix::processKeyPress(d, raw, mapped);
+            // Query active mapped key without mutating layer switch state
+            uint16_t mapped = VirtualMatrix::getActiveTranslation(d, raw);
             if (mapped == 0 || mapped > 0xFF) continue; // Modifier/Layer action or transparent
 
             uint8_t final_kc = (uint8_t)mapped;

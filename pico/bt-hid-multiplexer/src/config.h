@@ -22,9 +22,9 @@
 #define UART_BAUDRATE           115200
 
 // Multi-device limits
-#define MAX_BLE_DEVICES         4
-#define MAX_KEYBOARDS           4
-#define MAX_MICE                4
+#define MAX_BLE_DEVICES         8
+#define MAX_KEYBOARDS           8
+#define MAX_MICE                8
 
 // Virtual Matrix configuration
 #define NUM_LAYERS              4

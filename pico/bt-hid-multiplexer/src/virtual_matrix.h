@@ -16,6 +16,9 @@ public:
     // Purge state for a disconnected device
     static void purgeDevice(uint8_t dev_idx);
 
+    // Query active translation for a currently held key without re-triggering layer actions
+    static uint16_t getActiveTranslation(uint8_t dev_idx, uint8_t raw_keycode);
+
     // VIAL/VIA keymap access
     static uint16_t getKeycode(uint8_t layer, uint8_t row, uint8_t col);
     static void setKeycode(uint8_t layer, uint8_t row, uint8_t col, uint16_t keycode);

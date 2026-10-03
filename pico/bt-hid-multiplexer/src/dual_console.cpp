@@ -165,16 +165,68 @@ static void handle_command(const char *cmd) {
         uint32_t ms = to_ms_since_boot(get_absolute_time());
         dual_printf("Status Report:\r\n");
         dual_printf("  Uptime:       %lu ms (%lu s)\r\n", ms, ms / 1000);
-        dual_printf("  BLE State:    %s\r\n", BleHidHost::isConnected() ? "Connected" : "Disconnected");
-        dual_printf("  Device:       %s\r\n", BleHidHost::getConnectedDeviceName());
+        dual_printf("  BLE Devices:  %u / %u connected\r\n", BleHidHost::getConnectedCount(), MAX_BLE_DEVICES);
+        dual_printf("  Summary:      %s\r\n", BleHidHost::getConnectedDeviceName());
         dual_printf("  Active Layer: %u\r\n", VirtualMatrix::getActiveLayer());
         dual_printf("  Scanning:     %s\r\n", BleHidHost::isScanning() ? "Active" : "Idle");
         dual_printf("  Passkey PIN:  %lu\r\n", (unsigned long)BleHidHost::getActivePasskey());
+        BleHidHost::dumpDevices();
         BleHidHost::dumpBonds();
+    } else if (strcmp(cmd, "devices") == 0) {
+        BleHidHost::dumpDevices();
     } else if (strcmp(cmd, "bonds") == 0) {
         BleHidHost::dumpBonds();
     } else if (strcmp(cmd, "desc") == 0 || strcmp(cmd, "descriptor") == 0) {
         BleHidHost::dumpDescriptor();
+    } else if (strncmp(cmd, "unbond", 6) == 0) {
+        int idx = -1;
+        if (sscanf(cmd + 6, "%d", &idx) == 1 && idx >= 0) {
+            BleHidHost::unbond((uint8_t)idx);
+        } else {
+            dual_println("Usage: unbond <index>");
+        }
+    } else if (strncmp(cmd, "disconnect", 10) == 0 || strncmp(cmd, "kick", 4) == 0) {
+        int slot = -1;
+        const char *p = (cmd[0] == 'k') ? cmd + 4 : cmd + 10;
+        if (sscanf(p, "%d", &slot) == 1 && slot >= 0) {
+            BleHidHost::disconnectSlot((uint8_t)slot);
+        } else {
+            dual_println("Usage: disconnect <slot_idx>");
+        }
+    } else if (strncmp(cmd, "notif", 5) == 0) {
+        int slot = -1;
+        if (sscanf(cmd + 5, "%d", &slot) == 1 && slot >= 0) {
+            BleHidHost::enableNotifications((uint8_t)slot);
+        } else {
+            for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+                BleHidHost::enableNotifications(i);
+            }
+        }
+    } else if (strncmp(cmd, "getreport", 9) == 0) {
+        int slot = -1, rep = 1;
+        if (sscanf(cmd + 9, "%d %d", &slot, &rep) >= 1 && slot >= 0) {
+            BleHidHost::sendGetReport((uint8_t)slot, (uint8_t)rep);
+        } else {
+            dual_println("Usage: getreport <slot_idx> [report_id]");
+        }
+    } else if (strncmp(cmd, "mode", 4) == 0) {
+        int slot = -1, m = 1;
+        if (sscanf(cmd + 4, "%d %d", &slot, &m) >= 1 && slot >= 0) {
+            BleHidHost::sendSetProtocolMode((uint8_t)slot, (uint8_t)m);
+        } else {
+            dual_println("Usage: mode <slot_idx> [0=boot, 1=report]");
+        }
+    } else if (strncmp(cmd, "suspend", 7) == 0) {
+        int slot = -1;
+        if (sscanf(cmd + 7, "%d", &slot) == 1 && slot >= 0) {
+            BleHidHost::sendExitSuspend((uint8_t)slot);
+        } else {
+            dual_println("Usage: suspend <slot_idx> (sends exit suspend)");
+        }
+    } else if (strcmp(cmd, "clearbonds") == 0) {
+        dual_println("Clearing BLE bonds...");
+        BleHidHost::clearBonds();
+        dual_println("Bonds cleared.");
     } else if (strcmp(cmd, "reset") == 0) {
         dual_println("Clearing BLE bonds and resetting virtual matrix...");
         BleHidHost::clearBonds();
@@ -182,14 +234,22 @@ static void handle_command(const char *cmd) {
         dual_println("Factory reset complete.");
     } else if (strcmp(cmd, "help") == 0) {
         dual_println("Available Commands:");
-        dual_println("  bootloader  - Reboot board directly into USB BOOTSEL ROM");
-        dual_println("  pair / scan - Start 60-second BLE discovery pairing");
-        dual_println("  stop        - Stop active BLE discovery scan");
-        dual_println("  status      - Display connection status, layer, and uptime");
-        dual_println("  bonds       - Dump bonded peripheral database and cache");
-        dual_println("  desc        - Dump stored BLE HID report descriptor");
-        dual_println("  reset       - Clear all BLE bonds and reset keymap to default");
-        dual_println("  help        - Show this help summary");
+        dual_println("  bootloader     - Reboot board directly into USB BOOTSEL ROM");
+        dual_println("  pair / scan    - Start BLE discovery pairing");
+        dual_println("  stop           - Stop active BLE discovery scan");
+        dual_println("  status         - Display connection status, layer, and uptime");
+        dual_println("  devices        - List all connected BLE devices and slot details");
+        dual_println("  bonds          - Dump bonded peripheral database and cache");
+        dual_println("  desc           - Dump stored BLE HID report descriptor");
+        dual_println("  notif [slot]   - Re-enable BLE HID notifications on slot(s)");
+        dual_println("  getreport <s>  - Request HID Input report from slot <s>");
+        dual_println("  mode <s> <m>   - Set HID protocol mode (0=boot, 1=report)");
+        dual_println("  suspend <s>    - Send HID Exit Suspend command to slot <s>");
+        dual_println("  disconnect <s> - Disconnect link on slot <s>");
+        dual_println("  unbond <idx>   - Remove bonded device index from table");
+        dual_println("  clearbonds     - Clear all BLE bonds without resetting keymap");
+        dual_println("  reset          - Factory reset (clear bonds and reset keymap)");
+        dual_println("  help           - Show this help summary");
     } else {
         dual_printf("Unknown command: '%s'. Type 'help' for command list.\r\n", cmd);
     }

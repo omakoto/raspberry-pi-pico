@@ -208,7 +208,11 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
 
     // 1. Header Banner (0..11px)
     rect(0, 0, OLED_WIDTH, 11, true, true);
-    drawString("PICO 2W MULTIPLEXER", 4, 2, false, false);
+    if (pairing_active && ble_connected) {
+        drawString("MULTIPLEXER [SCAN]", 4, 2, false, false);
+    } else {
+        drawString("PICO MULTIPLEXER", 4, 2, false, false);
+    }
 
     // 2. Status or Pairing PIN (14..44px)
     if (passkey > 0) {
@@ -218,9 +222,6 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
         drawString("PAIR KEYBOARD PIN:", 2, 14, true, false);
         drawString(pin_str, 20, 24, true, true);
         drawString("Type PIN + Enter on KB", 2, 42, true, false);
-    } else if (pairing_active) {
-        drawString("BLE SCANNING...", 4, 18, true, true);
-        drawString("Place keyboard in pair mode", 2, 38, true, false);
     } else if (ble_connected) {
         drawString("BT:", 2, 16, true, false);
         drawString(dev_name ? dev_name : "Connected", 22, 16, true, false);
@@ -235,9 +236,14 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
 
         if (toast_msg && toast_msg[0] != '\0') {
             drawString(toast_msg, 2, 40, true, false);
+        } else if (pairing_active) {
+            drawString("Scanning for dev... | USB", 2, 40, true, false);
         } else {
             drawString("USB: Active | VIAL: Ready", 2, 40, true, false);
         }
+    } else if (pairing_active) {
+        drawString("BLE SCANNING...", 4, 18, true, true);
+        drawString("Place keyboard in pair mode", 2, 38, true, false);
     } else {
         drawString("DISCONNECTED", 4, 18, true, true);
         drawString("Hold button 2s to pair", 2, 38, true, false);

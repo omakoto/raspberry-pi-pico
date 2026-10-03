@@ -9,8 +9,9 @@
 #include <stdio.h>
 #include <string.h>
 
-// TAG to store remote device address, type, and name in TLV
-#define TLV_TAG_HOGD ((((uint32_t) 'H') << 24 ) | (((uint32_t) 'O') << 16) | (((uint32_t) 'G') << 8) | 'D')
+// Storage tags for persisting bonded device metadata in flash TLV
+#define TLV_TAG_HOGD       ((((uint32_t) 'H') << 24 ) | (((uint32_t) 'O') << 16) | (((uint32_t) 'G') << 8) | 'D')
+#define TLV_TAG_HOG_TABLE  ((((uint32_t) 'H') << 24 ) | (((uint32_t) 'O') << 16) | (((uint32_t) 'G') << 8) | 'T')
 
 struct BondedDeviceRecord {
     bd_addr_t addr;
@@ -18,40 +19,43 @@ struct BondedDeviceRecord {
     char name[32];
 };
 
+struct BondedTable {
+    uint8_t count;
+    BondedDeviceRecord records[MAX_BLE_DEVICES];
+};
+
+struct BleSlot {
+    hci_con_handle_t con_handle;
+    uint16_t hids_cid;
+    bd_addr_t addr;
+    bd_addr_type_t addr_type;
+    char name[32];
+    uint8_t dev_idx;
+    bool connected;
+};
+
+static BleSlot s_slots[MAX_BLE_DEVICES];
+static BondedTable s_bonded_table;
+
 static bool s_is_scanning = false;
 static bool s_is_connecting = false;
-static bool s_connected = false;
+static int8_t s_connecting_slot_idx = -1;
 static uint32_t s_active_passkey = 0;
-static char s_connected_dev_name[32] = {0};
-
-// Cached bonded peripheral info in RAM to avoid flash reads in packet handlers
-static bool s_has_bonded_device = false;
-static BondedDeviceRecord s_bonded_device;
-
-static bd_addr_t s_remote_addr;
-static bd_addr_type_t s_remote_addr_type = BD_ADDR_TYPE_LE_PUBLIC;
-static hci_con_handle_t s_con_handle = HCI_CON_HANDLE_INVALID;
-static uint16_t s_hids_cid = 0;
+static hci_con_handle_t s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
 static hid_protocol_mode_t s_protocol_mode = HID_PROTOCOL_MODE_REPORT;
+static char s_dev_name_summary[64] = {0};
 
-// Timer and handler for targeted auto-reconnect fallback
+// Connection and discovery timers
 static btstack_timer_source_t s_reconnect_timer;
+static btstack_timer_source_t s_pairing_timer;
+
 static void onReconnectTimeout(btstack_timer_source_t *ts);
+static void onPairingDelayTimeout(btstack_timer_source_t *ts);
 static void tryAutoReconnectOrScan();
 static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name);
 
-// Timer to allow Link Layer connection anchors to stabilize before sending pairing/security requests
-static btstack_timer_source_t s_pairing_timer;
-static void onPairingDelayTimeout(btstack_timer_source_t *ts) {
-    (void)ts;
-    if (s_con_handle != HCI_CON_HANDLE_INVALID && !s_connected) {
-        printf("[BLE Host] Link Layer established. Requesting security/pairing...\n");
-        sm_request_pairing(s_con_handle);
-    }
-}
-
-// Report descriptor buffer sized to accommodate complex composite peripherals (keyboard + touchpad)
-static uint8_t s_hid_descriptor_storage[2048];
+// Storage buffer for HID Report Descriptors across all active HOGP instances
+static uint8_t s_hid_descriptor_storage[4096];
 static btstack_packet_callback_registration_t s_hci_event_callback_registration;
 static btstack_packet_callback_registration_t s_sm_event_callback_registration;
 
@@ -64,13 +68,48 @@ static const uint8_t s_profile_data[] = {
     0x00, 0x00
 };
 
+// Slot lookup helpers
+static BleSlot* find_slot_by_handle(hci_con_handle_t handle) {
+    if (handle == HCI_CON_HANDLE_INVALID) return nullptr;
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_slots[i].con_handle == handle) return &s_slots[i];
+    }
+    return nullptr;
+}
+
+static BleSlot* find_slot_by_cid(uint16_t cid) {
+    if (cid == 0) return nullptr;
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_slots[i].hids_cid == cid) return &s_slots[i];
+    }
+    return nullptr;
+}
+
+static BleSlot* find_slot_by_addr(const bd_addr_t addr) {
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if ((s_slots[i].connected || s_slots[i].con_handle != HCI_CON_HANDLE_INVALID) &&
+            bd_addr_cmp(addr, s_slots[i].addr) == 0) {
+            return &s_slots[i];
+        }
+    }
+    return nullptr;
+}
+
+static BleSlot* find_free_slot() {
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (!s_slots[i].connected && s_slots[i].con_handle == HCI_CON_HANDLE_INVALID && s_connecting_slot_idx != (int8_t)i) {
+            return &s_slots[i];
+        }
+    }
+    return nullptr;
+}
+
 struct AdvDeviceInfo {
     bool has_hid_service;
     uint16_t appearance;
     char name[32];
 };
 
-// Case-insensitive match for common keyboard, mouse, and trackpad vendor names
 static bool name_matches_hid_keywords(const char *name) {
     if (!name || name[0] == '\0') return false;
     char lower[32];
@@ -86,18 +125,17 @@ static bool name_matches_hid_keywords(const char *name) {
             strstr(lower, "keyboard") != NULL ||
             strstr(lower, "kbd")      != NULL ||
             strstr(lower, "keychron") != NULL ||
-            strstr(lower, "trackpad")  != NULL ||
-            strstr(lower, "touchpad")  != NULL ||
-            strstr(lower, "trackball") != NULL ||
-            strstr(lower, "nape")      != NULL ||
-            strstr(lower, "mouse")     != NULL ||
+            strstr(lower, "trackpad") != NULL ||
+            strstr(lower, "touchpad") != NULL ||
+            strstr(lower, "trackball")!= NULL ||
+            strstr(lower, "nape")     != NULL ||
+            strstr(lower, "mouse")    != NULL ||
             strstr(lower, "xk01")     != NULL ||
             strstr(lower, "k380")     != NULL ||
             strstr(lower, "k480")     != NULL ||
             strstr(lower, "logi")     != NULL);
 }
 
-// Parses BLE advertisement or scan response data for HID service, appearance, and name
 static void parse_adv_data(const uint8_t *ad_data, uint8_t ad_len, AdvDeviceInfo *info) {
     info->has_hid_service = false;
     info->appearance = 0;
@@ -141,17 +179,10 @@ static void parse_adv_data(const uint8_t *ad_data, uint8_t ad_len, AdvDeviceInfo
     }
 }
 
-// Evaluates whether discovered peripheral matches HID device characteristics
 static bool is_target_hid_device(const AdvDeviceInfo &info) {
-    // 1. Matches BLE HID Service UUID (0x1812)
     if (info.has_hid_service) return true;
-
-    // 2. Matches BLE Appearance for HID category (0x03C0 - 0x03CF, e.g. Keyboard 0x03C1, Mouse 0x03C2, Touchpad 0x03C9)
     if (info.appearance >= 0x03C0 && info.appearance <= 0x03CF) return true;
-
-    // 3. Matches known keyboard/mouse/trackpad names
     if (name_matches_hid_keywords(info.name)) return true;
-
     return false;
 }
 
@@ -165,8 +196,6 @@ struct SeenDevice {
 static SeenDevice s_seen_devices[64];
 static uint8_t s_seen_idx = 0;
 
-// Updates seen device records across advertisement and scan response packets,
-// and throttles discovery log messages per device address
 static bool update_and_should_log_device(const bd_addr_t addr, uint32_t now, AdvDeviceInfo *info) {
     for (uint8_t i = 0; i < 64; ++i) {
         if (bd_addr_cmp(addr, s_seen_devices[i].addr) == 0) {
@@ -205,55 +234,108 @@ static bool update_and_should_log_device(const bd_addr_t addr, uint32_t now, Adv
     return true;
 }
 
-
-// Load bonded device record from TLV storage
-static bool load_bonded_device(BondedDeviceRecord *record) {
-    const btstack_tlv_t *tlv_impl = nullptr;
-    void *tlv_context = nullptr;
-    btstack_tlv_get_instance(&tlv_impl, &tlv_context);
-    if (!tlv_impl) return false;
-
-    int len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOGD, (uint8_t *)record, sizeof(BondedDeviceRecord));
-    return (len == (int)sizeof(BondedDeviceRecord));
-}
-
-// Persist bonded device record in TLV storage
-static void save_bonded_device(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
+// Persist the full table of bonded devices to TLV storage
+static void save_bonded_devices() {
     const btstack_tlv_t *tlv_impl = nullptr;
     void *tlv_context = nullptr;
     btstack_tlv_get_instance(&tlv_impl, &tlv_context);
     if (!tlv_impl) return;
 
-    BondedDeviceRecord record;
-    bd_addr_copy(record.addr, addr);
-    record.addr_type = addr_type;
-    if (name && name[0] != '\0') {
-        strncpy(record.name, name, sizeof(record.name) - 1);
-        record.name[sizeof(record.name) - 1] = '\0';
-    } else {
-        snprintf(record.name, sizeof(record.name), "%s", bd_addr_to_str(addr));
-    }
-
-    tlv_impl->store_tag(tlv_context, TLV_TAG_HOGD, (const uint8_t *)&record, sizeof(record));
-    printf("[BLE Host] Saved bonded device to TLV: '%s' (%s, type %u)\n",
-           record.name, bd_addr_to_str(record.addr), record.addr_type);
+    tlv_impl->store_tag(tlv_context, TLV_TAG_HOG_TABLE, (const uint8_t *)&s_bonded_table, sizeof(s_bonded_table));
+    printf("[BLE Host] Persisted %u bonded device(s) to TLV table.\n", s_bonded_table.count);
 }
 
-// Remove bonded device record from TLV storage
-static void delete_bonded_device() {
+// Load bonded devices table from TLV, migrating single-device legacy entries if present
+static void load_bonded_devices() {
+    memset(&s_bonded_table, 0, sizeof(s_bonded_table));
+
     const btstack_tlv_t *tlv_impl = nullptr;
     void *tlv_context = nullptr;
     btstack_tlv_get_instance(&tlv_impl, &tlv_context);
-    if (tlv_impl) {
-        tlv_impl->delete_tag(tlv_context, TLV_TAG_HOGD);
-        printf("[BLE Host] Removed bonded device record from TLV.\n");
+    if (!tlv_impl) return;
+
+    int len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOG_TABLE, (uint8_t *)&s_bonded_table, sizeof(s_bonded_table));
+    if (len == (int)sizeof(s_bonded_table) && s_bonded_table.count <= MAX_BLE_DEVICES) {
+        printf("[BLE Host] Loaded %u bonded device(s) from TLV table.\n", s_bonded_table.count);
+    } else {
+        // Fall back to legacy single-device TLV tag if present
+        BondedDeviceRecord legacy_record;
+        len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOGD, (uint8_t *)&legacy_record, sizeof(legacy_record));
+        if (len == (int)sizeof(legacy_record)) {
+            s_bonded_table.count = 1;
+            memcpy(&s_bonded_table.records[0], &legacy_record, sizeof(legacy_record));
+            save_bonded_devices();
+            printf("[BLE Host] Migrated legacy bonded device '%s' (%s) to table.\n",
+                   legacy_record.name, bd_addr_to_str(legacy_record.addr));
+        }
+    }
+
+    // Inspect le_device_db to discover any keys present without a metadata record
+    for (int i = 0; i < le_device_db_max_count(); i++) {
+        int addr_type = 0;
+        bd_addr_t db_addr;
+        le_device_db_info(i, &addr_type, db_addr, nullptr);
+        if (addr_type != BD_ADDR_TYPE_UNKNOWN) {
+            bool exists = false;
+            for (uint8_t r = 0; r < s_bonded_table.count; r++) {
+                if (bd_addr_cmp(db_addr, s_bonded_table.records[r].addr) == 0) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists && s_bonded_table.count < MAX_BLE_DEVICES) {
+                uint8_t idx = s_bonded_table.count++;
+                bd_addr_copy(s_bonded_table.records[idx].addr, db_addr);
+                s_bonded_table.records[idx].addr_type = (bd_addr_type_t)addr_type;
+                snprintf(s_bonded_table.records[idx].name, sizeof(s_bonded_table.records[idx].name),
+                         "%s", bd_addr_to_str(db_addr));
+                save_bonded_devices();
+                printf("[BLE Host] Added database peripheral '%s' to bonded table.\n",
+                       s_bonded_table.records[idx].name);
+            }
+        }
     }
 }
 
-// Check whether a device address matches a known bonded device in RAM cache or le_device_db
+// Add or update an entry in the bonded devices table
+static void add_or_update_bonded_device(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
+    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
+        if (bd_addr_cmp(addr, s_bonded_table.records[i].addr) == 0) {
+            s_bonded_table.records[i].addr_type = addr_type;
+            if (name && name[0] != '\0') {
+                snprintf(s_bonded_table.records[i].name, sizeof(s_bonded_table.records[i].name), "%s", name);
+            }
+            save_bonded_devices();
+            return;
+        }
+    }
+
+    uint8_t target_idx = 0;
+    if (s_bonded_table.count < MAX_BLE_DEVICES) {
+        target_idx = s_bonded_table.count++;
+    } else {
+        target_idx = 0; // Overwrite oldest slot if capacity reached
+    }
+
+    bd_addr_copy(s_bonded_table.records[target_idx].addr, addr);
+    s_bonded_table.records[target_idx].addr_type = addr_type;
+    if (name && name[0] != '\0') {
+        snprintf(s_bonded_table.records[target_idx].name, sizeof(s_bonded_table.records[target_idx].name), "%s", name);
+    } else {
+        snprintf(s_bonded_table.records[target_idx].name, sizeof(s_bonded_table.records[target_idx].name),
+                 "%s", bd_addr_to_str(addr));
+    }
+
+    save_bonded_devices();
+    printf("[BLE Host] Saved bonded device [%u]: '%s' (%s)\n",
+           target_idx, s_bonded_table.records[target_idx].name, bd_addr_to_str(addr));
+}
+
 static bool is_bonded_device_addr(const bd_addr_t addr) {
-    if (s_has_bonded_device && bd_addr_cmp(addr, s_bonded_device.addr) == 0) {
-        return true;
+    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
+        if (bd_addr_cmp(addr, s_bonded_table.records[i].addr) == 0) {
+            return true;
+        }
     }
     for (int i = 0; i < le_device_db_max_count(); i++) {
         int addr_type = 0;
@@ -270,78 +352,69 @@ static bool is_bonded_device_addr(const bd_addr_t addr) {
 static void onReconnectTimeout(btstack_timer_source_t *ts) {
     (void)ts;
     if (s_is_connecting) {
-        printf("[BLE Host] Connection attempt timed out. Resuming discovery scan...\n");
-        s_is_connecting = false;
-        s_connected_dev_name[0] = '\0';
+        printf("[BLE Host] Connection attempt timed out. Cancelling...\n");
+        // Instruct BTstack controller to cancel the pending LE connection.
+        // The controller will emit GAP_SUBEVENT_LE_CONNECTION_COMPLETE with an error status,
+        // which cleanly clears the connecting slot and safely resumes scanning without HCI race conditions.
         gap_connect_cancel();
-        BleHidHost::startScan();
+    }
+}
+
+// Delay timer to let link layer connection anchors stabilize before initiating SMP security
+static void onPairingDelayTimeout(btstack_timer_source_t *ts) {
+    (void)ts;
+    if (s_pending_pairing_handle != HCI_CON_HANDLE_INVALID) {
+        printf("[BLE Host] Requesting security/pairing for handle 0x%04X...\n", s_pending_pairing_handle);
+        sm_request_pairing(s_pending_pairing_handle);
+        s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
     }
 }
 
 // Centralized connection routine with 10-second timeout
 static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
-    if (s_is_connecting || s_connected) return;
+    if (s_is_connecting) return;
+    if (find_slot_by_addr(addr) != nullptr) return;
 
-    btstack_run_loop_remove_timer(&s_reconnect_timer);
-    gap_stop_scan();
-    s_is_scanning = false;
-    s_is_connecting = true;
-
-    bd_addr_copy(s_remote_addr, addr);
-    s_remote_addr_type = addr_type;
-    if (name && name[0] != '\0') {
-        strncpy(s_connected_dev_name, name, sizeof(s_connected_dev_name) - 1);
-        s_connected_dev_name[sizeof(s_connected_dev_name) - 1] = '\0';
-    } else {
-        snprintf(s_connected_dev_name, sizeof(s_connected_dev_name), "%s", bd_addr_to_str(addr));
+    BleSlot *slot = find_free_slot();
+    if (!slot) {
+        printf("[BLE Host] Max connection limit reached (%d devices). Cannot connect new peripheral.\n", MAX_BLE_DEVICES);
+        return;
     }
 
-    printf("[BLE Host] Connecting to '%s' (%s, type %u)...\n",
-           s_connected_dev_name, bd_addr_to_str(s_remote_addr), (unsigned)s_remote_addr_type);
+    slot->con_handle = HCI_CON_HANDLE_INVALID;
+    slot->hids_cid = 0;
+    slot->connected = false;
+    bd_addr_copy(slot->addr, addr);
+    slot->addr_type = addr_type;
+    if (name && name[0] != '\0') {
+        snprintf(slot->name, sizeof(slot->name), "%s", name);
+    } else {
+        snprintf(slot->name, sizeof(slot->name), "%s", bd_addr_to_str(addr));
+    }
 
-    // Set 10-second timeout for outgoing connection
+    s_connecting_slot_idx = slot->dev_idx;
+    s_is_connecting = true;
+
+    // Temporarily halt scanning while controller initiates connection
+    gap_stop_scan();
+    s_is_scanning = false;
+
+    printf("[BLE Host] Connecting to '%s' (%s, type %u) in slot %u...\n",
+           slot->name, bd_addr_to_str(slot->addr), (unsigned)slot->addr_type, slot->dev_idx);
+
     btstack_run_loop_set_timer(&s_reconnect_timer, 10000);
     btstack_run_loop_set_timer_handler(&s_reconnect_timer, &onReconnectTimeout);
     btstack_run_loop_add_timer(&s_reconnect_timer);
 
-    gap_connect(s_remote_addr, s_remote_addr_type);
+    gap_connect(slot->addr, slot->addr_type);
 }
 
-// Start continuous scanning for bonded peripheral reconnection or new HID devices
 static void tryAutoReconnectOrScan() {
-    btstack_run_loop_remove_timer(&s_reconnect_timer);
-
-    if (s_has_bonded_device) {
-        printf("[BLE Host] Bonded peripheral stored: '%s' (%s). Scanning for reconnection...\n",
-               s_bonded_device.name, bd_addr_to_str(s_bonded_device.addr));
-    } else {
-        printf("[BLE Host] No bonded device stored. Starting discovery scan...\n");
-    }
-    BleHidHost::startScan();
-}
-
-static void load_bonded_device_cache() {
-    s_has_bonded_device = load_bonded_device(&s_bonded_device);
-    if (!s_has_bonded_device) {
-        // Fall back to le_device_db if TLV tag not yet written
-        for (int i = 0; i < le_device_db_max_count(); i++) {
-            int addr_type = 0;
-            bd_addr_t addr;
-            le_device_db_info(i, &addr_type, addr, nullptr);
-            if (addr_type != BD_ADDR_TYPE_UNKNOWN) {
-                s_has_bonded_device = true;
-                bd_addr_copy(s_bonded_device.addr, addr);
-                s_bonded_device.addr_type = (bd_addr_type_t)addr_type;
-                snprintf(s_bonded_device.name, sizeof(s_bonded_device.name), "%s", bd_addr_to_str(addr));
-                break;
-            }
-        }
-    }
-    if (s_has_bonded_device) {
-        printf("[BLE Host] Loaded bonded device: '%s' (%s, type %u)\n",
-               s_bonded_device.name, bd_addr_to_str(s_bonded_device.addr), (unsigned)s_bonded_device.addr_type);
-    } else {
-        printf("[BLE Host] No bonded device stored.\n");
+    uint8_t conn_count = BleHidHost::getConnectedCount();
+    printf("[BLE Host] %u / %u devices connected, %u bonded device(s) stored.\n",
+           conn_count, MAX_BLE_DEVICES, s_bonded_table.count);
+    if (conn_count < MAX_BLE_DEVICES) {
+        BleHidHost::startScan();
     }
 }
 
@@ -364,44 +437,49 @@ void BleHidHost::init() {
     s_sm_event_callback_registration.callback = &smPacketHandler;
     sm_add_event_handler(&s_sm_event_callback_registration);
 
-    // Active continuous scanning (type 1) to fetch Scan Response packets containing HID UUIDs and names
-    gap_set_scan_parameters(1, 48, 48);
+    // Background scanning: 100ms interval (160), 20ms window (32) for 20% duty cycle
+    // to preserve radio bandwidth for active concurrent BLE HID connections.
+    gap_set_scan_parameters(1, 160, 32);
 
     // Initial connection parameters: 30ms scan window/interval, 15-30ms conn interval, 4s supervision timeout
     gap_set_connection_parameters(48, 48, 12, 24, 0, 400, 0, 0);
 
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        s_slots[i].con_handle = HCI_CON_HANDLE_INVALID;
+        s_slots[i].hids_cid = 0;
+        memset(s_slots[i].addr, 0, sizeof(bd_addr_t));
+        s_slots[i].addr_type = BD_ADDR_TYPE_LE_PUBLIC;
+        s_slots[i].name[0] = '\0';
+        s_slots[i].dev_idx = i;
+        s_slots[i].connected = false;
+    }
+
     s_is_scanning = false;
     s_is_connecting = false;
-    s_connected = false;
+    s_connecting_slot_idx = -1;
     s_active_passkey = 0;
-    s_con_handle = HCI_CON_HANDLE_INVALID;
-    s_connected_dev_name[0] = '\0';
+    s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
 
-    load_bonded_device_cache();
+    load_bonded_devices();
 
     hci_power_control(HCI_POWER_ON);
 }
 
 void BleHidHost::startScan() {
-    btstack_run_loop_remove_timer(&s_reconnect_timer);
-    btstack_run_loop_remove_timer(&s_pairing_timer);
     if (s_is_connecting) {
-        s_is_connecting = false;
+        printf("[BLE Host] Aborting pending connection to start scan...\n");
         gap_connect_cancel();
+        return; // GAP_SUBEVENT_LE_CONNECTION_COMPLETE will complete cleanup and restart scanning
     }
     if (s_is_scanning) return;
     printf("[BLE Host] Starting scan for BLE HID peripherals...\n");
     s_is_scanning = true;
     s_active_passkey = 0;
-    // Operate in Report Protocol Mode to ensure report characteristic discovery and CCCD notification subscription
     s_protocol_mode = HID_PROTOCOL_MODE_REPORT;
-    memset(s_seen_devices, 0, sizeof(s_seen_devices));
     gap_start_scan();
 }
 
 void BleHidHost::stopScan() {
-    btstack_run_loop_remove_timer(&s_reconnect_timer);
-    btstack_run_loop_remove_timer(&s_pairing_timer);
     if (!s_is_scanning) return;
     printf("[BLE Host] Stopping BLE scan.\n");
     s_is_scanning = false;
@@ -413,11 +491,53 @@ bool BleHidHost::isScanning() {
 }
 
 bool BleHidHost::isConnected() {
-    return s_connected;
+    return (getConnectedCount() > 0);
+}
+
+uint8_t BleHidHost::getConnectedCount() {
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_slots[i].connected) count++;
+    }
+    return count;
+}
+
+uint8_t BleHidHost::getBondedCount() {
+    return s_bonded_table.count;
+}
+
+bool BleHidHost::hasUnconnectedBonds() {
+    for (uint8_t b = 0; b < s_bonded_table.count; b++) {
+        bool connected = false;
+        for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+            if (s_slots[i].connected && bd_addr_cmp(s_slots[i].addr, s_bonded_table.records[b].addr) == 0) {
+                connected = true;
+                break;
+            }
+        }
+        if (!connected) return true;
+    }
+    return false;
 }
 
 const char* BleHidHost::getConnectedDeviceName() {
-    return (s_connected && s_connected_dev_name[0] != '\0') ? s_connected_dev_name : "None";
+    uint8_t count = getConnectedCount();
+    if (count == 0) return "None";
+    if (count == 1) {
+        for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+            if (s_slots[i].connected) return s_slots[i].name;
+        }
+    }
+
+    snprintf(s_dev_name_summary, sizeof(s_dev_name_summary), "%u Devs Connected", count);
+    return s_dev_name_summary;
+}
+
+const char* BleHidHost::getConnectedDeviceName(uint8_t slot_idx) {
+    if (slot_idx < MAX_BLE_DEVICES && s_slots[slot_idx].connected) {
+        return s_slots[slot_idx].name;
+    }
+    return "None";
 }
 
 uint32_t BleHidHost::getActivePasskey() {
@@ -429,24 +549,60 @@ void BleHidHost::clearPasskey() {
 }
 
 void BleHidHost::clearBonds() {
-    printf("[BLE Host] Clearing all bonded devices.\n");
+    printf("[BLE Host] Clearing all bonded devices and disconnecting active links.\n");
     btstack_run_loop_remove_timer(&s_pairing_timer);
-    s_has_bonded_device = false;
-    memset(&s_bonded_device, 0, sizeof(s_bonded_device));
-    s_connected_dev_name[0] = '\0';
-    delete_bonded_device();
+    btstack_run_loop_remove_timer(&s_reconnect_timer);
+
+    memset(&s_bonded_table, 0, sizeof(s_bonded_table));
+
+    const btstack_tlv_t *tlv_impl = nullptr;
+    void *tlv_context = nullptr;
+    btstack_tlv_get_instance(&tlv_impl, &tlv_context);
+    if (tlv_impl) {
+        tlv_impl->delete_tag(tlv_context, TLV_TAG_HOG_TABLE);
+        tlv_impl->delete_tag(tlv_context, TLV_TAG_HOGD);
+    }
+
     for (int i = 0; i < le_device_db_max_count(); i++) {
         le_device_db_remove(i);
     }
-    if (s_con_handle != HCI_CON_HANDLE_INVALID) {
-        gap_disconnect(s_con_handle);
+
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_slots[i].con_handle != HCI_CON_HANDLE_INVALID) {
+            gap_disconnect(s_slots[i].con_handle);
+        }
+        Multiplexer::purgeKeyboard(s_slots[i].dev_idx);
+        Multiplexer::purgeMouse(s_slots[i].dev_idx);
+        memset(&s_slots[i], 0, sizeof(BleSlot));
+        s_slots[i].dev_idx = i;
+        s_slots[i].con_handle = HCI_CON_HANDLE_INVALID;
+    }
+
+    s_is_connecting = false;
+    s_connecting_slot_idx = -1;
+    s_active_passkey = 0;
+
+    startScan();
+}
+
+void BleHidHost::dumpDevices() {
+    printf("[BLE Host] Connected Devices (%u / %u):\n", getConnectedCount(), MAX_BLE_DEVICES);
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_slots[i].connected) {
+            printf("  Slot %u: '%s' (%s, handle 0x%04X, cid 0x%04X)\n",
+                   i, s_slots[i].name, bd_addr_to_str(s_slots[i].addr),
+                   s_slots[i].con_handle, s_slots[i].hids_cid);
+        }
     }
 }
 
 void BleHidHost::dumpBonds() {
-    printf("[BLE Host] Bonded cache: %s\n", s_has_bonded_device ? s_bonded_device.name : "None");
-    if (s_has_bonded_device) {
-        printf("  Address: %s (type %u)\n", bd_addr_to_str(s_bonded_device.addr), (unsigned)s_bonded_device.addr_type);
+    printf("[BLE Host] Bonded Devices Table (%u stored):\n", s_bonded_table.count);
+    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
+        printf("  [%u] '%s' (%s, type %u)\n",
+               i, s_bonded_table.records[i].name,
+               bd_addr_to_str(s_bonded_table.records[i].addr),
+               (unsigned)s_bonded_table.records[i].addr_type);
     }
     printf("[BLE Host] le_device_db (max %d):\n", le_device_db_max_count());
     int valid = 0;
@@ -460,31 +616,116 @@ void BleHidHost::dumpBonds() {
         }
     }
     if (valid == 0) {
-        printf("  (no bonded devices in le_device_db)\n");
+        printf("  (no bonded keys in le_device_db)\n");
     }
 }
 
 void BleHidHost::sendHostLeds(uint8_t leds) {
-    if (s_connected && s_hids_cid != 0) {
-        // Send Output Report containing keyboard LED status
-        uint8_t led_report = leds;
-        hids_client_send_write_report(s_hids_cid, 0, HID_REPORT_TYPE_OUTPUT, &led_report, 1);
+    uint8_t led_report = leds;
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_slots[i].connected && s_slots[i].hids_cid != 0) {
+            hids_client_send_write_report(s_slots[i].hids_cid, 0, HID_REPORT_TYPE_OUTPUT, &led_report, 1);
+        }
     }
 }
 
 void BleHidHost::dumpDescriptor() {
-    if (!s_connected || s_hids_cid == 0) {
-        printf("[BLE Host] No active HIDS connection to dump descriptor.\n");
+    uint8_t count = getConnectedCount();
+    if (count == 0) {
+        printf("[BLE Host] No active HIDS connections to dump descriptor.\n");
         return;
     }
-    const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(s_hids_cid, 0);
-    uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(s_hids_cid, 0);
-    printf("[BLE Host] Stored HID Report Descriptor (len %u):\n", desc_len);
-    if (desc && desc_len > 0) {
-        printf_hexdump(desc, desc_len);
-    } else {
-        printf("[BLE Host] No HID descriptor available in storage\n");
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_slots[i].connected && s_slots[i].hids_cid != 0) {
+            const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(s_slots[i].hids_cid, 0);
+            uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(s_slots[i].hids_cid, 0);
+            printf("[BLE Host] Slot %u '%s' HID Report Descriptor (len %u):\n", i, s_slots[i].name, desc_len);
+            if (desc && desc_len > 0) {
+                printf_hexdump(desc, desc_len);
+            }
+        }
     }
+}
+
+void BleHidHost::sendExitSuspend(uint8_t slot_idx) {
+    if (slot_idx >= MAX_BLE_DEVICES || !s_slots[slot_idx].connected || s_slots[slot_idx].hids_cid == 0) {
+        printf("[BLE Host] Slot %u not connected or no HIDS CID.\n", slot_idx);
+        return;
+    }
+    uint8_t status = hids_client_send_exit_suspend(s_slots[slot_idx].hids_cid, 0);
+    printf("[BLE Host] Slot %u: send_exit_suspend status 0x%02X\n", slot_idx, status);
+}
+
+void BleHidHost::sendSetProtocolMode(uint8_t slot_idx, uint8_t mode) {
+    if (slot_idx >= MAX_BLE_DEVICES || !s_slots[slot_idx].connected || s_slots[slot_idx].hids_cid == 0) {
+        printf("[BLE Host] Slot %u not connected or no HIDS CID.\n", slot_idx);
+        return;
+    }
+    uint8_t status = hids_client_send_set_protocol_mode(s_slots[slot_idx].hids_cid, 0, (hid_protocol_mode_t)mode);
+    printf("[BLE Host] Slot %u: send_set_protocol_mode(%u) status 0x%02X\n", slot_idx, mode, status);
+}
+
+void BleHidHost::sendGetReport(uint8_t slot_idx, uint8_t report_id) {
+    if (slot_idx >= MAX_BLE_DEVICES || !s_slots[slot_idx].connected || s_slots[slot_idx].hids_cid == 0) {
+        printf("[BLE Host] Slot %u not connected or no HIDS CID.\n", slot_idx);
+        return;
+    }
+    uint8_t status = hids_client_send_get_report(s_slots[slot_idx].hids_cid, report_id, HID_REPORT_TYPE_INPUT);
+    printf("[BLE Host] Slot %u: send_get_report(id %u) status 0x%02X\n", slot_idx, report_id, status);
+}
+
+void BleHidHost::enableNotifications(uint8_t slot_idx) {
+    if (slot_idx >= MAX_BLE_DEVICES || !s_slots[slot_idx].connected || s_slots[slot_idx].hids_cid == 0) {
+        printf("[BLE Host] Slot %u not connected or no HIDS CID.\n", slot_idx);
+        return;
+    }
+    uint8_t status = hids_client_enable_notifications(s_slots[slot_idx].hids_cid);
+    printf("[BLE Host] Slot %u: enable_notifications status 0x%02X\n", slot_idx, status);
+}
+
+void BleHidHost::disconnectSlot(uint8_t slot_idx) {
+    if (slot_idx >= MAX_BLE_DEVICES || s_slots[slot_idx].con_handle == HCI_CON_HANDLE_INVALID) {
+        printf("[BLE Host] Slot %u has no active connection.\n", slot_idx);
+        return;
+    }
+    printf("[BLE Host] Disconnecting slot %u (handle 0x%04X)...\n", slot_idx, s_slots[slot_idx].con_handle);
+    gap_disconnect(s_slots[slot_idx].con_handle);
+}
+
+void BleHidHost::unbond(uint8_t idx) {
+    if (idx >= s_bonded_table.count) {
+        printf("[BLE Host] Invalid bond index %u (stored: %u)\n", idx, s_bonded_table.count);
+        return;
+    }
+    bd_addr_t target_addr;
+    bd_addr_copy(target_addr, s_bonded_table.records[idx].addr);
+    char name[32];
+    strncpy(name, s_bonded_table.records[idx].name, sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+
+    BleSlot *slot = find_slot_by_addr(target_addr);
+    if (slot && slot->con_handle != HCI_CON_HANDLE_INVALID) {
+        gap_disconnect(slot->con_handle);
+    }
+
+    for (int i = 0; i < le_device_db_max_count(); i++) {
+        int db_type = 0;
+        bd_addr_t db_addr;
+        le_device_db_info(i, &db_type, db_addr, nullptr);
+        if (db_type != BD_ADDR_TYPE_UNKNOWN && bd_addr_cmp(target_addr, db_addr) == 0) {
+            le_device_db_remove(i);
+            printf("[BLE Host] Removed bond from le_device_db slot %d (%s)\n", i, bd_addr_to_str(target_addr));
+            break;
+        }
+    }
+
+    for (uint8_t i = idx; i < s_bonded_table.count - 1; i++) {
+        s_bonded_table.records[i] = s_bonded_table.records[i + 1];
+    }
+    s_bonded_table.count--;
+    save_bonded_devices();
+    printf("[BLE Host] Unbonded [%u] '%s' (%s). %u bonded device(s) remaining.\n",
+           idx, name, bd_addr_to_str(target_addr), s_bonded_table.count);
 }
 
 void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
@@ -496,73 +737,99 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
     uint8_t subevent = hci_event_gattservice_meta_get_subevent_code(packet);
     switch (subevent) {
         case GATTSERVICE_SUBEVENT_HID_SERVICE_CONNECTED: {
+            uint16_t cid = gattservice_subevent_hid_service_connected_get_hids_cid(packet);
             uint8_t status = gattservice_subevent_hid_service_connected_get_status(packet);
+            BleSlot *slot = find_slot_by_cid(cid);
+
             if (status == ERROR_CODE_SUCCESS) {
                 uint8_t mode = gattservice_subevent_hid_service_connected_get_protocol_mode(packet);
                 uint8_t instances = gattservice_subevent_hid_service_connected_get_num_instances(packet);
-                printf("[BLE Host] HID Service Connected successfully! (mode: %u, instances: %u)\n", mode, instances);
-                s_connected = true;
-                s_active_passkey = 0;
+                printf("[BLE Host] HID Service Connected successfully! (slot %u, cid 0x%04X, mode: %u, instances: %u)\n",
+                       slot ? slot->dev_idx : 0xFF, cid, mode, instances);
 
-                // Update bonded device in RAM cache and persist to TLV
-                s_has_bonded_device = true;
-                bd_addr_copy(s_bonded_device.addr, s_remote_addr);
-                s_bonded_device.addr_type = s_remote_addr_type;
-                strncpy(s_bonded_device.name, s_connected_dev_name, sizeof(s_bonded_device.name) - 1);
-                s_bonded_device.name[sizeof(s_bonded_device.name) - 1] = '\0';
-                save_bonded_device(s_remote_addr, s_remote_addr_type, s_connected_dev_name);
+                if (slot) {
+                    slot->connected = true;
+                    s_active_passkey = 0;
 
-                // Dump raw HID Report Descriptor to inspect report IDs and features
-                const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(s_hids_cid, 0);
-                uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(s_hids_cid, 0);
-                printf("[BLE Host] HID Report Descriptor (len %u):\n", desc_len);
-                if (desc && desc_len > 0) {
-                    printf_hexdump(desc, desc_len);
-                } else {
-                    printf("[BLE Host] No HID descriptor available\n");
+                    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
+
+                    const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(slot->hids_cid, 0);
+                    uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(slot->hids_cid, 0);
+                    printf("[BLE Host] HID Report Descriptor for '%s' (len %u):\n", slot->name, desc_len);
+                    if (desc && desc_len > 0) {
+                        printf_hexdump(desc, desc_len);
+                    }
+
+                    uint8_t notif_res = hids_client_enable_notifications(slot->hids_cid);
+                    printf("[BLE Host] Initial enable_notifications(cid 0x%04X) status: 0x%02X\n", slot->hids_cid, notif_res);
+
+                    // Allow peripherals to use their preferred connection parameters (via L2CAP PPCP)
+                    // rather than forcing low latency with zero slave latency, preventing connection drops on battery-powered keyboards.
+                    if (BleHidHost::hasUnconnectedBonds() && BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
+                        BleHidHost::startScan();
+                    }
                 }
-
-                // Explicitly ensure report notifications are enabled across all discovered input reports
-                hids_client_enable_notifications(s_hids_cid);
-
-                // Request lowest latency BLE connection interval (6 * 1.25ms = 7.5ms = 133.3 Hz)
-                printf("[BLE Host] Requesting low-latency connection interval (7.5ms - 10ms)...\n");
-                gap_update_connection_parameters(s_con_handle, 6, 8, 0, 400);
             } else {
-                printf("[BLE Host] HID Service connection failed, status: 0x%02X\n", status);
-                if (s_protocol_mode == HID_PROTOCOL_MODE_BOOT && s_con_handle != HCI_CON_HANDLE_INVALID) {
-                    printf("[BLE Host] Retrying HIDS connection in Report Mode...\n");
-                    s_protocol_mode = HID_PROTOCOL_MODE_REPORT;
-                    hids_client_connect(s_con_handle, &gattPacketHandler, s_protocol_mode, &s_hids_cid);
-                    return;
+                printf("[BLE Host] HID Service connection failed for cid 0x%04X, status: 0x%02X\n", cid, status);
+                if (slot) {
+                    slot->connected = false;
+                    if (slot->con_handle != HCI_CON_HANDLE_INVALID) {
+                        gap_disconnect(slot->con_handle);
+                    }
                 }
-                s_connected = false;
-                if (s_con_handle != HCI_CON_HANDLE_INVALID) {
-                    gap_disconnect(s_con_handle);
+                if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
+                    BleHidHost::startScan();
                 }
             }
             break;
         }
 
-        case GATTSERVICE_SUBEVENT_HID_SERVICE_REPORTS_NOTIFICATION:
-            printf("[BLE Host] HID Reports notification configuration active.\n");
+        case GATTSERVICE_SUBEVENT_HID_SERVICE_REPORTS_NOTIFICATION: {
+            uint16_t cid = gattservice_subevent_hid_service_reports_notification_get_hids_cid(packet);
+            BleSlot *slot = find_slot_by_cid(cid);
+            printf("[BLE Host] HID Reports notification configuration active (slot %u, cid 0x%04X).\n",
+                   slot ? slot->dev_idx : 0xFF, cid);
+            if (slot && slot->hids_cid != 0) {
+                // Ensure peripheral exits any suspend mode upon active notifications
+                uint8_t susp_status = hids_client_send_exit_suspend(slot->hids_cid, 0);
+                printf("[BLE Host] Exit Suspend sent for slot %u: status 0x%02X\n", slot->dev_idx, susp_status);
+            }
             break;
+        }
 
-        case GATTSERVICE_SUBEVENT_HID_SERVICE_DISCONNECTED:
-            printf("[BLE Host] HID Service Disconnected.\n");
-            s_connected = false;
-            Multiplexer::purgeKeyboard(0);
-            Multiplexer::purgeMouse(0);
+        case GATTSERVICE_SUBEVENT_HID_SERVICE_DISCONNECTED: {
+            uint16_t cid = gattservice_subevent_hid_service_disconnected_get_hids_cid(packet);
+            BleSlot *slot = find_slot_by_cid(cid);
+            printf("[BLE Host] HID Service Disconnected (cid 0x%04X, slot %u).\n", cid, slot ? slot->dev_idx : 0xFF);
+            if (slot) {
+                slot->connected = false;
+                slot->hids_cid = 0;
+                Multiplexer::purgeKeyboard(slot->dev_idx);
+                Multiplexer::purgeMouse(slot->dev_idx);
+            }
+            if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
+                BleHidHost::startScan();
+            }
             break;
+        }
 
         case GATTSERVICE_SUBEVENT_HID_REPORT: {
+            uint16_t cid = gattservice_subevent_hid_report_get_hids_cid(packet);
+            BleSlot *slot = find_slot_by_cid(cid);
+            if (!slot) {
+                printf("[BLE Host] REPORT on unknown cid 0x%04X\n", cid);
+                break;
+            }
+            if (!slot->connected) {
+                printf("[BLE Host] REPORT on disconnected slot %u (cid 0x%04X)\n", slot->dev_idx, cid);
+                break;
+            }
+
             const uint8_t *report = gattservice_subevent_hid_report_get_report(packet);
             uint16_t len = gattservice_subevent_hid_report_get_report_len(packet);
             uint8_t report_id = gattservice_subevent_hid_report_get_report_id(packet);
             if (!report || len == 0) break;
 
-            // BTstack prepends report_id at index 0 when delivering report notifications.
-            // When report_id matches, payload begins at index 1 with length len - 1.
             const uint8_t *data = report;
             uint16_t data_len = len;
             if (len > 1 && report[0] == report_id) {
@@ -570,53 +837,76 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 data_len = len - 1;
             }
 
-            // Route incoming reports by length and report ID:
-            // 8-byte reports: Standard keyboard [modifier, reserved, k0..k5]
-            // 3-5 byte reports: Standard 8-bit mouse/trackpad [buttons, dx, dy, optional wheel, optional pan]
-            // 6-byte reports: 16-bit mouse displacement with wheel [buttons, dx_l, dx_h, dy_l, dy_h, wheel]
-            // 7-byte reports: ProtoArc 16-bit relative trackpad on report_id 2, or 7-byte keyboard [modifier, k0..k5]
-            if (data_len == 8) {
-                // Standard Keyboard report with modifier, reserved byte, and 6 keycodes
-                Multiplexer::handleKeyboardReport(0, data[0], &data[2], 6);
-            } else if (data_len >= 3 && data_len <= 5) {
-                // Standard 8-bit displacement: [buttons, dx, dy, optional wheel, optional pan]
-                uint8_t buttons = data[0];
-                int16_t dx = (int8_t)data[1];
-                int16_t dy = (int8_t)data[2];
-                int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
-                int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
-                Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, pan);
-            } else if (data_len == 6) {
-                // 16-bit displacement with vertical wheel: [buttons, dx_l, dx_h, dy_l, dy_h, wheel]
-                uint8_t buttons = data[0];
-                int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
-                int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
-                int8_t wheel = (int8_t)data[5];
-                Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, 0);
-            } else if (data_len == 7) {
-                if (report_id == 2) {
-                    // ProtoArc 16-bit relative trackpad report: [buttons, dx_l, dx_h, dy_l, dy_h, wheel, pan]
+            uint8_t dev_idx = slot->dev_idx;
+
+            // Log non-Nape mouse reports or any reports on slot != 0
+            if (dev_idx != 0 || report_id != 3) {
+                printf("[BLE Host] REPORT slot %u ('%s'): id=%u len=%u [", dev_idx, slot->name, report_id, data_len);
+                for (uint16_t i = 0; i < data_len && i < 8; i++) {
+                    printf(" %02X", data[i]);
+                }
+                printf(" ]\n");
+            }
+
+            if (report_id == 1 || (report_id == 0 && (data_len == 8 || data_len == 7))) {
+                if (data_len == 8) {
+                    Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[2], 6);
+                } else if (data_len == 7) {
+                    Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[1], 6);
+                }
+                if (data[0] != 0 || (data_len >= 3 && data[2] != 0)) {
+                    printf("[BLE Host] Key press on slot %u ('%s'): mod=0x%02X key=0x%02X\n",
+                           dev_idx, slot->name, data[0], (data_len == 8 ? data[2] : data[1]));
+                }
+            } else if (report_id == 2) {
+                if (data_len == 9) {
+                    // Keychron Nape Pro 16-bit mouse/trackball with 16-bit wheel and pan
+                    uint8_t buttons = data[0];
+                    int16_t dx    = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
+                    int16_t dy    = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
+                    int16_t wheel = (int16_t)((uint16_t)data[5] | ((uint16_t)data[6] << 8));
+                    int16_t pan   = (int16_t)((uint16_t)data[7] | ((uint16_t)data[8] << 8));
+                    Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, (int8_t)wheel, (int8_t)pan);
+                } else if (data_len == 7) {
+                    // ProtoArc 16-bit relative trackpad: [buttons, dx_l, dx_h, dy_l, dy_h, wheel, pan]
                     uint8_t buttons = data[0];
                     int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
                     int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
                     int8_t wheel = (int8_t)data[5];
                     int8_t pan = (int8_t)data[6];
-                    Multiplexer::handleMouseReport(0, buttons, dx, dy, wheel, pan);
-                } else {
-                    // Keyboard report with modifier and 6 keycodes (omitting reserved byte)
-                    Multiplexer::handleKeyboardReport(0, data[0], &data[1], 6);
+                    Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, pan);
+                } else if (data_len == 6) {
+                    uint8_t buttons = data[0];
+                    int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
+                    int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
+                    int8_t wheel = (int8_t)data[5];
+                    Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, 0);
+                } else if (data_len >= 3 && data_len <= 5) {
+                    uint8_t buttons = data[0];
+                    int16_t dx = (int8_t)data[1];
+                    int16_t dy = (int8_t)data[2];
+                    int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
+                    int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
+                    Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, pan);
                 }
             } else if (data_len == 9) {
-                // Keychron Nape Pro 16-bit mouse/trackball with 16-bit wheel and pan:
-                // [buttons, dx_l, dx_h, dy_l, dy_h, wheel_l, wheel_h, pan_l, pan_h]
                 uint8_t buttons = data[0];
                 int16_t dx    = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
                 int16_t dy    = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
                 int16_t wheel = (int16_t)((uint16_t)data[5] | ((uint16_t)data[6] << 8));
                 int16_t pan   = (int16_t)((uint16_t)data[7] | ((uint16_t)data[8] << 8));
-                Multiplexer::handleMouseReport(0, buttons, dx, dy, (int8_t)wheel, (int8_t)pan);
+                Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, (int8_t)wheel, (int8_t)pan);
+            } else if (data_len == 8) {
+                Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[2], 6);
+            } else if (data_len >= 3 && data_len <= 5) {
+                uint8_t buttons = data[0];
+                int16_t dx = (int8_t)data[1];
+                int16_t dy = (int8_t)data[2];
+                int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
+                int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
+                Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, pan);
             } else {
-                printf("[BLE Host] Unhandled HID Report (id %u, data_len %u)\n", report_id, data_len);
+                printf("[BLE Host] Unhandled HID Report for slot %u (id %u, data_len %u)\n", dev_idx, report_id, data_len);
             }
             break;
         }
@@ -634,18 +924,22 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
     uint8_t sm_event = hci_event_packet_get_type(packet);
     printf("[BLE Host] SM Event: 0x%02X\n", sm_event);
 
-    bool connect_hids = false;
+    hci_con_handle_t connect_hids_handle = HCI_CON_HANDLE_INVALID;
 
     switch (sm_event) {
-        case SM_EVENT_JUST_WORKS_REQUEST:
-            printf("[BLE Host] Just Works pairing requested. Confirming...\n");
-            sm_just_works_confirm(sm_event_just_works_request_get_handle(packet));
+        case SM_EVENT_JUST_WORKS_REQUEST: {
+            hci_con_handle_t h = sm_event_just_works_request_get_handle(packet);
+            printf("[BLE Host] Just Works pairing requested for handle 0x%04X. Confirming...\n", h);
+            sm_just_works_confirm(h);
             break;
+        }
 
-        case SM_EVENT_NUMERIC_COMPARISON_REQUEST:
-            printf("[BLE Host] Numeric comparison confirmed.\n");
-            sm_numeric_comparison_confirm(sm_event_numeric_comparison_request_get_handle(packet));
+        case SM_EVENT_NUMERIC_COMPARISON_REQUEST: {
+            hci_con_handle_t h = sm_event_numeric_comparison_request_get_handle(packet);
+            printf("[BLE Host] Numeric comparison confirmed for handle 0x%04X.\n", h);
+            sm_numeric_comparison_confirm(h);
             break;
+        }
 
         case SM_EVENT_PASSKEY_DISPLAY_NUMBER:
             s_active_passkey = sm_event_passkey_display_number_get_passkey(packet);
@@ -653,38 +947,54 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
             break;
 
         case SM_EVENT_PAIRING_COMPLETE: {
+            hci_con_handle_t h = sm_event_pairing_complete_get_handle(packet);
             uint8_t status = sm_event_pairing_complete_get_status(packet);
             uint8_t reason = sm_event_pairing_complete_get_reason(packet);
-            if (status == ERROR_CODE_SUCCESS) {
-                printf("[BLE Host] Pairing complete: SUCCESS\n");
-                s_active_passkey = 0;
-                connect_hids = true;
+            s_active_passkey = 0;
 
-                // Cache and persist bonded device immediately on pairing completion
-                s_has_bonded_device = true;
-                bd_addr_copy(s_bonded_device.addr, s_remote_addr);
-                s_bonded_device.addr_type = s_remote_addr_type;
-                strncpy(s_bonded_device.name, s_connected_dev_name, sizeof(s_bonded_device.name) - 1);
-                s_bonded_device.name[sizeof(s_bonded_device.name) - 1] = '\0';
-                save_bonded_device(s_remote_addr, s_remote_addr_type, s_connected_dev_name);
+            BleSlot *slot = find_slot_by_handle(h);
+            if (status == ERROR_CODE_SUCCESS) {
+                printf("[BLE Host] Pairing complete for handle 0x%04X: SUCCESS\n", h);
+                if (slot) {
+                    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
+                }
+                connect_hids_handle = h;
             } else {
-                printf("[BLE Host] Pairing complete: FAILED (status 0x%02X, reason 0x%02X)\n", status, reason);
-                s_active_passkey = 0;
-                if (s_con_handle != HCI_CON_HANDLE_INVALID) {
-                    gap_disconnect(s_con_handle);
+                printf("[BLE Host] Pairing complete for handle 0x%04X: FAILED (status 0x%02X, reason 0x%02X)\n", h, status, reason);
+                if (slot) {
+                    gap_disconnect(h);
+                }
+                if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
+                    BleHidHost::startScan();
                 }
             }
             break;
         }
 
         case SM_EVENT_REENCRYPTION_COMPLETE: {
+            hci_con_handle_t h = sm_event_reencryption_complete_get_handle(packet);
             uint8_t status = sm_event_reencryption_complete_get_status(packet);
             if (status == ERROR_CODE_SUCCESS) {
-                printf("[BLE Host] Re-encryption complete: SUCCESS\n");
-                connect_hids = true;
+                printf("[BLE Host] Re-encryption complete for handle 0x%04X: SUCCESS\n", h);
+                connect_hids_handle = h;
             } else {
-                printf("[BLE Host] Re-encryption failed (status 0x%02X). Requesting fresh pairing...\n", status);
-                sm_request_pairing(s_con_handle);
+                printf("[BLE Host] Re-encryption failed for handle 0x%04X (status 0x%02X). Requesting fresh pairing...\n", h, status);
+                // Invalidate any stale LTK key in le_device_db for this address so the peripheral
+                // can perform a clean fresh SMP pairing exchange without key collision.
+                BleSlot *slot = find_slot_by_handle(h);
+                if (slot) {
+                    for (int i = 0; i < le_device_db_max_count(); i++) {
+                        int db_type = 0;
+                        bd_addr_t db_addr;
+                        le_device_db_info(i, &db_type, db_addr, nullptr);
+                        if (db_type != BD_ADDR_TYPE_UNKNOWN && bd_addr_cmp(slot->addr, db_addr) == 0) {
+                            printf("[BLE Host] Purged stale bond key from le_device_db slot %d (%s)\n", i, bd_addr_to_str(db_addr));
+                            le_device_db_remove(i);
+                            break;
+                        }
+                    }
+                }
+                sm_request_pairing(h);
             }
             break;
         }
@@ -693,11 +1003,15 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
             break;
     }
 
-    if (connect_hids && s_con_handle != HCI_CON_HANDLE_INVALID) {
-        printf("[BLE Host] Connecting HIDS client (mode %u)...\n", s_protocol_mode);
-        uint8_t status = hids_client_connect(s_con_handle, &gattPacketHandler, s_protocol_mode, &s_hids_cid);
-        if (status != ERROR_CODE_SUCCESS) {
-            printf("[BLE Host] hids_client_connect failed with status 0x%02X\n", status);
+    if (connect_hids_handle != HCI_CON_HANDLE_INVALID) {
+        BleSlot *slot = find_slot_by_handle(connect_hids_handle);
+        if (slot) {
+            printf("[BLE Host] Connecting HIDS client for '%s' (slot %u, handle 0x%04X, mode %u)...\n",
+                   slot->name, slot->dev_idx, slot->con_handle, s_protocol_mode);
+            uint8_t status = hids_client_connect(slot->con_handle, &gattPacketHandler, s_protocol_mode, &slot->hids_cid);
+            if (status != ERROR_CODE_SUCCESS) {
+                printf("[BLE Host] hids_client_connect failed with status 0x%02X\n", status);
+            }
         }
     }
 }
@@ -718,9 +1032,13 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
 
         case GAP_EVENT_ADVERTISING_REPORT: {
             if (!s_is_scanning) break;
+            if (s_is_connecting) break;
+            if (find_free_slot() == nullptr) break;
 
             bd_addr_t addr;
             gap_event_advertising_report_get_address(packet, addr);
+            if (find_slot_by_addr(addr) != nullptr) break;
+
             uint8_t addr_type = gap_event_advertising_report_get_address_type(packet);
             const uint8_t *ad_data = gap_event_advertising_report_get_data(packet);
             uint8_t ad_len = gap_event_advertising_report_get_data_length(packet);
@@ -731,7 +1049,8 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
 
             uint32_t now = to_ms_since_boot(get_absolute_time());
             bool should_log = update_and_should_log_device(addr, now, &info);
-            if (should_log) {
+            bool is_bonded = is_bonded_device_addr(addr);
+            if (should_log && (is_bonded || is_target_hid_device(info) || info.name[0] != '\0')) {
                 if (info.name[0] != '\0') {
                     printf("[BLE Host] Adv: '%s' (%s, RSSI %d dBm, HID=%d, App=0x%04X)\n",
                            info.name, bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance);
@@ -740,11 +1059,17 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                            bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance);
                 }
             }
-
-            bool is_bonded = is_bonded_device_addr(addr);
             if (is_bonded || is_target_hid_device(info)) {
-                const char *dev_name = (info.name[0] != '\0') ? info.name :
-                                       (is_bonded ? s_bonded_device.name : "");
+                const char *dev_name = (info.name[0] != '\0') ? info.name : "";
+                if (dev_name[0] == '\0' && is_bonded) {
+                    for (uint8_t b = 0; b < s_bonded_table.count; b++) {
+                        if (bd_addr_cmp(addr, s_bonded_table.records[b].addr) == 0) {
+                            dev_name = s_bonded_table.records[b].name;
+                            break;
+                        }
+                    }
+                }
+
                 printf("[BLE Host] %s found: '%s' (%s)\n",
                        is_bonded ? "Bonded device" : "Target HID device",
                        dev_name[0] != '\0' ? dev_name : bd_addr_to_str(addr),
@@ -755,17 +1080,25 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
         }
 
         case HCI_EVENT_DISCONNECTION_COMPLETE: {
+            hci_con_handle_t handle = hci_event_disconnection_complete_get_connection_handle(packet);
             uint8_t reason = hci_event_disconnection_complete_get_reason(packet);
-            printf("[BLE Host] Device disconnected (reason 0x%02X). Resuming scan/reconnect...\n", reason);
-            btstack_run_loop_remove_timer(&s_reconnect_timer);
-            btstack_run_loop_remove_timer(&s_pairing_timer);
-            s_con_handle = HCI_CON_HANDLE_INVALID;
-            s_connected = false;
-            s_is_connecting = false;
-            s_active_passkey = 0;
-            s_connected_dev_name[0] = '\0';
-            Multiplexer::purgeKeyboard(0);
-            Multiplexer::purgeMouse(0);
+            BleSlot *slot = find_slot_by_handle(handle);
+            printf("[BLE Host] Device disconnected on handle 0x%04X (reason 0x%02X, slot %u).\n",
+                   handle, reason, slot ? slot->dev_idx : 0xFF);
+
+            if (slot) {
+                Multiplexer::purgeKeyboard(slot->dev_idx);
+                Multiplexer::purgeMouse(slot->dev_idx);
+                memset(slot, 0, sizeof(BleSlot));
+                slot->dev_idx = (uint8_t)(slot - s_slots);
+                slot->con_handle = HCI_CON_HANDLE_INVALID;
+            }
+
+            if (s_pending_pairing_handle == handle) {
+                s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
+                btstack_run_loop_remove_timer(&s_pairing_timer);
+            }
+
             tryAutoReconnectOrScan();
             break;
         }
@@ -774,24 +1107,58 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             uint8_t subevent = hci_event_gap_meta_get_subevent_code(packet);
             if (subevent == GAP_SUBEVENT_LE_CONNECTION_COMPLETE) {
                 btstack_run_loop_remove_timer(&s_reconnect_timer);
-                s_is_connecting = false;
                 uint8_t status = gap_subevent_le_connection_complete_get_status(packet);
+                hci_con_handle_t handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
+
                 if (status != ERROR_CODE_SUCCESS) {
                     printf("[BLE Host] LE Connection failed (status 0x%02X). Resuming scan...\n", status);
-                    btstack_run_loop_remove_timer(&s_pairing_timer);
-                    s_con_handle = HCI_CON_HANDLE_INVALID;
-                    s_connected = false;
-                    s_active_passkey = 0;
-                    startScan();
+                    if (s_connecting_slot_idx >= 0 && s_connecting_slot_idx < MAX_BLE_DEVICES) {
+                        memset(&s_slots[s_connecting_slot_idx], 0, sizeof(BleSlot));
+                        s_slots[s_connecting_slot_idx].dev_idx = s_connecting_slot_idx;
+                        s_slots[s_connecting_slot_idx].con_handle = HCI_CON_HANDLE_INVALID;
+                    }
+                    s_is_connecting = false;
+                    s_connecting_slot_idx = -1;
+                    s_is_scanning = false;
+                    if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
+                        BleHidHost::startScan();
+                    }
                     break;
                 }
-                s_con_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
-                printf("[BLE Host] LE Connection established (handle 0x%04X). Scheduling security/pairing in 200ms...\n", s_con_handle);
-                btstack_run_loop_remove_timer(&s_pairing_timer);
-                btstack_run_loop_set_timer(&s_pairing_timer, 200);
-                btstack_run_loop_set_timer_handler(&s_pairing_timer, &onPairingDelayTimeout);
-                btstack_run_loop_add_timer(&s_pairing_timer);
-            } else if (subevent == HCI_SUBEVENT_LE_CONNECTION_UPDATE_COMPLETE) {
+
+                BleSlot *slot = nullptr;
+                if (s_connecting_slot_idx >= 0 && s_connecting_slot_idx < MAX_BLE_DEVICES) {
+                    slot = &s_slots[s_connecting_slot_idx];
+                } else {
+                    bd_addr_t peer_addr;
+                    gap_subevent_le_connection_complete_get_peer_address(packet, peer_addr);
+                    slot = find_slot_by_addr(peer_addr);
+                }
+
+                if (!slot) {
+                    slot = find_free_slot();
+                }
+
+                s_is_connecting = false;
+                s_connecting_slot_idx = -1;
+
+                if (slot) {
+                    slot->con_handle = handle;
+                    printf("[BLE Host] LE Connection established for '%s' (slot %u, handle 0x%04X). Scheduling security in 200ms...\n",
+                           slot->name, slot->dev_idx, handle);
+                    s_pending_pairing_handle = handle;
+                    btstack_run_loop_remove_timer(&s_pairing_timer);
+                    btstack_run_loop_set_timer(&s_pairing_timer, 200);
+                    btstack_run_loop_set_timer_handler(&s_pairing_timer, &onPairingDelayTimeout);
+                    btstack_run_loop_add_timer(&s_pairing_timer);
+                }
+            }
+            break;
+        }
+
+        case HCI_EVENT_LE_META: {
+            uint8_t subevent = hci_event_le_meta_get_subevent_code(packet);
+            if (subevent == HCI_SUBEVENT_LE_CONNECTION_UPDATE_COMPLETE) {
                 uint16_t interval = hci_subevent_le_connection_update_complete_get_conn_interval(packet);
                 uint16_t latency = hci_subevent_le_connection_update_complete_get_conn_latency(packet);
                 uint16_t timeout = hci_subevent_le_connection_update_complete_get_supervision_timeout(packet);

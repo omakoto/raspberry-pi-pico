@@ -50,11 +50,13 @@ bool VirtualMatrix::processKeyPress(uint8_t dev_idx, uint8_t raw_keycode, uint16
     uint8_t col = raw_keycode % MATRIX_COLS;
     uint8_t active_l = computeActiveLayer();
 
-    uint16_t action = keymap_[active_l][row][col];
-
-    // Fall back to Layer 0 if transparent (0x0000)
-    if (action == 0x0000 && active_l != 0) {
-        action = keymap_[0][row][col];
+    uint16_t action = 0;
+    if (row < MATRIX_ROWS && col < MATRIX_COLS) {
+        action = keymap_[active_l][row][col];
+        // Fall back to Layer 0 if transparent (0x0000)
+        if (action == 0x0000 && active_l != 0) {
+            action = keymap_[0][row][col];
+        }
     }
     if (action == 0x0000) {
         action = raw_keycode;
@@ -110,6 +112,12 @@ bool VirtualMatrix::processKeyRelease(uint8_t dev_idx, uint8_t raw_keycode, uint
 
     out_keycode = (original_action != 0) ? original_action : raw_keycode;
     return true;
+}
+
+uint16_t VirtualMatrix::getActiveTranslation(uint8_t dev_idx, uint8_t raw_keycode) {
+    if (dev_idx >= MAX_KEYBOARDS) return raw_keycode;
+    uint16_t action = active_translation_[dev_idx][raw_keycode];
+    return (action != 0) ? action : raw_keycode;
 }
 
 void VirtualMatrix::purgeDevice(uint8_t dev_idx) {
