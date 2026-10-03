@@ -1011,7 +1011,9 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 } else if (data_len == 7) {
                     Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[1], 6);
                 }
-                if (data[0] != 0 || (data_len >= 3 && data[2] != 0)) {
+                // Per-keystroke print is diagnostic only ('reports on'): it blocks the BTstack
+                // context on the UART for several ms and adds that directly to key latency.
+                if (s_log_reports && (data[0] != 0 || (data_len >= 3 && data[2] != 0))) {
                     printf("[BLE Host] Key press on slot %u ('%s'): mod=0x%02X key=0x%02X\n",
                            dev_idx, slot->name, data[0], (data_len == 8 ? data[2] : data[1]));
                 }
@@ -1235,7 +1237,13 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             uint32_t now = to_ms_since_boot(get_absolute_time());
             bool should_log = update_and_should_log_device(addr, now, &info);
             bool is_bonded = is_bonded_device_addr(addr);
-            if (should_log && (is_bonded || is_target_hid_device(info) || info.name[0] != '\0')) {
+            // Background scanning runs whenever a bonded device is absent, so in a busy RF
+            // environment this fires for dozens of devices every few seconds. Printing each one
+            // stalls the BTstack context on the UART and shows up as input latency, so unrelated
+            // named devices are only listed in verbose mode ('log on'); HID candidates and bonded
+            // devices are always announced.
+            bool is_candidate = is_bonded || is_target_hid_device(info);
+            if (should_log && (is_candidate || (s_stack_logging && info.name[0] != '\0'))) {
                 if (info.name[0] != '\0') {
                     printf("[BLE Host] Adv: '%s' (%s, RSSI %d dBm, HID=%d, App=0x%04X)\n",
                            info.name, bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance);
