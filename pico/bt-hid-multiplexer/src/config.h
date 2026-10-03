@@ -45,10 +45,13 @@
 #define FLASH_KEYMAP_OFFSET     (PICO_FLASH_SIZE_BYTES - (64 * 1024))
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 
-// After a peripheral has negotiated its own LL connection parameters, re-request the same
-// interval with slave latency 0 (once per connection). HID peripherals ask for latency ~30 to
-// save battery, which lets them skip up to 30 connection events; with 0 they answer at every
-// event, which measurably lowers input latency at the cost of higher peripheral power draw.
+// After a peripheral has negotiated its own LL connection parameters and left them alone for a
+// while, re-request the same interval with slave latency 0 (see ZERO_LATENCY_DELAY_MS and
+// MAX_ZERO_LATENCY_ATTEMPTS in ble_hid_host.cpp).
+// HID peripherals ask for latency ~30 to save battery, which lets them skip up to 30 connection
+// events; with 0 they answer at every event, which measurably lowers input latency at the cost
+// of higher peripheral power draw. Only verified with the Keychron Nape Pro and ProtoArc XK01;
+// set to 0 if another device re-negotiates endlessly or drops the link after the update.
 #define BLE_ZERO_SLAVE_LATENCY      1
 
 // Whether verbose diagnostics (BTstack's internal log_info lines and advertising reports of

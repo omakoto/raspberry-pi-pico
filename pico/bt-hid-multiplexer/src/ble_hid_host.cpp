@@ -35,8 +35,16 @@ struct BleSlot {
     bool connected;
     uint16_t conn_interval; // last reported LL connection interval, 1.25 ms units (0 = unknown)
     uint16_t conn_latency;  // last reported slave latency
-    bool latency_forced;    // slave latency 0 already requested for this connection
+    uint8_t latency_forced; // how often slave latency 0 was requested on this connection
+    btstack_timer_source_t latency_timer; // delays the latency-0 request past the peer's settling window
 };
+
+// Peripherals defend their preferred parameters for a while after connecting: the ProtoArc XK01
+// immediately re-requests latency 32 whenever the parameters change in the first seconds, but
+// accepts latency 0 once the link has settled. So the request is made this long after the
+// peripheral's last parameter update, and at most a few times per connection before giving up.
+#define ZERO_LATENCY_DELAY_MS     10000
+#define MAX_ZERO_LATENCY_ATTEMPTS 3
 
 static BleSlot s_slots[MAX_BLE_DEVICES];
 static BondedTable s_bonded_table;
@@ -385,6 +393,38 @@ static void onPairingDelayTimeout(btstack_timer_source_t *ts) {
     }
 }
 
+#if BLE_ZERO_SLAVE_LATENCY
+static void onZeroLatencyTimeout(btstack_timer_source_t *ts) {
+    BleSlot *slot = (BleSlot *)btstack_run_loop_get_timer_context(ts);
+    if (!slot || slot->con_handle == HCI_CON_HANDLE_INVALID || slot->conn_latency == 0) return;
+    if (slot->latency_forced >= MAX_ZERO_LATENCY_ATTEMPTS) {
+        printf("[BLE Host] Slot %u keeps requesting slave latency %u; leaving it alone.\n",
+               slot->dev_idx, slot->conn_latency);
+        return;
+    }
+    slot->latency_forced++;
+    BleHidHost::updateConnectionParams(slot->dev_idx, slot->conn_interval, 0);
+}
+
+static void scheduleZeroLatency(BleSlot *slot) {
+    btstack_run_loop_remove_timer(&slot->latency_timer);
+    btstack_run_loop_set_timer_context(&slot->latency_timer, slot);
+    btstack_run_loop_set_timer_handler(&slot->latency_timer, &onZeroLatencyTimeout);
+    btstack_run_loop_set_timer(&slot->latency_timer, ZERO_LATENCY_DELAY_MS);
+    btstack_run_loop_add_timer(&slot->latency_timer);
+}
+#endif
+
+// Forget everything about a slot. The latency timer must leave the run loop before the struct
+// is zeroed, or the run loop keeps a dangling list entry.
+static void reset_slot(BleSlot *slot) {
+    btstack_run_loop_remove_timer(&slot->latency_timer);
+    uint8_t idx = (uint8_t)(slot - s_slots);
+    memset(slot, 0, sizeof(BleSlot));
+    slot->dev_idx = idx;
+    slot->con_handle = HCI_CON_HANDLE_INVALID;
+}
+
 // Centralized connection routine with 10-second timeout
 static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
     if (s_is_connecting) return;
@@ -698,9 +738,7 @@ void BleHidHost::clearBonds() {
         }
         Multiplexer::purgeKeyboard(s_slots[i].dev_idx);
         Multiplexer::purgeMouse(s_slots[i].dev_idx);
-        memset(&s_slots[i], 0, sizeof(BleSlot));
-        s_slots[i].dev_idx = i;
-        s_slots[i].con_handle = HCI_CON_HANDLE_INVALID;
+        reset_slot(&s_slots[i]);
     }
 
     s_is_connecting = false;
@@ -1305,9 +1343,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             if (slot) {
                 Multiplexer::purgeKeyboard(slot->dev_idx);
                 Multiplexer::purgeMouse(slot->dev_idx);
-                memset(slot, 0, sizeof(BleSlot));
-                slot->dev_idx = (uint8_t)(slot - s_slots);
-                slot->con_handle = HCI_CON_HANDLE_INVALID;
+                reset_slot(slot);
             }
 
             if (s_pending_pairing_handle == handle) {
@@ -1329,9 +1365,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 if (status != ERROR_CODE_SUCCESS) {
                     printf("[BLE Host] LE Connection failed (status 0x%02X). Resuming scan...\n", status);
                     if (s_connecting_slot_idx >= 0 && s_connecting_slot_idx < MAX_BLE_DEVICES) {
-                        memset(&s_slots[s_connecting_slot_idx], 0, sizeof(BleSlot));
-                        s_slots[s_connecting_slot_idx].dev_idx = s_connecting_slot_idx;
-                        s_slots[s_connecting_slot_idx].con_handle = HCI_CON_HANDLE_INVALID;
+                        reset_slot(&s_slots[s_connecting_slot_idx]);
                     }
                     s_is_connecting = false;
                     s_connecting_slot_idx = -1;
@@ -1398,11 +1432,10 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 printf("[BLE Host] Connection parameters updated (slot %u): interval %.2f ms, latency %u, timeout %u ms\n",
                        slot ? slot->dev_idx : 0xFF, interval * 1.25f, latency, timeout * 10);
 #if BLE_ZERO_SLAVE_LATENCY
-                // Keep the peripheral's preferred interval but drop its slave latency, once per
-                // connection so a peripheral that insists on re-requesting latency is honored.
-                if (slot && latency > 0 && !slot->latency_forced) {
-                    slot->latency_forced = true;
-                    BleHidHost::updateConnectionParams(slot->dev_idx, interval, 0);
+                // Keep the peripheral's preferred interval but drop its slave latency once it
+                // has stopped changing parameters itself.
+                if (slot && latency > 0) {
+                    scheduleZeroLatency(slot);
                 }
 #endif
             }
