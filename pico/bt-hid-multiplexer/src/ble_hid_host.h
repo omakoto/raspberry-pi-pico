@@ -31,6 +31,15 @@ public:
     static void sendSetProtocolMode(uint8_t slot_idx, uint8_t mode);
     static void sendGetReport(uint8_t slot_idx, uint8_t report_id);
     static void enableNotifications(uint8_t slot_idx);
+    static void requestProtocolMode(uint8_t slot_idx);
+
+    // Pairing policy (applies to new pairings only) and BTstack internal logging
+    static void setAuthReq(bool mitm, bool secure_connections);
+    static void dumpAuthReq();
+    static void setStackLogging(bool enable);
+    static bool isStackLogging();
+    static void setHciPacketLogging(bool enable);
+    static void setReportLogging(bool enable);
 
     // Callbacks for BTstack run loop
     static void packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);

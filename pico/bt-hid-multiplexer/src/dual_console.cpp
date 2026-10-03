@@ -216,6 +216,71 @@ static void handle_command(const char *cmd) {
         } else {
             dual_println("Usage: mode <slot_idx> [0=boot, 1=report]");
         }
+    } else if (strncmp(cmd, "getmode", 7) == 0) {
+        int slot = -1;
+        if (sscanf(cmd + 7, "%d", &slot) == 1 && slot >= 0) {
+            BleHidHost::requestProtocolMode((uint8_t)slot);
+        } else {
+            dual_println("Usage: getmode <slot_idx> (reads HID Protocol Mode)");
+        }
+    } else if (strncmp(cmd, "reports", 7) == 0) {
+        const char *arg = cmd + 7;
+        while (*arg == ' ') arg++;
+        if (strcmp(arg, "on") == 0 || strcmp(arg, "1") == 0) {
+            BleHidHost::setReportLogging(true);
+        } else if (strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0) {
+            BleHidHost::setReportLogging(false);
+        } else {
+            dual_println("Usage: reports on|off  (dump every incoming HID report)");
+        }
+    } else if (strncmp(cmd, "hcilog", 6) == 0) {
+        const char *arg = cmd + 6;
+        while (*arg == ' ') arg++;
+        if (strcmp(arg, "on") == 0 || strcmp(arg, "1") == 0) {
+            BleHidHost::setHciPacketLogging(true);
+        } else if (strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0) {
+            BleHidHost::setHciPacketLogging(false);
+        } else {
+            dual_println("Usage: hcilog on|off  (raw ACL/ATT packet dump; run 'stop' first)");
+        }
+    } else if (strncmp(cmd, "log", 3) == 0 && (cmd[3] == '\0' || cmd[3] == ' ')) {
+        const char *arg = cmd + 3;
+        while (*arg == ' ') arg++;
+        if (strcmp(arg, "on") == 0 || strcmp(arg, "1") == 0) {
+            BleHidHost::setStackLogging(true);
+        } else if (strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0) {
+            BleHidHost::setStackLogging(false);
+        } else {
+            dual_printf("BTstack log_info output is %s. Usage: log on|off\r\n",
+                        BleHidHost::isStackLogging() ? "on" : "off");
+        }
+    } else if (strncmp(cmd, "authreq", 7) == 0) {
+        // Pairing policy for new pairings: any combination of 'legacy'/'sc' and 'mitm'/'nomitm'.
+        // No arguments just prints the current policy.
+        const char *arg = cmd + 7;
+        bool has_args = false;
+        bool mitm = false;
+        bool sc = false;
+        bool ok = true;
+        while (*arg) {
+            while (*arg == ' ') arg++;
+            if (*arg == '\0') break;
+            has_args = true;
+            if (strncmp(arg, "legacy", 6) == 0)      { sc = false; arg += 6; }
+            else if (strncmp(arg, "nomitm", 6) == 0) { mitm = false; arg += 6; }
+            else if (strncmp(arg, "mitm", 4) == 0)   { mitm = true; arg += 4; }
+            else if (strncmp(arg, "sc", 2) == 0)     { sc = true; arg += 2; }
+            else { ok = false; break; }
+        }
+        if (!ok) {
+            dual_println("Usage: authreq [legacy|sc] [mitm|nomitm]   (no args: show current policy)");
+            dual_println("  e.g. 'authreq legacy nomitm' (default), 'authreq sc', 'authreq legacy mitm'");
+            dual_println("  Takes effect for new pairings only: 'unbond <idx>' the device, then re-pair it.");
+        } else if (has_args) {
+            BleHidHost::setAuthReq(mitm, sc);
+        } else {
+            BleHidHost::dumpAuthReq();
+        }
     } else if (strncmp(cmd, "suspend", 7) == 0) {
         int slot = -1;
         if (sscanf(cmd + 7, "%d", &slot) == 1 && slot >= 0) {
@@ -244,7 +309,12 @@ static void handle_command(const char *cmd) {
         dual_println("  notif [slot]   - Re-enable BLE HID notifications on slot(s)");
         dual_println("  getreport <s>  - Request HID Input report from slot <s>");
         dual_println("  mode <s> <m>   - Set HID protocol mode (0=boot, 1=report)");
+        dual_println("  getmode <s>    - Read HID Protocol Mode from slot <s>");
         dual_println("  suspend <s>    - Send HID Exit Suspend command to slot <s>");
+        dual_println("  authreq [..]   - Show/set pairing policy: [legacy|sc] [mitm|nomitm]");
+        dual_println("  log on|off     - Toggle BTstack internal log_info output");
+        dual_println("  hcilog on|off  - Toggle raw HCI ACL/ATT packet dump (stop scan first)");
+        dual_println("  reports on|off - Toggle dump of every incoming HID report");
         dual_println("  disconnect <s> - Disconnect link on slot <s>");
         dual_println("  unbond <idx>   - Remove bonded device index from table");
         dual_println("  clearbonds     - Clear all BLE bonds without resetting keymap");

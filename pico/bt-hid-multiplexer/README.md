@@ -81,9 +81,21 @@ Commands supported on either console:
 - `stop`: Halts BLE scanning
 - `status`: Displays uptime, connection state, device name, and active layer
 - `bonds`: Dumps bonded peripheral database and cache
-- `desc` / `descriptor`: Dumps stored BLE HID report descriptor
+- `devices`: Lists connected slots with connection handles and HIDS CIDs
+- `desc` / `descriptor`: Dumps stored BLE HID report descriptors
+- `notif [slot]`, `getreport <slot> [id]`, `getmode <slot>`, `mode <slot> <0|1>`, `suspend <slot>`: HID-over-GATT diagnostics (re-enable notifications, read an input report and its CCCD, read/write Protocol Mode, send Exit Suspend)
+- `authreq [legacy|sc] [mitm|nomitm]`: Shows or sets the pairing policy used for *new* pairings (default `legacy nomitm`, see below)
+- `log on|off`: Toggles BTstack's internal `log_info` output (SM pairing method, GATT security errors, HIDS discovery trace)
+- `hcilog on|off`, `reports on|off`: Raw ATT packet dump (ACL only) and per-report dump of every incoming HID report, both off by default because console output blocks the BTstack context
+- `disconnect <slot>`, `unbond <idx>`, `clearbonds`: Drop a link, forget one bond, or forget all bonds
 - `reset`: Clears all bonded devices and resets keymap to default
 - `help`: Lists all console commands
+
+### CCCD discovery: Read By Type (`ENABLE_GATT_LEGACY_CCC_DISCOVERY`)
+BTstack's default Find-Information walk for locating a report's Client Characteristic Configuration Descriptor loses the CCCD write when a peripheral returns one descriptor per response (small ATT MTU, e.g. the ProtoArc XK01 at MTU 23): every notification enable then ends in a 30 s GATT timeout and only reports whose CCCD the device restored from its own bond ever arrive. `btstack_config.h` therefore selects the Read-By-Type lookup. If a device connects but some of its reports stay silent, check `log on` output for `GATT client timeout` and `hcilog on` for missing ATT Write Requests (`12 <handle> 01 00`).
+
+### Pairing policy: LE legacy pairing by default
+The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Request by default. LE Secure Connections is compiled in but opt-in (`authreq sc`), because the ProtoArc XK01 keyboard pairs and encrypts fine over Secure Connections yet never sends a single HID input notification afterwards, while it works with legacy pairing. A keyboard that insists on MITM still gets passkey entry (the PIN shows on the OLED), and `authreq legacy mitm` forces it. The policy only affects new pairings: `unbond <idx>` a device and re-pair it to apply a new policy.
 
 ---
 

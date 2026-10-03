@@ -45,6 +45,10 @@
 #define FLASH_KEYMAP_OFFSET     (PICO_FLASH_SIZE_BYTES - (64 * 1024))
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 
+// Whether BTstack's internal log_info/log_error lines (SM pairing method, GATT security
+// errors, HIDS discovery) are printed on the console from boot. Toggle at runtime with 'log on|off'.
+#define BLE_STACK_LOG_DEFAULT       1
+
 // UI and Timer Intervals
 #define STATUS_UPDATE_INTERVAL_MS   100
 #define HEARTBEAT_INTERVAL_MS       500

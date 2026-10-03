@@ -6,10 +6,20 @@
 #define ENABLE_LE_PERIPHERAL
 #define ENABLE_L2CAP_LE_CREDIT_BASED_FLOW_CONTROL_MODE
 
+// Locate CCCDs with ATT Read By Type instead of the default Find Information walk. BTstack's
+// Find Information handler loses the CCCD write when a peripheral spreads a characteristic's
+// descriptors over several responses (small ATT MTU, one descriptor per reply): it finds the
+// CCCD, then continues the walk and never issues the write, so every notification enable ends
+// in a 30 s GATT timeout. The ProtoArc XK01 keyboard (MTU 23) triggers exactly this.
+#define ENABLE_GATT_LEGACY_CCC_DISCOVERY
+
 // Diagnostic logging
 #define ENABLE_LOG_INFO
 #define ENABLE_LOG_ERROR
 #define ENABLE_PRINTF_HEXDUMP
+// Note: the HIDS client discovery trace (ENABLE_TESTING_SUPPORT) is enabled per-source in
+// CMakeLists.txt rather than here, because defining it globally changes BTstack's run loop
+// time type and breaks the build.
 
 // Memory and buffer configuration
 #define HCI_OUTGOING_PRE_BUFFER_SIZE 4

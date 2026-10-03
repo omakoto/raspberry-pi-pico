@@ -5,6 +5,7 @@
 #include "btstack_tlv.h"
 #include "ble/gatt-service/hids_client.h"
 #include "ble/le_device_db.h"
+#include "hci_dump.h"
 #include "pico/time.h"
 #include <stdio.h>
 #include <string.h>
@@ -44,6 +45,17 @@ static uint32_t s_active_passkey = 0;
 static hci_con_handle_t s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
 static hid_protocol_mode_t s_protocol_mode = HID_PROTOCOL_MODE_REPORT;
 static char s_dev_name_summary[64] = {0};
+
+// Authentication requirements we put in our SMP Pairing Request. Only affects new pairings;
+// existing bonds re-encrypt with their stored LTK regardless.
+//
+// Default is LE legacy pairing without MITM. The ProtoArc XK01 keyboard only ever delivered
+// input reports when paired this way: once LE Secure Connections pairing was offered it paired
+// and encrypted fine but never sent a single HID notification, so SC is opt-in per 'authreq'.
+// MITM (passkey entry, shown on the OLED) is also opt-in because it changes the pairing UX.
+static uint8_t s_sm_auth_req = SM_AUTHREQ_BONDING;
+static bool s_stack_logging = false;
+static bool s_log_reports = false;
 
 // Connection and discovery timers
 static btstack_timer_source_t s_reconnect_timer;
@@ -418,13 +430,123 @@ static void tryAutoReconnectOrScan() {
     }
 }
 
+// ---- Filtered BTstack log sink ---------------------------------------------------------------
+// BTstack's log_info output is emitted from the BTstack run-loop context, which runs at a higher
+// priority than main() on this port, and every line goes out over the blocking UART console.
+// Unfiltered, hci.c and l2cap.c alone print hundreds of lines at boot; that starved the main loop
+// (and TinyUSB's tud_task) long enough for USB enumeration to fail. Only the modules that explain
+// pairing and HID-over-GATT problems are let through, and the long absolute source path BTstack
+// prefixes each line with is trimmed to the file name. Errors from any module always pass.
+static const char *const s_stack_log_modules[] = { "sm.c", "gatt_client.c", "hids_client.c" };
+
+static void stack_log_reset(void) {}
+
+// Raw HCI packet dump, off by default and meant for short, targeted captures with scanning stopped
+// (every advertising report is an HCI event and the console would drown). Only ACL data is printed,
+// which is where ATT requests/responses and notifications travel.
+static void stack_log_packet(uint8_t packet_type, uint8_t in, uint8_t *packet, uint16_t len) {
+    if (packet_type != HCI_ACL_DATA_PACKET) return;
+    printf("[HCI] ACL %s (%u bytes):", in ? "<=" : "=>", len);
+    for (uint16_t i = 0; i < len && i < 40; i++) {
+        printf(" %02X", packet[i]);
+    }
+    printf("%s\n", len > 40 ? " ..." : "");
+}
+
+void BleHidHost::setReportLogging(bool enable) {
+    s_log_reports = enable;
+    printf("[BLE Host] Raw HID report dump %s.\n", enable ? "enabled" : "disabled");
+}
+
+void BleHidHost::setHciPacketLogging(bool enable) {
+    hci_dump_enable_packet_log(enable);
+    printf("[BLE Host] HCI ACL packet dump %s.\n", enable ? "enabled" : "disabled");
+}
+
+static void stack_log_message(int log_level, const char *format, va_list args) {
+    static char buf[200];
+    int len = vsnprintf(buf, sizeof(buf), format, args);
+    if (len <= 0) return;
+
+    // Lines look like "<path>/sm.c.1260: text"; locate the file name just after the last '/'
+    // that precedes the first ": " separator.
+    const char *text = buf;
+    const char *sep = strstr(buf, ": ");
+    if (sep) {
+        for (const char *p = sep; p > buf; p--) {
+            if (p[-1] == '/') { text = p; break; }
+        }
+    }
+
+    bool pass = (log_level == HCI_DUMP_LOG_LEVEL_ERROR);
+    for (size_t i = 0; !pass && i < sizeof(s_stack_log_modules) / sizeof(s_stack_log_modules[0]); i++) {
+        size_t n = strlen(s_stack_log_modules[i]);
+        pass = (strncmp(text, s_stack_log_modules[i], n) == 0 && text[n] == '.');
+    }
+    if (pass) {
+        printf("[BT] %s\n", text);
+    }
+}
+
+static const hci_dump_t s_stack_log_sink = {
+    &stack_log_reset,
+    &stack_log_packet,
+    &stack_log_message,
+};
+
+// Prints the security properties of an encrypted link so pairing problems are visible on the console
+static void print_link_security(hci_con_handle_t h, const char *context) {
+    // A non-zero encryption key size means the LE link is currently encrypted
+    uint8_t key_size = gap_encryption_key_size(h);
+    printf("[BLE Host] Link 0x%04X security (%s): encrypted=%d key_size=%u authenticated=%d secure_conn=%d bonded=%d\n",
+           h, context,
+           key_size > 0,
+           key_size,
+           gap_authenticated(h),
+           gap_secure_connection(h),
+           gap_bonded(h));
+}
+
+void BleHidHost::setStackLogging(bool enable) {
+    s_stack_logging = enable;
+    hci_dump_enable_log_level(HCI_DUMP_LOG_LEVEL_INFO, enable ? 1 : 0);
+    hci_dump_enable_log_level(HCI_DUMP_LOG_LEVEL_ERROR, 1);
+    printf("[BLE Host] BTstack log_info output %s.\n", enable ? "enabled" : "disabled");
+}
+
+bool BleHidHost::isStackLogging() {
+    return s_stack_logging;
+}
+
+void BleHidHost::setAuthReq(bool mitm, bool secure_connections) {
+    s_sm_auth_req = SM_AUTHREQ_BONDING;
+    if (mitm) s_sm_auth_req |= SM_AUTHREQ_MITM_PROTECTION;
+    if (secure_connections) s_sm_auth_req |= SM_AUTHREQ_SECURE_CONNECTION;
+    sm_set_authentication_requirements(s_sm_auth_req);
+    dumpAuthReq();
+}
+
+void BleHidHost::dumpAuthReq() {
+    printf("[BLE Host] Pairing policy for new pairings: %s, %s (authreq 0x%02X). Existing bonds are unaffected.\n",
+           (s_sm_auth_req & SM_AUTHREQ_SECURE_CONNECTION) ? "LE Secure Connections" : "LE legacy pairing",
+           (s_sm_auth_req & SM_AUTHREQ_MITM_PROTECTION) ? "MITM/passkey required" : "no MITM (Just Works unless peer insists)",
+           s_sm_auth_req);
+}
+
 void BleHidHost::init() {
+    // Route BTstack's log_info/log_error text through the filtered sink above. Raw HCI packet
+    // dumping stays off: it would flood the console and stall the run loop during scanning.
+    hci_dump_init(&s_stack_log_sink);
+    hci_dump_enable_packet_log(false);
+    setStackLogging(BLE_STACK_LOG_DEFAULT != 0);
+
     l2cap_init();
 
     // Security Manager setup: Display Only for 6-digit keyboard passkey pairing
     sm_init();
     sm_set_io_capabilities(IO_CAPABILITY_DISPLAY_ONLY);
-    sm_set_authentication_requirements(SM_AUTHREQ_BONDING | SM_AUTHREQ_SECURE_CONNECTION);
+    sm_set_authentication_requirements(s_sm_auth_req);
+    dumpAuthReq();
 
     gatt_client_init();
     att_server_init(s_profile_data, NULL, NULL);
@@ -683,6 +805,16 @@ void BleHidHost::enableNotifications(uint8_t slot_idx) {
     printf("[BLE Host] Slot %u: enable_notifications status 0x%02X\n", slot_idx, status);
 }
 
+void BleHidHost::requestProtocolMode(uint8_t slot_idx) {
+    if (slot_idx >= MAX_BLE_DEVICES || !s_slots[slot_idx].connected || s_slots[slot_idx].hids_cid == 0) {
+        printf("[BLE Host] Slot %u not connected or no HIDS CID.\n", slot_idx);
+        return;
+    }
+    // Result arrives as GATTSERVICE_SUBEVENT_HID_PROTOCOL_MODE
+    uint8_t status = hids_client_get_protocol_mode(s_slots[slot_idx].hids_cid, 0);
+    printf("[BLE Host] Slot %u: get_protocol_mode status 0x%02X\n", slot_idx, status);
+}
+
 void BleHidHost::disconnectSlot(uint8_t slot_idx) {
     if (slot_idx >= MAX_BLE_DEVICES || s_slots[slot_idx].con_handle == HCI_CON_HANDLE_INVALID) {
         printf("[BLE Host] Slot %u has no active connection.\n", slot_idx);
@@ -760,11 +892,14 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                         printf_hexdump(desc, desc_len);
                     }
 
-                    uint8_t notif_res = hids_client_enable_notifications(slot->hids_cid);
-                    printf("[BLE Host] Initial enable_notifications(cid 0x%04X) status: 0x%02X\n", slot->hids_cid, notif_res);
+                    // In Report mode BTstack has already written every input report's CCCD before
+                    // emitting this event, so no extra enable_notifications() call is needed here. Doing
+                    // it anyway rewrites all CCCDs and keeps the HIDS client busy (every other request
+                    // returns COMMAND_DISALLOWED) for as long as the peripheral takes to answer, which on
+                    // the ProtoArc XK01 is a 30 s GATT timeout per write. 'notif <slot>' remains for manual use.
 
-                    // Allow peripherals to use their preferred connection parameters (via L2CAP PPCP)
-                    // rather than forcing low latency with zero slave latency, preventing connection drops on battery-powered keyboards.
+                    // Peripherals keep their preferred connection parameters (via L2CAP PPCP) rather than
+                    // being forced to zero slave latency, which made battery-powered keyboards drop the link.
                     if (BleHidHost::hasUnconnectedBonds() && BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
                         BleHidHost::startScan();
                     }
@@ -787,13 +922,29 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
         case GATTSERVICE_SUBEVENT_HID_SERVICE_REPORTS_NOTIFICATION: {
             uint16_t cid = gattservice_subevent_hid_service_reports_notification_get_hids_cid(packet);
             BleSlot *slot = find_slot_by_cid(cid);
-            printf("[BLE Host] HID Reports notification configuration active (slot %u, cid 0x%04X).\n",
+            printf("[BLE Host] HID Reports notification configuration done (slot %u, cid 0x%04X).\n",
                    slot ? slot->dev_idx : 0xFF, cid);
-            if (slot && slot->hids_cid != 0) {
-                // Ensure peripheral exits any suspend mode upon active notifications
-                uint8_t susp_status = hids_client_send_exit_suspend(slot->hids_cid, 0);
-                printf("[BLE Host] Exit Suspend sent for slot %u: status 0x%02X\n", slot->dev_idx, susp_status);
-            }
+            break;
+        }
+
+        case GATTSERVICE_SUBEVENT_HID_INFORMATION: {
+            uint16_t cid = gattservice_subevent_hid_information_get_hids_cid(packet);
+            BleSlot *slot = find_slot_by_cid(cid);
+            printf("[BLE Host] HID Information (slot %u): bcdHID 0x%04X, country %u, remote_wake %u, normally_connectable %u\n",
+                   slot ? slot->dev_idx : 0xFF,
+                   gattservice_subevent_hid_information_get_base_usb_hid_version(packet),
+                   gattservice_subevent_hid_information_get_country_code(packet),
+                   gattservice_subevent_hid_information_get_remote_wake(packet),
+                   gattservice_subevent_hid_information_get_normally_connectable(packet));
+            break;
+        }
+
+        case GATTSERVICE_SUBEVENT_HID_PROTOCOL_MODE: {
+            uint16_t cid = gattservice_subevent_hid_protocol_mode_get_hids_cid(packet);
+            BleSlot *slot = find_slot_by_cid(cid);
+            uint8_t mode = gattservice_subevent_hid_protocol_mode_get_protocol_mode(packet);
+            printf("[BLE Host] Protocol Mode read (slot %u): %u (%s)\n",
+                   slot ? slot->dev_idx : 0xFF, mode, mode == 0 ? "Boot" : mode == 1 ? "Report" : "?");
             break;
         }
 
@@ -820,9 +971,14 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 printf("[BLE Host] REPORT on unknown cid 0x%04X\n", cid);
                 break;
             }
+            // BTstack registers the notification listener for each input report as soon as its CCCD
+            // write is issued, well before it emits HID_SERVICE_CONNECTED for the whole service. A
+            // keyboard whose remaining CCCD writes are slow (or time out) can therefore deliver valid
+            // reports for a long while before the slot is marked connected, so accept them here.
             if (!slot->connected) {
-                printf("[BLE Host] REPORT on disconnected slot %u (cid 0x%04X)\n", slot->dev_idx, cid);
-                break;
+                printf("[BLE Host] REPORT on slot %u (cid 0x%04X) before HID service setup finished; accepting.\n",
+                       slot->dev_idx, cid);
+                slot->connected = true;
             }
 
             const uint8_t *report = gattservice_subevent_hid_report_get_report(packet);
@@ -839,8 +995,9 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
 
             uint8_t dev_idx = slot->dev_idx;
 
-            // Log non-Nape mouse reports or any reports on slot != 0
-            if (dev_idx != 0 || report_id != 3) {
+            // Raw report dump is opt-in ('reports on'): a trackpad emits ~100 reports/s and each
+            // console line blocks the BTstack context for several ms on the UART.
+            if (s_log_reports) {
                 printf("[BLE Host] REPORT slot %u ('%s'): id=%u len=%u [", dev_idx, slot->name, report_id, data_len);
                 for (uint16_t i = 0; i < data_len && i < 8; i++) {
                     printf(" %02X", data[i]);
@@ -943,8 +1100,34 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
 
         case SM_EVENT_PASSKEY_DISPLAY_NUMBER:
             s_active_passkey = sm_event_passkey_display_number_get_passkey(packet);
-            printf("[BLE Host] >>> PAIRING PASSKEY: %06lu <<<\n", (unsigned long)s_active_passkey);
+            printf("[BLE Host] >>> PAIRING PASSKEY: %06lu <<< (type it on the keyboard and press Enter)\n",
+                   (unsigned long)s_active_passkey);
             break;
+
+        case SM_EVENT_PASSKEY_DISPLAY_CANCEL:
+            printf("[BLE Host] Passkey display cancelled.\n");
+            s_active_passkey = 0;
+            break;
+
+        case SM_EVENT_PAIRING_STARTED: {
+            hci_con_handle_t h = sm_event_pairing_started_get_handle(packet);
+            printf("[BLE Host] Pairing started for handle 0x%04X (our authreq 0x%02X).\n", h, s_sm_auth_req);
+            break;
+        }
+
+        case SM_EVENT_REENCRYPTION_STARTED: {
+            hci_con_handle_t h = sm_event_reencryption_started_get_handle(packet);
+            printf("[BLE Host] Re-encryption with stored LTK started for handle 0x%04X.\n", h);
+            break;
+        }
+
+        case SM_EVENT_IDENTITY_RESOLVING_SUCCEEDED: {
+            bd_addr_t id_addr;
+            sm_event_identity_resolving_succeeded_get_identity_address(packet, id_addr);
+            printf("[BLE Host] Identity resolved to %s (le_device_db index %u).\n",
+                   bd_addr_to_str(id_addr), sm_event_identity_resolving_succeeded_get_index(packet));
+            break;
+        }
 
         case SM_EVENT_PAIRING_COMPLETE: {
             hci_con_handle_t h = sm_event_pairing_complete_get_handle(packet);
@@ -955,6 +1138,7 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
             BleSlot *slot = find_slot_by_handle(h);
             if (status == ERROR_CODE_SUCCESS) {
                 printf("[BLE Host] Pairing complete for handle 0x%04X: SUCCESS\n", h);
+                print_link_security(h, "after pairing");
                 if (slot) {
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
                 }
@@ -976,6 +1160,7 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
             uint8_t status = sm_event_reencryption_complete_get_status(packet);
             if (status == ERROR_CODE_SUCCESS) {
                 printf("[BLE Host] Re-encryption complete for handle 0x%04X: SUCCESS\n", h);
+                print_link_security(h, "after re-encryption");
                 connect_hids_handle = h;
             } else {
                 printf("[BLE Host] Re-encryption failed for handle 0x%04X (status 0x%02X). Requesting fresh pairing...\n", h, status);
@@ -1153,6 +1338,17 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     btstack_run_loop_add_timer(&s_pairing_timer);
                 }
             }
+            break;
+        }
+
+        case HCI_EVENT_ENCRYPTION_CHANGE:
+        case HCI_EVENT_ENCRYPTION_CHANGE_V2: {
+            hci_con_handle_t handle = hci_event_encryption_change_get_connection_handle(packet);
+            uint8_t status = hci_event_encryption_change_get_status(packet);
+            uint8_t enabled = hci_event_encryption_change_get_encryption_enabled(packet);
+            BleSlot *slot = find_slot_by_handle(handle);
+            printf("[BLE Host] Encryption change on handle 0x%04X (slot %u): status 0x%02X, enabled %u\n",
+                   handle, slot ? slot->dev_idx : 0xFF, status, enabled);
             break;
         }
 
