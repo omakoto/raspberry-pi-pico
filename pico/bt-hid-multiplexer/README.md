@@ -83,9 +83,9 @@ Commands supported on either console:
 - `bonds`: Dumps bonded peripheral database and cache
 - `devices`: Lists connected slots with connection handles and HIDS CIDs
 - `desc` / `descriptor`: Dumps stored BLE HID report descriptors
-- `notif [slot]`, `getreport <slot> [id]`, `getmode <slot>`, `mode <slot> <0|1>`, `suspend <slot>`: HID-over-GATT diagnostics (re-enable notifications, read an input report and its CCCD, read/write Protocol Mode, send Exit Suspend)
+- `notif [slot]`, `getreport <slot> [id]`, `getmode <slot>`, `mode <slot> <0|1>`, `suspend <slot>`: HID-over-GATT diagnostics (re-enable notifications, read an input report, read/write Protocol Mode, send Exit Suspend)
 - `authreq [legacy|sc] [mitm|nomitm]`: Shows or sets the pairing policy used for *new* pairings (default `legacy nomitm`, see below)
-- `log on|off`: Verbose mode, off by default: BTstack's internal `log_info` output (SM pairing method, GATT security errors, HIDS discovery trace) plus advertising reports of non-HID devices nearby
+- `log on|off`: Verbose mode, off by default: BTstack's internal `log_info` output (SM pairing method, GATT timeouts and security errors, HIDS client steps) plus advertising reports of non-HID devices nearby
 - `hcilog on|off`, `reports on|off`: Raw ATT packet dump (ACL only) and per-report/per-keystroke dump of incoming HID reports, both off by default because every console line blocks the BTstack context for milliseconds and shows up as input latency
 - `disconnect <slot>`, `unbond <idx>`, `clearbonds`: Drop a link, forget one bond, or forget all bonds
 - `reset`: Clears all bonded devices and resets keymap to default

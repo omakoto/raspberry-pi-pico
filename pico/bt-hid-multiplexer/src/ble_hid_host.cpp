@@ -946,13 +946,6 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
 
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
 
-                    const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(slot->hids_cid, 0);
-                    uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(slot->hids_cid, 0);
-                    printf("[BLE Host] HID Report Descriptor for '%s' (len %u):\n", slot->name, desc_len);
-                    if (desc && desc_len > 0) {
-                        printf_hexdump(desc, desc_len);
-                    }
-
                     // In Report mode BTstack has already written every input report's CCCD before
                     // emitting this event, so no extra enable_notifications() call is needed here. Doing
                     // it anyway rewrites all CCCDs and keeps the HIDS client busy (every other request
@@ -1040,8 +1033,6 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             // keyboard whose remaining CCCD writes are slow (or time out) can therefore deliver valid
             // reports for a long while before the slot is marked connected, so accept them here.
             if (!slot->connected) {
-                printf("[BLE Host] REPORT on slot %u (cid 0x%04X) before HID service setup finished; accepting.\n",
-                       slot->dev_idx, cid);
                 slot->connected = true;
             }
 
@@ -1145,7 +1136,6 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
     if (packet_type != HCI_EVENT_PACKET) return;
 
     uint8_t sm_event = hci_event_packet_get_type(packet);
-    printf("[BLE Host] SM Event: 0x%02X\n", sm_event);
 
     hci_con_handle_t connect_hids_handle = HCI_CON_HANDLE_INVALID;
 

@@ -17,9 +17,6 @@
 #define ENABLE_LOG_INFO
 #define ENABLE_LOG_ERROR
 #define ENABLE_PRINTF_HEXDUMP
-// Note: the HIDS client discovery trace (ENABLE_TESTING_SUPPORT) is enabled per-source in
-// CMakeLists.txt rather than here, because defining it globally changes BTstack's run loop
-// time type and breaks the build.
 
 // Memory and buffer configuration
 #define HCI_OUTGOING_PRE_BUFFER_SIZE 4

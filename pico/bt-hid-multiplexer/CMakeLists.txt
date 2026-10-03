@@ -53,19 +53,6 @@ target_compile_definitions(bt-hid-multiplexer PRIVATE
     PICO_FLASH_ASSUME_CORE1_SAFE=1
 )
 
-# HID-over-GATT diagnostics: with ENABLE_TESTING_SUPPORT the BTstack HIDS client prints its
-# whole discovery on the console (HID characteristics, Report Reference IDs/types, CCCD handles,
-# each notification enable) and 'getreport' reads back the CCCD before the report. This is the
-# only way to see why a peripheral that pairs and encrypts fine never delivers input reports.
-# The define must stay per-source: globally it also widens btstack_time_t to 64 bits, which
-# breaks the run loop build. It is applied to btstack_memory.c as well because the define adds a
-# field to hids_client_t, and the memory pool must allocate entries of the size hids_client.c uses.
-set_source_files_properties(
-    ${PICO_SDK_PATH}/lib/btstack/src/ble/gatt-service/hids_client.c
-    ${PICO_SDK_PATH}/lib/btstack/src/btstack_memory.c
-    PROPERTIES COMPILE_DEFINITIONS ENABLE_TESTING_SUPPORT
-)
-
 # Link essential Pico SDK and driver libraries
 target_link_libraries(bt-hid-multiplexer PRIVATE
     pico_stdlib
