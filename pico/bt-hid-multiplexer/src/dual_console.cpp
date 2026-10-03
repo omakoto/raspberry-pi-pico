@@ -216,6 +216,16 @@ static void handle_command(const char *cmd) {
         } else {
             dual_println("Usage: mode <slot_idx> [0=boot, 1=report]");
         }
+    } else if (strncmp(cmd, "connparam", 9) == 0) {
+        int slot = -1, latency = -1;
+        float interval_ms = 0.0f;
+        int n = sscanf(cmd + 9, "%d %d %f", &slot, &latency, &interval_ms);
+        if (n >= 2 && slot >= 0 && latency >= 0) {
+            uint16_t units = (interval_ms > 0.0f) ? (uint16_t)(interval_ms / 1.25f + 0.5f) : 0;
+            BleHidHost::updateConnectionParams((uint8_t)slot, units, (uint16_t)latency);
+        } else {
+            dual_println("Usage: connparam <slot_idx> <slave_latency> [interval_ms]  (interval 7.5..4000, default: current)");
+        }
     } else if (strncmp(cmd, "getmode", 7) == 0) {
         int slot = -1;
         if (sscanf(cmd + 7, "%d", &slot) == 1 && slot >= 0) {
@@ -310,6 +320,7 @@ static void handle_command(const char *cmd) {
         dual_println("  getreport <s>  - Request HID Input report from slot <s>");
         dual_println("  mode <s> <m>   - Set HID protocol mode (0=boot, 1=report)");
         dual_println("  getmode <s>    - Read HID Protocol Mode from slot <s>");
+        dual_println("  connparam <s> <lat> [ms] - Request LL connection params (slave latency, interval)");
         dual_println("  suspend <s>    - Send HID Exit Suspend command to slot <s>");
         dual_println("  authreq [..]   - Show/set pairing policy: [legacy|sc] [mitm|nomitm]");
         dual_println("  log on|off     - Toggle BTstack internal log_info output");

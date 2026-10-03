@@ -32,6 +32,8 @@ public:
     static void sendGetReport(uint8_t slot_idx, uint8_t report_id);
     static void enableNotifications(uint8_t slot_idx);
     static void requestProtocolMode(uint8_t slot_idx);
+    // Request new LL connection parameters; interval in 1.25 ms units (0 = keep current)
+    static void updateConnectionParams(uint8_t slot_idx, uint16_t interval_units, uint16_t latency);
 
     // Pairing policy (applies to new pairings only) and BTstack internal logging
     static void setAuthReq(bool mitm, bool secure_connections);

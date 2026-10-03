@@ -91,6 +91,12 @@ Commands supported on either console:
 - `reset`: Clears all bonded devices and resets keymap to default
 - `help`: Lists all console commands
 
+### Input latency
+- Peripherals negotiate their own connection interval (7.5–8.75 ms) but ask for slave latency ~30, which lets them skip up to 30 connection events. With `BLE_ZERO_SLAVE_LATENCY` (default on in `config.h`) the Pico re-requests the same interval with latency 0 once per connection; `connparam <slot> <latency> [interval_ms]` changes it at runtime and `devices` shows the current values. Cost: higher peripheral power draw.
+- Console output from the BTstack context blocks on the UART, so all per-event dumps are opt-in (`reports`, `log`, `hcilog`).
+- The OLED is redrawn only when its content changes: `SSD1306::show()` is a ~25 ms blocking I2C transfer and TinyUSB releases the HID endpoint only from `tud_task()` in the main loop.
+- Remove bonds of devices that no longer exist (`bonds`, `unbond <idx>`): background scanning runs whenever a bonded device is absent and competes with the links for radio time.
+
 ### CCCD discovery: Read By Type (`ENABLE_GATT_LEGACY_CCC_DISCOVERY`)
 BTstack's default Find-Information walk for locating a report's Client Characteristic Configuration Descriptor loses the CCCD write when a peripheral returns one descriptor per response (small ATT MTU, e.g. the ProtoArc XK01 at MTU 23): every notification enable then ends in a 30 s GATT timeout and only reports whose CCCD the device restored from its own bond ever arrive. `btstack_config.h` therefore selects the Read-By-Type lookup. If a device connects but some of its reports stay silent, check `log on` output for `GATT client timeout` and `hcilog on` for missing ATT Write Requests (`12 <handle> 01 00`).
 

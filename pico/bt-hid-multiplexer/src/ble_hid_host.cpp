@@ -33,6 +33,9 @@ struct BleSlot {
     char name[32];
     uint8_t dev_idx;
     bool connected;
+    uint16_t conn_interval; // last reported LL connection interval, 1.25 ms units (0 = unknown)
+    uint16_t conn_latency;  // last reported slave latency
+    bool latency_forced;    // slave latency 0 already requested for this connection
 };
 
 static BleSlot s_slots[MAX_BLE_DEVICES];
@@ -711,9 +714,10 @@ void BleHidHost::dumpDevices() {
     printf("[BLE Host] Connected Devices (%u / %u):\n", getConnectedCount(), MAX_BLE_DEVICES);
     for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
         if (s_slots[i].connected) {
-            printf("  Slot %u: '%s' (%s, handle 0x%04X, cid 0x%04X)\n",
+            printf("  Slot %u: '%s' (%s, handle 0x%04X, cid 0x%04X, interval %.2f ms, latency %u)\n",
                    i, s_slots[i].name, bd_addr_to_str(s_slots[i].addr),
-                   s_slots[i].con_handle, s_slots[i].hids_cid);
+                   s_slots[i].con_handle, s_slots[i].hids_cid,
+                   s_slots[i].conn_interval * 1.25f, s_slots[i].conn_latency);
         }
     }
 }
@@ -813,6 +817,25 @@ void BleHidHost::requestProtocolMode(uint8_t slot_idx) {
     // Result arrives as GATTSERVICE_SUBEVENT_HID_PROTOCOL_MODE
     uint8_t status = hids_client_get_protocol_mode(s_slots[slot_idx].hids_cid, 0);
     printf("[BLE Host] Slot %u: get_protocol_mode status 0x%02X\n", slot_idx, status);
+}
+
+void BleHidHost::updateConnectionParams(uint8_t slot_idx, uint16_t interval_units, uint16_t latency) {
+    if (slot_idx >= MAX_BLE_DEVICES || s_slots[slot_idx].con_handle == HCI_CON_HANDLE_INVALID) {
+        printf("[BLE Host] Slot %u has no active connection.\n", slot_idx);
+        return;
+    }
+    BleSlot *slot = &s_slots[slot_idx];
+    if (interval_units == 0) {
+        // Fall back to the fastest legal interval (7.5 ms) if the peer never told us its own
+        interval_units = slot->conn_interval ? slot->conn_interval : 6;
+    }
+    // Supervision timeout (10 ms units) must exceed (1 + latency) * interval * 2; keep 4 s unless
+    // the requested latency needs more.
+    uint32_t min_timeout = ((1u + latency) * interval_units * 125u * 2u) / 1000u + 10u;
+    uint16_t timeout = (min_timeout > 400u) ? (uint16_t)min_timeout : 400u;
+    int status = gap_update_connection_parameters(slot->con_handle, interval_units, interval_units, latency, timeout);
+    printf("[BLE Host] Slot %u: connection parameter update requested (interval %.2f ms, latency %u, timeout %u ms): status %d\n",
+           slot_idx, interval_units * 1.25f, latency, timeout * 10, status);
 }
 
 void BleHidHost::disconnectSlot(uint8_t slot_idx) {
@@ -1366,8 +1389,22 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 uint16_t interval = hci_subevent_le_connection_update_complete_get_conn_interval(packet);
                 uint16_t latency = hci_subevent_le_connection_update_complete_get_conn_latency(packet);
                 uint16_t timeout = hci_subevent_le_connection_update_complete_get_supervision_timeout(packet);
-                printf("[BLE Host] Connection parameters updated: interval %.2f ms, latency %u, timeout %u ms\n",
-                       interval * 1.25f, latency, timeout * 10);
+                hci_con_handle_t handle = hci_subevent_le_connection_update_complete_get_connection_handle(packet);
+                BleSlot *slot = find_slot_by_handle(handle);
+                if (slot) {
+                    slot->conn_interval = interval;
+                    slot->conn_latency = latency;
+                }
+                printf("[BLE Host] Connection parameters updated (slot %u): interval %.2f ms, latency %u, timeout %u ms\n",
+                       slot ? slot->dev_idx : 0xFF, interval * 1.25f, latency, timeout * 10);
+#if BLE_ZERO_SLAVE_LATENCY
+                // Keep the peripheral's preferred interval but drop its slave latency, once per
+                // connection so a peripheral that insists on re-requesting latency is honored.
+                if (slot && latency > 0 && !slot->latency_forced) {
+                    slot->latency_forced = true;
+                    BleHidHost::updateConnectionParams(slot->dev_idx, interval, 0);
+                }
+#endif
             }
             break;
         }

@@ -150,7 +150,11 @@ int main() {
                              (cur_passkey != s_last_passkey) ||
                              (cur_has_toast != s_last_has_toast);
 
-        if (now >= splash_end_ms && (state_changed || (now - s_last_display_update_ms >= 1000))) {
+        // SSD1306::show() is a ~25 ms blocking I2C transfer, and TinyUSB only releases the HID IN
+        // endpoint from tud_task() in this loop, so every redraw delays the next HID report by up
+        // to that long. Redraw only when the content changed; the 10 s refresh is just a safety
+        // net against a glitched display.
+        if (now >= splash_end_ms && (state_changed || (now - s_last_display_update_ms >= 10000))) {
             s_last_display_update_ms = now;
             s_last_ble_count = cur_ble_count;
             strncpy(s_last_dev_name, cur_dev_name, sizeof(s_last_dev_name) - 1);
