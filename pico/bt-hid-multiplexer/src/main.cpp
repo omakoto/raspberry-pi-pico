@@ -109,17 +109,45 @@ int main() {
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, s_led_state);
         }
 
-        // Periodic SSD1306 UI Display Refresh (10 Hz, starts after splash screen ends)
-        if (now >= splash_end_ms && (now - s_last_display_update_ms >= STATUS_UPDATE_INTERVAL_MS)) {
-            s_last_display_update_ms = now;
+        // SSD1306 UI Display Refresh: update on status changes or at 1 Hz periodic interval
+        // to avoid blocking I2C bus transfers (which stall USB and BLE polling)
+        static bool s_last_ble_connected = false;
+        static const char *s_last_dev_name = "";
+        static int s_last_active_layer = -1;
+        static bool s_last_is_scanning = false;
+        static uint32_t s_last_passkey = 0;
+        static bool s_last_has_toast = false;
 
-            const char *toast = (now < s_toast_expiry_ms) ? s_toast_msg : "";
+        bool cur_ble_connected = BleHidHost::isConnected();
+        const char *cur_dev_name = BleHidHost::getConnectedDeviceName();
+        int cur_active_layer = VirtualMatrix::getActiveLayer();
+        bool cur_is_scanning = BleHidHost::isScanning();
+        uint32_t cur_passkey = BleHidHost::getActivePasskey();
+        bool cur_has_toast = (now < s_toast_expiry_ms);
+
+        bool state_changed = (cur_ble_connected != s_last_ble_connected) ||
+                             (cur_dev_name != s_last_dev_name) ||
+                             (cur_active_layer != s_last_active_layer) ||
+                             (cur_is_scanning != s_last_is_scanning) ||
+                             (cur_passkey != s_last_passkey) ||
+                             (cur_has_toast != s_last_has_toast);
+
+        if (now >= splash_end_ms && (state_changed || (now - s_last_display_update_ms >= 1000))) {
+            s_last_display_update_ms = now;
+            s_last_ble_connected = cur_ble_connected;
+            s_last_dev_name = cur_dev_name;
+            s_last_active_layer = cur_active_layer;
+            s_last_is_scanning = cur_is_scanning;
+            s_last_passkey = cur_passkey;
+            s_last_has_toast = cur_has_toast;
+
+            const char *toast = cur_has_toast ? s_toast_msg : "";
             SSD1306::renderStatus(
-                BleHidHost::isConnected(),
-                BleHidHost::getConnectedDeviceName(),
-                VirtualMatrix::getActiveLayer(),
-                BleHidHost::isScanning(),
-                BleHidHost::getActivePasskey(),
+                cur_ble_connected,
+                cur_dev_name,
+                cur_active_layer,
+                cur_is_scanning,
+                cur_passkey,
                 toast
             );
         }

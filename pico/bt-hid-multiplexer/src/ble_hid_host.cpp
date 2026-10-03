@@ -524,6 +524,10 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
 
                 // Explicitly ensure report notifications are enabled across all discovered input reports
                 hids_client_enable_notifications(s_hids_cid);
+
+                // Request lowest latency BLE connection interval (6 * 1.25ms = 7.5ms = 133.3 Hz)
+                printf("[BLE Host] Requesting low-latency connection interval (7.5ms - 10ms)...\n");
+                gap_update_connection_parameters(s_con_handle, 6, 8, 0, 400);
             } else {
                 printf("[BLE Host] HID Service connection failed, status: 0x%02X\n", status);
                 if (s_protocol_mode == HID_PROTOCOL_MODE_BOOT && s_con_handle != HCI_CON_HANDLE_INVALID) {
@@ -565,12 +569,6 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 data = &report[1];
                 data_len = len - 1;
             }
-
-            printf("[BLE Host] HID Report (id %u, len %u):", report_id, data_len);
-            for (uint16_t i = 0; i < data_len; i++) {
-                printf(" %02X", data[i]);
-            }
-            printf("\n");
 
             // Route incoming reports by length and report ID:
             // 8-byte reports: Standard keyboard [modifier, reserved, k0..k5]
@@ -772,8 +770,9 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             break;
         }
 
-        case HCI_EVENT_META_GAP:
-            if (hci_event_gap_meta_get_subevent_code(packet) == GAP_SUBEVENT_LE_CONNECTION_COMPLETE) {
+        case HCI_EVENT_META_GAP: {
+            uint8_t subevent = hci_event_gap_meta_get_subevent_code(packet);
+            if (subevent == GAP_SUBEVENT_LE_CONNECTION_COMPLETE) {
                 btstack_run_loop_remove_timer(&s_reconnect_timer);
                 s_is_connecting = false;
                 uint8_t status = gap_subevent_le_connection_complete_get_status(packet);
@@ -792,8 +791,15 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 btstack_run_loop_set_timer(&s_pairing_timer, 200);
                 btstack_run_loop_set_timer_handler(&s_pairing_timer, &onPairingDelayTimeout);
                 btstack_run_loop_add_timer(&s_pairing_timer);
+            } else if (subevent == HCI_SUBEVENT_LE_CONNECTION_UPDATE_COMPLETE) {
+                uint16_t interval = hci_subevent_le_connection_update_complete_get_conn_interval(packet);
+                uint16_t latency = hci_subevent_le_connection_update_complete_get_conn_latency(packet);
+                uint16_t timeout = hci_subevent_le_connection_update_complete_get_supervision_timeout(packet);
+                printf("[BLE Host] Connection parameters updated: interval %.2f ms, latency %u, timeout %u ms\n",
+                       interval * 1.25f, latency, timeout * 10);
             }
             break;
+        }
 
         default:
             break;
