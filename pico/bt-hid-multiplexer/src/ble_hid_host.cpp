@@ -959,10 +959,13 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     // returns COMMAND_DISALLOWED) for as long as the peripheral takes to answer, which on
                     // the ProtoArc XK01 is a 30 s GATT timeout per write. 'notif <slot>' remains for manual use.
 
-                    // Peripherals keep their preferred connection parameters (via L2CAP PPCP) rather than
-                    // being forced to zero slave latency, which made battery-powered keyboards drop the link.
+                    // Keep looking for bonded devices that are still missing; once every bonded
+                    // device is connected, stop scanning so it no longer takes radio time from the
+                    // links (the main loop restarts it when a device drops off).
                     if (BleHidHost::hasUnconnectedBonds() && BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
                         BleHidHost::startScan();
+                    } else {
+                        BleHidHost::stopScan();
                     }
                 }
             } else {
