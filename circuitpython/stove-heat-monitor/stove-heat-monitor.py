@@ -24,6 +24,7 @@ import digitalio
 import wifi
 import socketpool
 import mdns
+import microcontroller
 import supervisor
 
 # Library imports
@@ -543,13 +544,19 @@ def render_matrix_to_serial(frame: list[float], threshold_c: float, colorize: bo
     print("\n" + format_matrix(frame, threshold_c, colorize))
 
 
+# The mDNS server stops responding once it's garbage collected, so it must stay referenced for the
+# lifetime of the program.
+_mdns_server: mdns.Server | None = None
+
+
 # Advertises this device as "<hostname>.local" with an _http._tcp service so the frame server is
 # reachable by name. Failure is non-fatal because the server is still reachable by IP.
 def setup_mdns(hostname: str, port: int) -> None:
+    global _mdns_server
     try:
-        server = mdns.Server(wifi.radio)
-        server.hostname = hostname
-        server.advertise_service(service_type="_http", protocol="_tcp", port=port)
+        _mdns_server = mdns.Server(wifi.radio)
+        _mdns_server.hostname = hostname
+        _mdns_server.advertise_service(service_type="_http", protocol="_tcp", port=port)
         print(f"mDNS active: http://{hostname}.local:{port}/ -> {wifi.radio.ipv4_address}")
     except Exception as e:
         print(f"Warning: mDNS setup failed ({e}). Use the IP address: {wifi.radio.ipv4_address}:{port}")
@@ -642,8 +649,10 @@ def check_serial_commands() -> None:
         if supervisor.runtime.serial_bytes_available:
             data: str = sys.stdin.read(supervisor.runtime.serial_bytes_available)
             if any(ch in data for ch in ("r", "R", "\x03", "\x19")):
-                print("\nRestart command received. Reloading...")
-                supervisor.reload()
+                # A full reset rather than supervisor.reload(): after a soft reload the HTTP server's
+                # listening socket stops accepting connections, while a hard reset gives a clean network stack.
+                print("\nRestart command received. Resetting...")
+                microcontroller.reset()
             elif any(ch in data for ch in ("q", "Q")):
                 print("\nQuit command received. Exiting to REPL...")
                 sys.exit(0)

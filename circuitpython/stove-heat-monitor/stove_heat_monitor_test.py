@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import MagicMock
 
 # Mock CircuitPython hardware modules before importing stove-heat-monitor
-for mod in ["board", "busio", "digitalio", "wifi", "socketpool", "adafruit_requests", "adafruit_mlx90640", "common", "supervisor", "mdns"]:
+for mod in ["board", "busio", "digitalio", "wifi", "socketpool", "adafruit_requests", "adafruit_mlx90640", "common", "supervisor", "mdns", "microcontroller"]:
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
