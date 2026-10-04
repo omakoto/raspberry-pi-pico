@@ -231,7 +231,8 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
         if (active_layer == 1) l_name = "NAV/MEDIA";
         else if (active_layer == 2) l_name = "FUNCTION";
         else if (active_layer == 3) l_name = "NUMPAD";
-        snprintf(layer_str, sizeof(layer_str), "LAYER %d: %s", active_layer, l_name);
+        else if (active_layer > 3) l_name = "";
+        snprintf(layer_str, sizeof(layer_str), l_name[0] ? "LAYER %d: %s" : "LAYER %d", active_layer, l_name);
         drawString(layer_str, 2, 28, true, false);
 
         if (toast_msg && toast_msg[0] != '\0') {

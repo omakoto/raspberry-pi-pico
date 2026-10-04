@@ -23,7 +23,7 @@ Example used throughout this manual: a Logitech device with a vertical wheel, a 
 
 ## Step 1. Pick a layer for the device
 
-The keymap has 4 layers (0–3). Layer 0 is the base layer shared by all devices. Choose one of layers **1, 2 or 3** for the device. Each layer can be used by several devices, but a layer you also use for `MO(n)` layer keys then changes what those keys do for the bound device, so pick one you are not using for anything else.
+The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device. Each layer can be used by several devices, but a layer you also use for `MO(n)` layer keys then changes what those keys do for the bound device, so pick one you are not using for anything else.
 
 This manual uses **layer 3**.
 
@@ -70,7 +70,7 @@ The binding is saved in flash by the device's Bluetooth address. It survives rec
    - the **wheel down** key → **Volume Down** (`KC_VOLD`)
 
    Changes apply immediately and are saved to flash half a second after your last edit.
-5. Leave everything else **Transparent** (`KC_TRNS`, which is what every key on layers 1–3 starts as): those inputs behave as on layer 0.
+5. Leave everything else **Transparent** (`KC_TRNS`, which is what every key on layers 1–7 starts as): those inputs behave as on layer 0.
 
 ### Which physical input is which key
 

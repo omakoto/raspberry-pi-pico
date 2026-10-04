@@ -21,8 +21,11 @@ static const uint32_t SAVE_DELAY_MS = 500;
 
 void VirtualMatrix::init() {
     StorageManager::init();
-    if (!StorageManager::loadKeymap(keymap_)) {
+    bool needs_save = false;
+    if (!StorageManager::loadKeymap(keymap_, needs_save)) {
         resetKeymap();
+    } else if (needs_save) {
+        StorageManager::saveKeymap(keymap_);
     }
 
     default_layer_ = 0;

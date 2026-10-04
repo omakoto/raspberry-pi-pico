@@ -34,7 +34,7 @@
 // possible HID keyboard usage (0x00-0xFF; 0xE0-0xE7 are the modifiers). The otherwise unused
 // usages 0xE8-0xFF are used for mouse buttons and mouse motion directions, which lets VIAL remap
 // mice exactly like keys.
-#define NUM_LAYERS              4
+#define NUM_LAYERS              8
 #define MATRIX_ROWS             16
 #define MATRIX_COLS             16
 
@@ -107,13 +107,21 @@
 
 // Flash storage offsets for keymap persistence (placed safely 64KB before end of flash)
 #define FLASH_KEYMAP_OFFSET     (PICO_FLASH_SIZE_BYTES - (64 * 1024))
-// Per-device layer bindings live in the sector after the keymap.
-#define FLASH_BINDINGS_OFFSET   (FLASH_KEYMAP_OFFSET + 4096)
+// The keymap takes as many 4 KB sectors as it needs (2 for 8 layers) from FLASH_KEYMAP_OFFSET. The
+// per-device layer bindings live in a sector of their own after the room reserved for the keymap
+// (FLASH_KEYMAP_RESERVED_BYTES); a 4-layer firmware kept them right after its single keymap sector,
+// at FLASH_LEGACY_BINDINGS_OFFSET.
+#define FLASH_KEYMAP_RESERVED_BYTES  (4 * 4096)
+#define FLASH_BINDINGS_OFFSET   (FLASH_KEYMAP_OFFSET + FLASH_KEYMAP_RESERVED_BYTES)
+#define FLASH_LEGACY_BINDINGS_OFFSET  (FLASH_KEYMAP_OFFSET + 4096)
 #define FLASH_BINDINGS_MAGIC    0x42494E44 // 'BIND'
 #define MAX_DEVICE_BINDINGS     8
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 // Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded.
-#define FLASH_KEYMAP_VERSION    4
+#define FLASH_KEYMAP_VERSION    5
+// Version of the keymap layout written by firmware with 4 layers, which is migrated on load.
+#define FLASH_KEYMAP_LEGACY_VERSION  4
+#define LEGACY_NUM_LAYERS       4
 
 // After a peripheral has negotiated its own LL connection parameters and left them alone for a
 // while, re-request the same interval with slave latency 0 (see ZERO_LATENCY_DELAY_MS and

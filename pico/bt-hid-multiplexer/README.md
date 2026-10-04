@@ -32,7 +32,7 @@ This project connects wireless BLE keyboards, mice, and integrated trackpads and
   - When all 8 slots are filled and an eligible bonded or newly-paired peripheral connects, the oldest idle connection is cleanly disconnected to make room while preserving its bond in flash.
 - **VIAL Dynamic Keymapping (WebHID):**
   - Exposes standard Vendor RawHID interface (`0xFF60:0x0061`).
-  - Open [https://vial.rocks/](https://vial.rocks/) in Chrome to remap every key (including modifiers, F-keys, arrows, the numpad and international keys) and the mouse buttons and motion across 4 layers in real-time. See [Keymapping with VIAL](#keymapping-with-vial) for what is supported.
+  - Open [https://vial.rocks/](https://vial.rocks/) in Chrome to remap every key (including modifiers, F-keys, arrows, the numpad and international keys) and the mouse buttons and motion across 8 layers in real-time. See [Keymapping with VIAL](#keymapping-with-vial) for what is supported.
   - Keymaps are persisted across reboots in RP2350 flash memory.
 - **Reverse Lock LED Sync:**
   - Forward CapsLock, NumLock, and ScrollLock status from the host PC back over BLE to connected keyboards.
@@ -158,7 +158,7 @@ The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Reques
 2. Connect the Pico upstream USB cable to your computer.
 3. Open **[https://vial.rocks/](https://vial.rocks/)** in Google Chrome or any Chromium-based browser.
 4. Click **Start** and select **Pico W BLE HID Multiplexer**.
-5. Remap keys across 4 layers (Base, Nav/Media, Function, NumPad). Changes take effect instantly and are stored in flash.
+5. Remap keys across 8 layers. Changes take effect instantly and are stored in flash.
 
 ### Layers and what is supported
 

@@ -16,7 +16,7 @@ uint32_t g_now_ms = 0;
 static int g_saves = 0;
 static uint16_t g_flash[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS];
 void StorageManager::init() {}
-bool StorageManager::loadKeymap(uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]) { (void)km; return false; }
+bool StorageManager::loadKeymap(uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS], bool &needs_save) { (void)km; needs_save = false; return false; }
 void StorageManager::saveKeymap(const uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]) {
     memcpy(g_flash, km, sizeof(g_flash));
     g_saves++;
@@ -144,6 +144,22 @@ int main() {
     CHECK(g_saves == 1 && g_flash[0][0][5] == 6);
     VirtualMatrix::flushPendingSave();
     CHECK(g_saves == 1);
+
+    // All layers work, including the highest one, and layers start out transparent.
+    reset();
+    CHECK(NUM_LAYERS == 8);
+    CHECK(VirtualMatrix::getKeycode(NUM_LAYERS - 1, 3, 4) == KC_TRNS_);
+    set(NUM_LAYERS - 1, 0x04, 0x05);
+    CHECK(VirtualMatrix::getKeycode(NUM_LAYERS - 1, 0, 4) == 0x05);
+    CHECK(VirtualMatrix::getKeycode(NUM_LAYERS, 0, 4) == 0);
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5100 + NUM_LAYERS - 1);  // button 1 -> MO(7)
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == NUM_LAYERS - 1);
+    uint8_t layer_a[1] = {0x04};
+    Multiplexer::handleKeyboardReport(0, 0, layer_a, 1);
+    CHECK(lastKbd().keys[0] == 0x05);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
 
     // Transparent keys on upper layers fall through to layer 0.
     reset();
