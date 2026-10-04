@@ -22,6 +22,7 @@ import busio
 import digitalio
 import wifi
 import socketpool
+import supervisor
 
 # Library imports
 from common import get_i2c, get_led_pin, get_pin
@@ -139,6 +140,30 @@ def load_toml_config(file_path: str = CONFIG_FILE_PATH, override_path: str = CON
     if parse_toml_file(override_path, config):
         print(f"Loaded override config from '{override_path}'")
     return config
+
+
+# Identifies sensitive keys (e.g. Wi-Fi passwords, Pushover secret tokens/user keys) that should be masked in diagnostic logs
+def is_sensitive_config_key(key: str) -> bool:
+    key_lower: str = key.lower()
+    return (
+        "password" in key_lower
+        or key_lower in ("pushover_token", "pushover_user_key")
+        or "token" in key_lower
+        or "secret" in key_lower
+    )
+
+
+# Logs loaded configuration settings to console at startup while masking secrets
+def log_config(config: dict[str, str | int | float | bool]) -> None:
+    print("\nConfiguration:")
+    for key in sorted(config.keys()):
+        val = config[key]
+        if is_sensitive_config_key(key):
+            display_val: str = "***" if val else "(not set)"
+        else:
+            display_val = str(val)
+        print(f"  {key}: {display_val}")
+    print()
 
 
 # Wi-Fi disconnect error mapping for human-readable diagnostics
@@ -302,16 +327,18 @@ def parse_url(url: str) -> tuple[str, str, int, str]:
     return proto.lower(), host, port, path
 
 
-# Helper to URL-encode form field values without urllib
+# Helper to URL-encode form field values using UTF-8 bytes to properly handle multibyte characters (e.g. °)
 def urlencode_val(val: str | int | float) -> str:
     res: list[str] = []
-    for ch in str(val):
-        if ch.isalnum() or ch in "-_.~":
-            res.append(ch)
-        elif ch == " ":
+    val_bytes: bytes = str(val).encode("utf-8")
+    for b in val_bytes:
+        # Check for unreserved ASCII characters (0-9, A-Z, a-z, '-', '.', '_', '~')
+        if (48 <= b <= 57) or (65 <= b <= 90) or (97 <= b <= 122) or b in (45, 46, 95, 126):
+            res.append(chr(b))
+        elif b == 32:  # Space
             res.append("+")
         else:
-            res.append(f"%{ord(ch):02X}")
+            res.append(f"%{b:02X}")
     return "".join(res)
 
 
@@ -387,8 +414,12 @@ class PushoverNotifier:
             sock = None
             elapsed: float = time.monotonic() - start_t
 
-            header_text = resp_bytes.split(b"\r\n\r\n")[0].decode("utf-8", errors="replace")
-            status_line = header_text.split("\r\n")[0] if header_text else ""
+            header_part = resp_bytes.split(b"\r\n\r\n")[0]
+            try:
+                header_text: str = header_part.decode("utf-8")
+            except Exception:
+                header_text = str(header_part)
+            status_line: str = header_text.split("\r\n")[0] if header_text else ""
 
             if " 200 " in status_line or status_line.endswith(" 200"):
                 print(f"[Pushover] Success ({status_line}, took {elapsed:.2f}s)")
@@ -468,12 +499,28 @@ def render_matrix_to_serial(frame: list[float], threshold_c: float, colorize: bo
     print("=" * 100)
 
 
+# Checks incoming serial characters for interactive control commands (restart on 'r'/Ctrl+Y/Ctrl+C, quit on 'q')
+def check_serial_commands() -> None:
+    try:
+        if supervisor.runtime.serial_bytes_available:
+            data: str = sys.stdin.read(supervisor.runtime.serial_bytes_available)
+            if any(ch in data for ch in ("r", "R", "\x03", "\x19")):
+                print("\nRestart command received. Reloading...")
+                supervisor.reload()
+            elif any(ch in data for ch in ("q", "Q")):
+                print("\nQuit command received. Exiting to REPL...")
+                sys.exit(0)
+    except Exception:
+        pass
+
+
 # Main Application Logic
 def main() -> None:
     print("Starting Kitchen Stove Heat Monitor...")
 
     # Load configuration
     config: dict[str, str | int | float | bool] = load_toml_config()
+    log_config(config)
 
     # Alert thresholds
     threshold_c: float = float(config.get("threshold_c", 60.0))
@@ -540,12 +587,14 @@ def main() -> None:
     last_alert_time: float = 0.0
 
     print("\nEntering monitoring loop...")
-    print(f"Parameters: Threshold={threshold_c:.1f}°C, Alert Delay={alert_delay_min:.1f} min, Interval={monitoring_interval_s:.1f}s\n")
+    print(f"Parameters: Threshold={threshold_c:.1f}°C, Alert Delay={alert_delay_min:.1f} min, Interval={monitoring_interval_s:.1f}s")
+    print("Interactive Controls: Press 'r' or Ctrl+Y to restart, 'q' to exit to REPL.\n")
 
     led.set_state(LedState.MONITORING_COOL)
 
     while True:
         led.update()
+        check_serial_commands()
 
         # Capture thermal frame
         try:
@@ -643,8 +692,12 @@ def main() -> None:
         # Periodically invoke garbage collection to preserve memory headroom
         gc.collect()
 
-        # Sleep for remainder of monitoring interval
-        time.sleep(monitoring_interval_s)
+        # Responsive sleep while servicing LED patterns and checking for interactive serial commands
+        sleep_end: float = time.monotonic() + monitoring_interval_s
+        while time.monotonic() < sleep_end:
+            led.update()
+            check_serial_commands()
+            time.sleep(0.05)
 
 
 if __name__ == "__main__":

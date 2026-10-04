@@ -21,17 +21,17 @@ pushover_url="https://api.pushover.net/1/messages.json"
 
 # Thermal Detection Settings
 # Temperature threshold in Celsius to consider the stove actively hot
-threshold_c=60.0
+threshold_c=35.0
 
 # Temperature drop below threshold (in Celsius) required to consider stove cooled down
-hysteresis_c=5.0
+hysteresis_c=30.0
 
 # Time in minutes that temperature must remain above threshold before triggering alert.
 # Helps avoid alerts during normal intentional cooking.
-alert_delay_minutes=15.0
+alert_delay_minutes=0.2
 
 # Repeat alert interval in minutes if stove continues to remain hot after initial alert
-alert_repeat_minutes=15.0
+alert_repeat_minutes=5.0
 
 # Send a notification when stove cools down after having triggered an alert
 notify_on_cooldown=true

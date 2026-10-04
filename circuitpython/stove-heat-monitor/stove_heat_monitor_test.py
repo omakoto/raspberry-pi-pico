@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import MagicMock
 
 # Mock CircuitPython hardware modules before importing stove-heat-monitor
-for mod in ["board", "busio", "digitalio", "wifi", "socketpool", "adafruit_requests", "adafruit_mlx90640", "common"]:
+for mod in ["board", "busio", "digitalio", "wifi", "socketpool", "adafruit_requests", "adafruit_mlx90640", "common", "supervisor"]:
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
@@ -66,6 +66,55 @@ class TestStoveHeatMonitor(unittest.TestCase):
         # Should execute cleanly without error
         stove_heat_monitor.render_matrix_to_serial(frame, threshold_c=60.0, colorize=False)
         stove_heat_monitor.render_matrix_to_serial(frame, threshold_c=60.0, colorize=True)
+
+    def test_log_config(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        test_config: dict[str, str | int | float | bool] = {
+            "wifi_ssid": "MySSID",
+            "wifi_password": "supersecretpassword",
+            "pushover_token": "a1b2c3d4e5",
+            "pushover_user_key": "u6v7w8x9y0",
+            "pushover_url": "https://api.pushover.net/1/messages.json",
+            "threshold_c": 55.0,
+            "dump_matrix": True,
+        }
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            stove_heat_monitor.log_config(test_config)
+
+        output = buf.getvalue()
+        # Verify sensitive values are masked
+        self.assertNotIn("supersecretpassword", output)
+        self.assertNotIn("a1b2c3d4e5", output)
+        self.assertNotIn("u6v7w8x9y0", output)
+        self.assertIn("wifi_password: ***", output)
+        self.assertIn("pushover_token: ***", output)
+        self.assertIn("pushover_user_key: ***", output)
+
+        # Verify non-sensitive values are logged cleanly
+        self.assertIn("wifi_ssid: MySSID", output)
+        self.assertIn("pushover_url: https://api.pushover.net/1/messages.json", output)
+        self.assertIn("threshold_c: 55.0", output)
+        self.assertIn("dump_matrix: True", output)
+
+    def test_urlencode_val(self) -> None:
+        import urllib.parse
+
+        test_cases = [
+            "Hello World",
+            "Stove surface has been HOT (max 61.8°C, threshold 35°C) for 3 minutes!",
+            "abc123-_.~",
+            "Special & = + ? % chars",
+            123,
+            45.6,
+        ]
+        for val in test_cases:
+            expected = urllib.parse.quote_plus(str(val))
+            actual = stove_heat_monitor.urlencode_val(val)
+            self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
