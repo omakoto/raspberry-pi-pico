@@ -53,6 +53,11 @@ color_matrix=true
 # i2c_sda=5
 i2c_frequency=400000
 
+# HTTP frame server: GET / returns the latest thermal frame as a colorized HTML page (/index.txt: plain text)
+http_port=80
+# Advertised as <mdns_hostname>.local; set to "" to disable mDNS
+mdns_hostname="stove-monitor"
+
 # General System Settings
 log=true
 led_active_low=false

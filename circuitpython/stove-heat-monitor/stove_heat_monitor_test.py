@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import MagicMock
 
 # Mock CircuitPython hardware modules before importing stove-heat-monitor
-for mod in ["board", "busio", "digitalio", "wifi", "socketpool", "adafruit_requests", "adafruit_mlx90640", "common", "supervisor"]:
+for mod in ["board", "busio", "digitalio", "wifi", "socketpool", "adafruit_requests", "adafruit_mlx90640", "common", "supervisor", "mdns"]:
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
@@ -66,6 +66,31 @@ class TestStoveHeatMonitor(unittest.TestCase):
         # Should execute cleanly without error
         stove_heat_monitor.render_matrix_to_serial(frame, threshold_c=60.0, colorize=False)
         stove_heat_monitor.render_matrix_to_serial(frame, threshold_c=60.0, colorize=True)
+
+    def test_format_matrix_and_request_path(self) -> None:
+        frame = [25.0] * 768
+        frame[0] = 85.4
+        text = stove_heat_monitor.format_matrix(frame, 60.0, False)
+        self.assertNotIn("\033", text)
+        self.assertEqual(len(text.split("\n")), 3 + 24 + 1)
+        self.assertIn("00 | 85 25", text)
+        self.assertIn("\033[97;41m", stove_heat_monitor.format_matrix(frame, 60.0, True))
+
+        server = stove_heat_monitor.FrameServer.__new__(stove_heat_monitor.FrameServer)
+        server.threshold_c, server.status, server.frame = 60.0, "st", frame
+        server.refresh_s = 2
+        self.assertNotIn("\033", server.build_text())
+        html = server.build_html()
+        self.assertTrue(html.startswith("<!DOCTYPE html>"))
+        self.assertIn('<span class="h">85</span>', html)
+        self.assertIn('<span class="b">25</span>', html)
+        self.assertIn("<pre>st", html)
+
+        parse = stove_heat_monitor.parse_request_path
+        self.assertEqual(parse(b"GET /frame?x=1 HTTP/1.1\r\nHost: a\r\n\r\n"), "/frame")
+        self.assertEqual(parse(b"GET / HTTP/1.1\r\n\r\n"), "/")
+        self.assertIsNone(parse(b"POST / HTTP/1.1\r\n\r\n"))
+        self.assertIsNone(parse(b""))
 
     def test_log_config(self) -> None:
         import io

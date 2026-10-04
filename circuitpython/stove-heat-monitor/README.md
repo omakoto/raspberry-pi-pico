@@ -78,6 +78,8 @@ color_matrix = true
 | `monitoring_interval_s`| `float`| `2.0` | Seconds between thermal reads |
 | `dump_matrix` | `bool` | `true` | Stream 32×24 matrix to UART serial |
 | `color_matrix` | `bool` | `true` | Use ANSI colors in matrix dump |
+| `http_port` | `int` | `80` | Port of the HTTP frame server (`/` and `/frame` color HTML page (auto-refreshing), `/index.txt` plain text) |
+| `mdns_hostname` | `str` | `stove-monitor` | Advertised as `<name>.local` via mDNS; empty disables |
 | `i2c_frequency` | `int` | `400000` | I2C clock frequency (400 kHz) |
 | `i2c_scl` / `sda` | `int` | `None` | Optional explicit SoC GPIO numbers |
 

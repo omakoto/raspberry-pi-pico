@@ -11,6 +11,7 @@
 # - Tracks active heat duration and sends Pushover alerts over Wi-Fi when a burner is left on
 #   longer than the configured threshold duration (e.g. 15 minutes).
 # - Uses native socketpool and ssl directly for HTTP/HTTPS alerts (zero external library dependencies).
+# - Serves the latest thermal frame over HTTP (GET / or /frame as HTML, /index.txt as plain text) and advertises it via mDNS.
 # - Supports multi-AP Wi-Fi fallback, configurable HTTP/HTTPS endpoints, and TOML config files.
 
 import gc
@@ -22,6 +23,7 @@ import busio
 import digitalio
 import wifi
 import socketpool
+import mdns
 import supervisor
 
 # Library imports
@@ -457,8 +459,8 @@ def create_i2c_bus(scl_gpio: int | None, sda_gpio: int | None, frequency: int) -
     return get_i2c(scl=scl_gpio, sda=sda_gpio)
 
 
-# Prints 32x24 thermal matrix to serial with ANSI temperature color codes
-def render_matrix_to_serial(frame: list[float], threshold_c: float, colorize: bool) -> None:
+# Formats the 32x24 thermal matrix as text, optionally with ANSI temperature color codes
+def format_matrix(frame: list[float], threshold_c: float, colorize: bool) -> str:
     # ANSI color definitions
     # Blue: < 30°C
     # Green: 30°C - 45°C
@@ -470,9 +472,11 @@ def render_matrix_to_serial(frame: list[float], threshold_c: float, colorize: bo
     color_yellow: str = "\033[93m" if colorize else ""
     color_hot: str = "\033[97;41m" if colorize else ""  # White on Red background
 
-    print("\n" + "=" * 100)
-    print("      MLX90640 Thermal Image (32 columns x 24 rows) [°C]")
-    print("-" * 100)
+    lines: list[str] = [
+        "=" * 100,
+        "      MLX90640 Thermal Image (32 columns x 24 rows) [°C]",
+        "-" * 100,
+    ]
 
     for row in range(24):
         row_str_parts: list[str] = [f"{row:02d} | "]
@@ -495,8 +499,141 @@ def render_matrix_to_serial(frame: list[float], threshold_c: float, colorize: bo
             int_val: int = int(round(val))
             row_str_parts.append(f"{color}{int_val:2d}{color_reset} ")
 
-        print("".join(row_str_parts))
-    print("=" * 100)
+        lines.append("".join(row_str_parts))
+    lines.append("=" * 100)
+    return "\n".join(lines)
+
+
+# Renders the status line and thermal matrix as a self-contained HTML page. The matrix lives in a
+# <pre> so a fixed-width font keeps columns aligned; colors mirror the ANSI scheme of format_matrix().
+# The page refreshes itself so a browser tab works as a live view.
+def format_matrix_html(frame: list[float], threshold_c: float, status: str, refresh_s: int) -> str:
+    rows: list[str] = []
+    for row in range(24):
+        cells: list[str] = [f"{row:02d} | "]
+        for col in range(32):
+            val: float = frame[row * 32 + col]
+            if val >= threshold_c:
+                cls = "h"
+            elif val >= 45.0:
+                cls = "y"
+            elif val >= 30.0:
+                cls = "g"
+            else:
+                cls = "b"
+            cells.append(f'<span class="{cls}">{int(round(val)):2d}</span> ')
+        rows.append("".join(cells))
+    # Literals are joined with explicit "+" and the CSS is kept apart from any f-string: CircuitPython
+    # treats adjacent string literals as one f-string if any of them has the f prefix, which would
+    # misparse the CSS braces.
+    head: str = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    head += '<meta http-equiv="refresh" content="' + str(refresh_s) + '">'
+    head += '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    head += "<title>Stove Heat Monitor</title><style>"
+    head += "body{background:#111;color:#ddd;margin:8px}"
+    head += "pre{font-family:ui-monospace,Menlo,Consolas,'DejaVu Sans Mono',monospace;font-size:14px;line-height:1.25}"
+    head += ".b{color:#6cf}.g{color:#6d6}.y{color:#fd4}.h{color:#fff;background:#c22}"
+    head += "</style></head><body><pre>"
+    title: str = "      MLX90640 Thermal Image (32 columns x 24 rows) [°C]"
+    return head + status + "\n\n" + title + "\n" + "\n".join(rows) + "</pre></body></html>"
+
+
+# Prints 32x24 thermal matrix to serial
+def render_matrix_to_serial(frame: list[float], threshold_c: float, colorize: bool) -> None:
+    print("\n" + format_matrix(frame, threshold_c, colorize))
+
+
+# Advertises this device as "<hostname>.local" with an _http._tcp service so the frame server is
+# reachable by name. Failure is non-fatal because the server is still reachable by IP.
+def setup_mdns(hostname: str, port: int) -> None:
+    try:
+        server = mdns.Server(wifi.radio)
+        server.hostname = hostname
+        server.advertise_service(service_type="_http", protocol="_tcp", port=port)
+        print(f"mDNS active: http://{hostname}.local:{port}/ -> {wifi.radio.ipv4_address}")
+    except Exception as e:
+        print(f"Warning: mDNS setup failed ({e}). Use the IP address: {wifi.radio.ipv4_address}:{port}")
+
+
+# Extracts the request path from the first line of an HTTP request; None if it isn't a GET.
+def parse_request_path(request: bytes) -> str | None:
+    parts = request.split(b"\r\n", 1)[0].decode("utf-8").split(" ")
+    if len(parts) < 2 or parts[0] != "GET":
+        return None
+    return parts[1].split("?", 1)[0]
+
+
+# Minimal non-blocking HTTP server that returns the latest thermal frame as plain text.
+# poll() must be called regularly from the main loop; it never blocks waiting for a client.
+class FrameServer:
+    def __init__(self, port: int, threshold_c: float, refresh_s: int = 2) -> None:
+        self.threshold_c: float = threshold_c
+        self.refresh_s: int = refresh_s
+        self.frame: list[float] | None = None
+        self.status: str = "No frame captured yet."
+        self.sock = socketpool.SocketPool(wifi.radio).socket(socketpool.SocketPool.AF_INET, socketpool.SocketPool.SOCK_STREAM)
+        self.sock.setsockopt(socketpool.SocketPool.SOL_SOCKET, socketpool.SocketPool.SO_REUSEADDR, 1)
+        self.sock.bind(("0.0.0.0", port))
+        self.sock.listen(2)
+        self.sock.setblocking(False)
+
+    # Publishes the latest frame and a one-line status summary for subsequent requests
+    def update(self, frame: list[float], status: str) -> None:
+        self.frame = frame
+        self.status = status
+
+    def build_text(self) -> str:
+        parts: list[str] = [self.status]
+        if self.frame is not None:
+            parts.append(format_matrix(self.frame, self.threshold_c, False))
+        return "\n".join(parts) + "\n"
+
+    def build_html(self) -> str:
+        if self.frame is None:
+            return '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + self.status + "</body></html>"
+        return format_matrix_html(self.frame, self.threshold_c, self.status, self.refresh_s)
+
+    # Serves at most one pending client. Closes the connection promptly to free socket buffers.
+    def poll(self) -> None:
+        try:
+            client, _addr = self.sock.accept()
+        except OSError:
+            return  # No pending connection
+        try:
+            client.settimeout(1.0)
+            buf = bytearray(512)
+            n: int = client.recv_into(buf)
+            path = parse_request_path(bytes(buf[:n]))
+            # "/" and "/frame" serve an HTML view for browsers; "/index.txt" is plain text
+            content_type: str = "text/plain; charset=utf-8"
+            if path in ("/", "/frame"):
+                body: bytes = self.build_html().encode("utf-8")
+                content_type = "text/html; charset=utf-8"
+                header: str = "HTTP/1.0 200 OK\r\n"
+            elif path == "/index.txt":
+                body = self.build_text().encode("utf-8")
+                header = "HTTP/1.0 200 OK\r\n"
+            else:
+                body = b"Not found\n"
+                header = "HTTP/1.0 404 Not Found\r\n"
+            header += f"Content-Type: {content_type}\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n"
+            data: bytes = header.encode("utf-8") + body
+            # The TCP send buffer is far smaller than the HTML page, so send in small chunks and
+            # retry on a send timeout (buffer full) until the client has drained it or we give up.
+            view = memoryview(data)
+            deadline: float = time.monotonic() + 5.0
+            while len(view) > 0:
+                try:
+                    sent: int = client.send(view[:1024])
+                    view = view[sent:]
+                except OSError:
+                    if time.monotonic() > deadline:
+                        raise
+                    time.sleep(0.02)
+        except Exception as e:
+            print(f"HTTP request failed: {e}")
+        finally:
+            client.close()
 
 
 # Checks incoming serial characters for interactive control commands (restart on 'r'/Ctrl+Y/Ctrl+C, quit on 'q')
@@ -540,6 +677,10 @@ def main() -> None:
     sda_gpio: int | None = int(config["i2c_sda"]) if "i2c_sda" in config else None
     led_active_low: bool = bool(config.get("led_active_low", False))
 
+    # HTTP frame server / mDNS
+    http_port: int = int(config.get("http_port", 80))
+    mdns_hostname: str = str(config.get("mdns_hostname", "stove-monitor")).strip()
+
     # Pushover credentials
     pushover_token: str = str(config.get("pushover_token", "")).strip()
     pushover_user: str = str(config.get("pushover_user_key", "")).strip()
@@ -554,6 +695,16 @@ def main() -> None:
     wifi_manager: WifiManager = WifiManager(config)
     print(f"Configured Wi-Fi SSIDs: {wifi_manager.configured_ssids}")
     wifi_manager.connect(led)
+
+    # Start the HTTP frame server (non-fatal on failure) and advertise it over mDNS
+    frame_server: FrameServer | None = None
+    try:
+        frame_server = FrameServer(http_port, threshold_c, max(1, int(monitoring_interval_s)))
+        print(f"HTTP frame server listening on http://{wifi.radio.ipv4_address}:{http_port}/")
+        if mdns_hostname:
+            setup_mdns(mdns_hostname, http_port)
+    except Exception as e:
+        print(f"Warning: HTTP frame server failed to start: {e}")
 
     # Initialize Pushover client
     pushover: PushoverNotifier = PushoverNotifier(
@@ -608,6 +759,13 @@ def main() -> None:
         min_temp: float = min(frame)
         max_temp: float = max(frame)
         avg_temp: float = sum(frame) / 768.0
+
+        if frame_server is not None:
+            frame_server.update(
+                frame,
+                f"Uptime: {now:.0f}s | Max: {max_temp:.1f}°C | Min: {min_temp:.1f}°C | Avg: {avg_temp:.1f}°C"
+                f" | Hot: {'yes' if is_hot else 'no'} | Threshold: {threshold_c:.1f}°C",
+            )
 
         # Dump temperature matrix to UART serial if configured
         if dump_matrix:
@@ -697,6 +855,8 @@ def main() -> None:
         while time.monotonic() < sleep_end:
             led.update()
             check_serial_commands()
+            if frame_server is not None:
+                frame_server.poll()
             time.sleep(0.05)
 
 
