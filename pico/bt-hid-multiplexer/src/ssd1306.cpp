@@ -262,10 +262,10 @@ void SSD1306::renderBootSplash(const char *board_desc, const char *version_desc)
 
     // Header banner with inverted text
     rect(0, 0, OLED_WIDTH, 11, true, true);
-    drawString("PICO BLE MULTIPLEXER", 14, 2, false, false);
+    drawString("PICO BT MULTIPLEXER", 16, 2, false, false);
 
     // Prominent title
-    drawString("BLE MULTIPLEX", 12, 16, true, true);
+    drawString("BT MULTIPLEX", 16, 16, true, true);
 
     // Hardware target and firmware version
     if (board_desc) {

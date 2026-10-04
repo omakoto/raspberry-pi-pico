@@ -513,7 +513,7 @@ void print_welcome_banner() {
 #endif
 
     dual_println("\r\n==================================================");
-    dual_println("  Pico BLE HID Multiplexer");
+    dual_println("  Pico BT HID Multiplexer");
     dual_printf ("  Hardware : %s\r\n", board_name);
     dual_printf ("  Firmware : v1.0.0 (Built %s %s)\r\n", __DATE__, __TIME__);
     dual_printf ("  Status   : %s\r\n", BleHidHost::isConnected() ? "Connected" : "Ready / Idle");
