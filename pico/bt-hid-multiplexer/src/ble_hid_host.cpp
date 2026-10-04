@@ -306,7 +306,6 @@ static void save_bonded_devices() {
 // Load bonded devices table from TLV, migrating single-device legacy entries if present
 static void load_bonded_devices() {
     memset(&s_bonded_table, 0, sizeof(s_bonded_table));
-    ClassicHidHost::clearBonds();
 
     const btstack_tlv_t *tlv_impl = nullptr;
     void *tlv_context = nullptr;
@@ -840,6 +839,7 @@ void BleHidHost::clearBonds() {
     btstack_run_loop_remove_timer(&s_reconnect_timer);
 
     memset(&s_bonded_table, 0, sizeof(s_bonded_table));
+    ClassicHidHost::clearBonds();
 
     const btstack_tlv_t *tlv_impl = nullptr;
     void *tlv_context = nullptr;
