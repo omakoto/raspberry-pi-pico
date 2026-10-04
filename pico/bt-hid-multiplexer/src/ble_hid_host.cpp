@@ -25,6 +25,13 @@ struct BondedTable {
     BondedDeviceRecord records[MAX_BLE_DEVICES];
 };
 
+enum BleMouseFormat : uint8_t {
+    MOUSE_FORMAT_UNKNOWN = 0,
+    MOUSE_FORMAT_STANDARD,       // 8-bit relative dx, dy
+    MOUSE_FORMAT_16BIT,          // 16-bit relative dx, dy (ProtoArc trackpad)
+    MOUSE_FORMAT_LOGITECH_12BIT  // 16-bit buttons, 12-bit packed dx, dy (Logitech Lift / MX)
+};
+
 struct BleSlot {
     hci_con_handle_t con_handle;
     uint16_t hids_cid;
@@ -42,6 +49,12 @@ struct BleSlot {
     bool led_report_resolved;   // report descriptor has been inspected for LED output report
     uint8_t led_report_id;      // report ID for LED output report (0 if no report ID)
     uint32_t last_used_ms;      // timestamp (ms since boot) of last input report or connection
+    BleMouseFormat mouse_format;     // detected mouse report format
+    bool mouse_format_resolved;      // report descriptor has been inspected for mouse format
+    uint8_t mouse_report_id;         // report ID for mouse input reports
+    uint16_t mouse_speed_percent;    // mouse sensitivity scaling (default 100)
+    int32_t scale_rem_x;             // fractional count accumulator for X
+    int32_t scale_rem_y;             // fractional count accumulator for Y
 };
 
 // Peripherals defend their preferred parameters for a while after connecting: the ProtoArc XK01
@@ -53,6 +66,7 @@ struct BleSlot {
 
 static BleSlot s_slots[MAX_BLE_DEVICES];
 static BondedTable s_bonded_table;
+static uint16_t s_global_mouse_speed_percent = 100;
 
 static bool s_is_scanning = false;
 static bool s_is_connecting = false;
@@ -452,6 +466,8 @@ static void reset_slot(BleSlot *slot) {
     memset(slot, 0, sizeof(BleSlot));
     slot->dev_idx = idx;
     slot->con_handle = HCI_CON_HANDLE_INVALID;
+    slot->mouse_format = MOUSE_FORMAT_UNKNOWN;
+    slot->mouse_speed_percent = s_global_mouse_speed_percent;
 }
 
 // Disconnect the least-recently-used connected slot to make room for a new connection
@@ -679,13 +695,7 @@ void BleHidHost::init() {
     gap_set_connection_parameters(48, 48, 12, 24, 0, 400, 0, 0);
 
     for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
-        s_slots[i].con_handle = HCI_CON_HANDLE_INVALID;
-        s_slots[i].hids_cid = 0;
-        memset(s_slots[i].addr, 0, sizeof(bd_addr_t));
-        s_slots[i].addr_type = BD_ADDR_TYPE_LE_PUBLIC;
-        s_slots[i].name[0] = '\0';
-        s_slots[i].dev_idx = i;
-        s_slots[i].connected = false;
+        reset_slot(&s_slots[i]);
     }
 
     s_is_scanning = false;
@@ -872,9 +882,52 @@ void BleHidHost::dumpDevices() {
             } else if (s_slots[i].led_report_resolved) {
                 printf(", no_leds");
             }
+            if (s_slots[i].mouse_format != MOUSE_FORMAT_UNKNOWN) {
+                const char *mfmt = (s_slots[i].mouse_format == MOUSE_FORMAT_LOGITECH_12BIT) ? "logi-12b" :
+                                   (s_slots[i].mouse_format == MOUSE_FORMAT_16BIT) ? "16b" : "8b";
+                printf(", mouse %s (speed %u%%)", mfmt, s_slots[i].mouse_speed_percent);
+            } else if (s_slots[i].mouse_speed_percent != 100) {
+                printf(", speed %u%%", s_slots[i].mouse_speed_percent);
+            }
             printf(", idle %lu s)\n", (unsigned long)idle_s);
         }
     }
+}
+
+void BleHidHost::setMouseSpeed(uint8_t slot_idx, uint16_t percent) {
+    if (slot_idx < MAX_BLE_DEVICES) {
+        if (percent == 0) percent = 1;
+        if (percent > 1000) percent = 1000;
+        s_slots[slot_idx].mouse_speed_percent = percent;
+        s_slots[slot_idx].scale_rem_x = 0;
+        s_slots[slot_idx].scale_rem_y = 0;
+        printf("[BLE Host] Slot %u ('%s') mouse speed set to %u%%\n",
+               slot_idx, s_slots[slot_idx].name, percent);
+    }
+}
+
+uint16_t BleHidHost::getMouseSpeed(uint8_t slot_idx) {
+    if (slot_idx < MAX_BLE_DEVICES) {
+        return s_slots[slot_idx].mouse_speed_percent;
+    }
+    return 100;
+}
+
+void BleHidHost::setGlobalMouseSpeed(uint16_t percent) {
+    if (percent == 0) percent = 1;
+    if (percent > 1000) percent = 1000;
+    s_global_mouse_speed_percent = percent;
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        s_slots[i].mouse_speed_percent = percent;
+        s_slots[i].scale_rem_x = 0;
+        s_slots[i].scale_rem_y = 0;
+    }
+    printf("[BLE Host] Global mouse speed set to %u%% (applied to all %u slots)\n",
+           percent, MAX_BLE_DEVICES);
+}
+
+uint16_t BleHidHost::getGlobalMouseSpeed() {
+    return s_global_mouse_speed_percent;
 }
 
 void BleHidHost::dumpBonds() {
@@ -981,6 +1034,129 @@ static void resolve_led_report(BleSlot *slot) {
         slot->led_report_resolved = true;
         printf("[BLE Host] Slot %u '%s': no LED output report found in descriptor\n",
                slot->dev_idx, slot->name);
+    }
+}
+
+// Scan HID Report Descriptor for Mouse Input item (Generic Desktop 0x01, Usage 0x30 X or 0x31 Y)
+// and determine coordinate bit size (12-bit packed vs 16-bit vs 8-bit)
+static bool find_mouse_format_and_report_id(const uint8_t *desc, uint16_t desc_len,
+                                            uint8_t *out_report_id, BleMouseFormat *out_format) {
+    if (!desc || desc_len == 0) return false;
+
+    struct GlobalState {
+        uint32_t usage_page;
+        uint8_t report_id;
+        uint8_t report_size;
+        uint8_t report_count;
+    };
+    GlobalState current_state = {0, 0, 0, 0};
+    GlobalState state_stack[4];
+    uint8_t stack_depth = 0;
+
+    bool found_xy = false;
+
+    uint16_t i = 0;
+    while (i < desc_len) {
+        uint8_t b = desc[i++];
+        if (b == 0xFE) { // Long item
+            if (i + 2 > desc_len) break;
+            uint8_t data_len = desc[i];
+            i += 2 + data_len;
+            continue;
+        }
+
+        uint8_t bTag = (b >> 4) & 0x0F;
+        uint8_t bType = (b >> 2) & 0x03;
+        uint8_t bSize = b & 0x03;
+        if (bSize == 3) bSize = 4;
+        if (i + bSize > desc_len) break;
+
+        uint32_t val = 0;
+        for (uint8_t j = 0; j < bSize; j++) {
+            val |= ((uint32_t)desc[i + j]) << (8 * j);
+        }
+        i += bSize;
+
+        if (bType == 1) { // Global item
+            if (bTag == 0) { // Usage Page
+                current_state.usage_page = val;
+            } else if (bTag == 7) { // Report Size
+                current_state.report_size = (uint8_t)val;
+            } else if (bTag == 8) { // Report ID
+                current_state.report_id = (uint8_t)val;
+            } else if (bTag == 9) { // Report Count
+                current_state.report_count = (uint8_t)val;
+            } else if (bTag == 10) { // Push
+                if (stack_depth < 4) {
+                    state_stack[stack_depth++] = current_state;
+                }
+            } else if (bTag == 11) { // Pop
+                if (stack_depth > 0) {
+                    current_state = state_stack[--stack_depth];
+                }
+            }
+        } else if (bType == 2) { // Local item
+            if (bTag == 0) { // Usage
+                if (current_state.usage_page == 0x01 && (val == 0x30 || val == 0x31)) {
+                    found_xy = true;
+                }
+            }
+        } else if (bType == 0) { // Main item
+            if (bTag == 8) { // Input
+                if (found_xy && current_state.usage_page == 0x01) {
+                    if (out_report_id) {
+                        *out_report_id = current_state.report_id;
+                    }
+                    if (out_format) {
+                        if (current_state.report_size == 12) {
+                            *out_format = MOUSE_FORMAT_LOGITECH_12BIT;
+                        } else if (current_state.report_size == 16) {
+                            *out_format = MOUSE_FORMAT_16BIT;
+                        } else {
+                            *out_format = MOUSE_FORMAT_STANDARD;
+                        }
+                    }
+                    return true;
+                }
+                found_xy = false;
+            }
+        }
+    }
+    return false;
+}
+
+static void resolve_mouse_format(BleSlot *slot) {
+    if (!slot) return;
+    if (slot->hids_cid == 0) {
+        if (strstr(slot->name, "LIFT") || strstr(slot->name, "Logi") || strstr(slot->name, "MX ")) {
+            slot->mouse_format = MOUSE_FORMAT_LOGITECH_12BIT;
+            slot->mouse_report_id = 2;
+        }
+        return;
+    }
+
+    const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(slot->hids_cid, 0);
+    uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(slot->hids_cid, 0);
+    if (!desc || desc_len == 0) {
+        if (strstr(slot->name, "LIFT") || strstr(slot->name, "Logi") || strstr(slot->name, "MX ")) {
+            slot->mouse_format = MOUSE_FORMAT_LOGITECH_12BIT;
+            slot->mouse_report_id = 2;
+        }
+        return;
+    }
+
+    uint8_t rep_id = 0;
+    BleMouseFormat fmt = MOUSE_FORMAT_UNKNOWN;
+    if (find_mouse_format_and_report_id(desc, desc_len, &rep_id, &fmt)) {
+        slot->mouse_format = fmt;
+        slot->mouse_report_id = rep_id;
+        slot->mouse_format_resolved = true;
+        const char *fmt_name = (fmt == MOUSE_FORMAT_LOGITECH_12BIT) ? "Logitech 12-bit packed" :
+                               (fmt == MOUSE_FORMAT_16BIT) ? "16-bit relative" : "Standard 8-bit";
+        printf("[BLE Host] Slot %u '%s': detected Mouse report (ID %u, format: %s)\n",
+               slot->dev_idx, slot->name, rep_id, fmt_name);
+    } else {
+        slot->mouse_format_resolved = true;
     }
 }
 
@@ -1131,6 +1307,19 @@ void BleHidHost::unbond(uint8_t idx) {
            idx, name, bd_addr_to_str(target_addr), s_bonded_table.count);
 }
 
+// Applies sensitivity scaling with fractional remainder accumulation to avoid dropping sub-count movements
+static inline void scale_mouse_delta(BleSlot *slot, int16_t &dx, int16_t &dy) {
+    if (slot && slot->mouse_speed_percent != 100) {
+        int32_t scaled_x = (int32_t)dx * slot->mouse_speed_percent + slot->scale_rem_x;
+        dx = (int16_t)(scaled_x / 100);
+        slot->scale_rem_x = (int16_t)(scaled_x % 100);
+
+        int32_t scaled_y = (int32_t)dy * slot->mouse_speed_percent + slot->scale_rem_y;
+        dy = (int16_t)(scaled_y / 100);
+        slot->scale_rem_y = (int16_t)(scaled_y % 100);
+    }
+}
+
 void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
     (void)size;
@@ -1157,6 +1346,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
 
                     resolve_led_report(slot);
+                    resolve_mouse_format(slot);
                     if (slot->has_led_report) {
                         uint8_t current_leds = Multiplexer::getHostLeds();
                         hids_client_send_write_report(slot->hids_cid, slot->led_report_id, HID_REPORT_TYPE_OUTPUT, &current_leds, 1);
@@ -1269,6 +1459,9 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             if (!slot->led_report_resolved) {
                 resolve_led_report(slot);
             }
+            if (!slot->mouse_format_resolved) {
+                resolve_mouse_format(slot);
+            }
 
             const uint8_t *report = gattservice_subevent_hid_report_get_report(packet);
             uint16_t len = gattservice_subevent_hid_report_get_report_len(packet);
@@ -1306,14 +1499,32 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     printf("[BLE Host] Key press on slot %u ('%s'): mod=0x%02X key=0x%02X\n",
                            dev_idx, slot->name, data[0], (data_len == 8 ? data[2] : data[1]));
                 }
-            } else if (report_id == 2) {
-                if (data_len == 9) {
+            } else if (report_id == 2 || (slot->mouse_report_id != 0 && report_id == slot->mouse_report_id)) {
+                if (slot->mouse_format == MOUSE_FORMAT_LOGITECH_12BIT ||
+                    (slot->mouse_format == MOUSE_FORMAT_UNKNOWN && (strstr(slot->name, "LIFT") || strstr(slot->name, "Logi") || strstr(slot->name, "MX ")))) {
+                    // Logitech 12-bit packed mouse report:
+                    // data[0]: buttons 1-8, data[1]: buttons 9-16
+                    // data[2..4]: 12-bit packed X and Y
+                    // data[5]: wheel, data[6]: pan (tilt/h-wheel)
+                    if (data_len >= 5) {
+                        uint8_t buttons = data[0];
+                        uint16_t x_raw = (uint16_t)data[2] | (((uint16_t)(data[3] & 0x0F)) << 8);
+                        int16_t dx = (x_raw & 0x0800) ? (int16_t)(x_raw | 0xF000) : (int16_t)x_raw;
+                        uint16_t y_raw = ((uint16_t)(data[3] >> 4)) | (((uint16_t)data[4]) << 4);
+                        int16_t dy = (y_raw & 0x0800) ? (int16_t)(y_raw | 0xF000) : (int16_t)y_raw;
+                        int8_t wheel = (data_len >= 6) ? (int8_t)data[5] : 0;
+                        int8_t pan   = (data_len >= 7) ? (int8_t)data[6] : 0;
+                        scale_mouse_delta(slot, dx, dy);
+                        Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, pan);
+                    }
+                } else if (data_len == 9) {
                     // Keychron Nape Pro 16-bit mouse/trackball with 16-bit wheel and pan
                     uint8_t buttons = data[0];
                     int16_t dx    = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
                     int16_t dy    = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
                     int16_t wheel = (int16_t)((uint16_t)data[5] | ((uint16_t)data[6] << 8));
                     int16_t pan   = (int16_t)((uint16_t)data[7] | ((uint16_t)data[8] << 8));
+                    scale_mouse_delta(slot, dx, dy);
                     Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, (int8_t)wheel, (int8_t)pan);
                 } else if (data_len == 7) {
                     // ProtoArc 16-bit relative trackpad: [buttons, dx_l, dx_h, dy_l, dy_h, wheel, pan]
@@ -1322,12 +1533,14 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
                     int8_t wheel = (int8_t)data[5];
                     int8_t pan = (int8_t)data[6];
+                    scale_mouse_delta(slot, dx, dy);
                     Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, pan);
                 } else if (data_len == 6) {
                     uint8_t buttons = data[0];
                     int16_t dx = (int16_t)((uint16_t)data[1] | ((uint16_t)data[2] << 8));
                     int16_t dy = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
                     int8_t wheel = (int8_t)data[5];
+                    scale_mouse_delta(slot, dx, dy);
                     Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, 0);
                 } else if (data_len >= 3 && data_len <= 5) {
                     uint8_t buttons = data[0];
@@ -1335,6 +1548,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     int16_t dy = (int8_t)data[2];
                     int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
                     int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
+                    scale_mouse_delta(slot, dx, dy);
                     Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, pan);
                 }
             } else if (data_len == 9) {
@@ -1343,6 +1557,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 int16_t dy    = (int16_t)((uint16_t)data[3] | ((uint16_t)data[4] << 8));
                 int16_t wheel = (int16_t)((uint16_t)data[5] | ((uint16_t)data[6] << 8));
                 int16_t pan   = (int16_t)((uint16_t)data[7] | ((uint16_t)data[8] << 8));
+                scale_mouse_delta(slot, dx, dy);
                 Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, (int8_t)wheel, (int8_t)pan);
             } else if (data_len == 8) {
                 Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[2], 6);
@@ -1352,6 +1567,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 int16_t dy = (int8_t)data[2];
                 int8_t wheel = (data_len >= 4) ? (int8_t)data[3] : 0;
                 int8_t pan   = (data_len >= 5) ? (int8_t)data[4] : 0;
+                scale_mouse_delta(slot, dx, dy);
                 Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, wheel, pan);
             } else {
                 printf("[BLE Host] Unhandled HID Report for slot %u (id %u, data_len %u)\n", dev_idx, report_id, data_len);

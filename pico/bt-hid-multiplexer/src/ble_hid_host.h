@@ -28,6 +28,12 @@ public:
     static void dumpDevices();
     static void sendHostLeds(uint8_t leds);
 
+    // Mouse sensitivity scaling (percent, e.g. 100 = 100%, 50 = 50%, 25 = 25%)
+    static void setMouseSpeed(uint8_t slot_idx, uint16_t percent);
+    static uint16_t getMouseSpeed(uint8_t slot_idx);
+    static void setGlobalMouseSpeed(uint16_t percent);
+    static uint16_t getGlobalMouseSpeed();
+
     // Diagnostics and peripheral control
     static void unbond(uint8_t idx);
     static void disconnectSlot(uint8_t slot_idx);

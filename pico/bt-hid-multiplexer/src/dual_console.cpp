@@ -324,6 +324,28 @@ static void handle_command(const char *cmd) {
                 dual_println("Usage: leds [mask]  (e.g. 'leds 2' for CapsLock, 'leds 0' for off)");
             }
         }
+    } else if (strncmp(cmd, "mousespeed", 10) == 0 || strncmp(cmd, "speed", 5) == 0) {
+        const char *arg = (cmd[0] == 'm') ? cmd + 10 : cmd + 5;
+        while (*arg == ' ') arg++;
+        if (*arg == '\0') {
+            dual_printf("Global mouse speed: %u%%\r\n", BleHidHost::getGlobalMouseSpeed());
+            for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+                dual_printf("  Slot %u: %u%%\r\n", i, BleHidHost::getMouseSpeed(i));
+            }
+        } else {
+            int arg1 = -1, arg2 = -1;
+            int count = sscanf(arg, "%d %d", &arg1, &arg2);
+            if (count == 1 && arg1 > 0) {
+                BleHidHost::setGlobalMouseSpeed((uint16_t)arg1);
+                dual_printf("Set global mouse speed to %u%%\r\n", (uint16_t)arg1);
+            } else if (count == 2 && arg1 >= 0 && arg1 < MAX_BLE_DEVICES && arg2 > 0) {
+                BleHidHost::setMouseSpeed((uint8_t)arg1, (uint16_t)arg2);
+                dual_printf("Set slot %d mouse speed to %u%%\r\n", arg1, (uint16_t)arg2);
+            } else {
+                dual_println("Usage: mousespeed [<percent>] | [<slot_idx> <percent>]");
+                dual_println("  e.g. 'mousespeed 50' (set global), 'mousespeed 0 50' (set slot 0)");
+            }
+        }
     } else if (strcmp(cmd, "clearbonds") == 0) {
         dual_println("Clearing BLE bonds...");
         BleHidHost::clearBonds();
@@ -342,6 +364,7 @@ static void handle_command(const char *cmd) {
         dual_println("  devices        - List all connected BLE devices and slot details");
         dual_println("  bonds          - Dump bonded peripheral database and cache");
         dual_println("  desc           - Dump stored BLE HID report descriptor");
+        dual_println("  mousespeed [..]- Get/set mouse sensitivity: [<percent>] or [<slot> <percent>]");
         dual_println("  notif [slot]   - Re-enable BLE HID notifications on slot(s)");
         dual_println("  getreport <s>  - Request HID Input report from slot <s>");
         dual_println("  mode <s> <m>   - Set HID protocol mode (0=boot, 1=report)");

@@ -10,7 +10,8 @@ This project connects wireless BLE keyboards, mice, and integrated trackpads and
 
 - **BLE Central / HOGP Host:**
   - Connects to Bluetooth Low Energy keyboards, mice, and composite keyboard+trackpad peripherals (HID over GATT Profile).
-  - **Integrated Trackpad Support:** Supports multi-touch trackpads (e.g. ProtoArc XK01 TP) with 16-bit relative X/Y motion vectors, vertical scroll wheel, and horizontal pan.
+  - **Integrated Trackpad & Mouse Support:** Supports multi-touch trackpads (e.g. ProtoArc XK01 TP) with 16-bit relative X/Y motion vectors, vertical scroll wheel, horizontal pan, standard 8-bit mice, and Logitech 12-bit packed coordinate mice (e.g. Logitech Lift, MX Master).
+  - **Configurable Mouse Sensitivity:** Scale mouse cursor speed globally or per-slot via `mousespeed <percent>` with sub-count fractional remainder accumulation to avoid dropping micro-movements.
   - Multi-device rollover aggregation: simultaneously merges modifier keys and keypresses across multiple keyboards without ghosting or stuck keys.
   - Rate-decoupled mouse and trackpad vector aggregation (X, Y, scroll wheel, pan, and 5 buttons) up to 1000 Hz.
   - Automatically reconnects to bonded devices across power cycles via non-volatile flash storage.
@@ -88,6 +89,7 @@ Commands supported on either console:
 - `bonds`: Dumps bonded peripheral database and cache
 - `devices`: Lists connected slots with connection handles and HIDS CIDs
 - `desc` / `descriptor`: Dumps stored BLE HID report descriptors
+- `mousespeed [<percent>] | [<slot> <percent>]`: Get or set mouse speed scaling percentage (e.g. `mousespeed 50` for 50% speed, `mousespeed 0 75` for slot 0)
 - `notif [slot]`, `getreport <slot> [id]`, `getmode <slot>`, `mode <slot> <0|1>`, `suspend <slot>`: HID-over-GATT diagnostics (re-enable notifications, read an input report, read/write Protocol Mode, send Exit Suspend)
 - `connparam <slot> <lat> [ms]`, `leds [mask]`: Request LL connection parameters (slave latency, interval) or view/set host Lock LED states
 - `authreq [legacy|sc] [mitm|nomitm]`: Shows or sets the pairing policy used for *new* pairings (default `legacy nomitm`, see below)
