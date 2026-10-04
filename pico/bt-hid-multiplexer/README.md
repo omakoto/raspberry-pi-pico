@@ -55,6 +55,7 @@ Matches the pinout specification from [`circuitpython/ssd1306/`](../../circuitpy
 | **Push Button** | Ground Pin | `GND` | Pin 8 or 13 | Connects pin to GND when pressed |
 | **UART0 TX** | Serial Out | `GP16` | Pin 21 | 115,200 baud, 8N1 / Console & log output |
 | **UART0 RX** | Serial In | `GP17` | Pin 22 | 115,200 baud, 8N1 / Console command input |
+| **USB serial enable** | Jumper to GND | `GP10` | Pin 14 | Connect to GND (e.g. pin 13 or 8) before plugging in to add the USB serial port; internal pull-up, read once at boot |
 | **Host PC USB** | USB D+ / D- | Micro-USB | — | Upstream USB composite device |
 
 ---
@@ -80,7 +81,10 @@ MULTIPLEXER_UART=/dev/ttyUSB0 ./01-install.sh
 ```
 
 ### 3. Diagnostic Serial Console (USB CDC / UART0)
-Interactive serial console and logger running concurrently on USB CDC (`/dev/ttyACM*`) and hardware UART0 (GP16/GP17 at 115,200 baud):
+Interactive serial console and logger running concurrently on USB CDC (`/dev/ttyACM*`) and hardware UART0 (GP16/GP17 at 115,200 baud).
+
+**The USB serial port is off by default**, so the board does not add a serial port to your computer while you work on other microcontroller projects; it then enumerates as just the keyboard/mouse and VIAL interfaces. To get it, connect `GP10` (pin 14) to GND *before* powering the board (the pin is read once at boot; unplug and re-plug after changing the jumper). For "off", leave `GP10` open: do not tie it to another GPIO, because unused pins have an internal pull-down that fights `GP10`'s pull-up and makes the reading unreliable. The hardware UART console is always available. `01-install.sh` does not need the serial port: without it, it reboots the board into BOOTSEL through the VIAL interface (VIA "jump to bootloader" command). For development there is also a build option that always enables the port: `./00-build.sh -DUSB_SERIAL_ALWAYS=ON` (use `-DUSB_SERIAL_ALWAYS=OFF` to go back).
+
 ```bash
 ./02-monitor.sh
 ```

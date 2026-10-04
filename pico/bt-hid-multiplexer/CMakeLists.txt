@@ -80,6 +80,13 @@ pico_set_program_version(bt-hid-multiplexer "1.0.0")
 # Generate UF2, HEX, and map files
 pico_add_extra_outputs(bt-hid-multiplexer)
 
+# For development: build with -DUSB_SERIAL_ALWAYS=ON to always include the USB serial port, without
+# grounding PIN_USB_SERIAL_ENABLE.
+option(USB_SERIAL_ALWAYS "Always enable the USB serial port" OFF)
+if(USB_SERIAL_ALWAYS)
+    target_compile_definitions(bt-hid-multiplexer PRIVATE USB_SERIAL_ALWAYS=1)
+endif()
+
 # Route printf output to TinyUSB CDC serial port
 pico_enable_stdio_usb(bt-hid-multiplexer 0)
 pico_enable_stdio_uart(bt-hid-multiplexer 0)

@@ -2,8 +2,10 @@
 #
 # Flashes the bt-hid-multiplexer firmware to a Raspberry Pi Pico 2 W / Pico W board.
 #
-# Automatically drops the board into BOOTSEL mode via USB CDC 1200-baud touch or
-# UART console without requiring physical button presses or manual mode switching.
+# Automatically drops the board into BOOTSEL mode without requiring physical button presses or
+# manual mode switching, using (in this order) picotool, the board's own USB serial port (1200-baud
+# touch; only present when GP10 is grounded at boot), the VIA "jump to bootloader" command on the
+# VIAL RawHID interface (always present), and the hardware UART console.
 #
 
 set -euo pipefail
@@ -35,8 +37,10 @@ if [[ -n "$PICOTOOL_BIN" ]]; then
     "$PICOTOOL_BIN" reboot -f -u >/dev/null 2>&1 || true
 fi
 
-# 2. Attempt to reboot device to BOOTSEL mode via USB CDC serial console (1200 baud pulse and bootloader command)
-for cdc_dev in /dev/serial/by-id/usb-Raspberry_Pi_Pico_2_W_BLE_HID_Multiplexer*-if00 /dev/ttyACM*; do
+# 2. Attempt to reboot device to BOOTSEL mode via the board's own USB CDC serial console (1200 baud
+#    pulse and bootloader command). Only this board's port is touched, never other ttyACM devices.
+for cdc_dev in /dev/serial/by-id/usb-Raspberry_Pi_Pico_W_BLE_HID_Multiplexer*-if00 \
+               /dev/serial/by-id/usb-Raspberry_Pi_Pico_2_W_BLE_HID_Multiplexer*-if00; do
     if [[ -e "$cdc_dev" ]]; then
         echo "Found active Pico serial console at $cdc_dev. Requesting reboot to BOOTSEL mode..."
         python3 -c "
@@ -58,6 +62,27 @@ except Exception:
         break
     fi
 done
+
+# 2b. Attempt to reboot device to BOOTSEL mode via the VIA "jump to bootloader" command (0x0B) on the
+#     VIAL RawHID interface. This works without the USB serial port; it needs access to the hidraw
+#     node (see ~/cbin/setup/config-hidraw-permission).
+python3 - <<'PYEOF' 2>/dev/null || true
+import glob, os
+for d in sorted(glob.glob('/sys/class/hidraw/hidraw*')):
+    try:
+        if '0003:00002E8A:0000000C' not in open(d + '/device/uevent').read():
+            continue
+        desc = open(d + '/device/report_descriptor', 'rb').read()
+        if not desc.startswith(bytes([0x06, 0x60, 0xFF])):  # vendor usage page 0xFF60 (VIAL)
+            continue
+        fd = os.open('/dev/' + os.path.basename(d), os.O_WRONLY)
+        os.write(fd, bytes([0, 0x0B]) + bytes(31))
+        os.close(fd)
+        print('Sent bootloader command over VIAL RawHID /dev/' + os.path.basename(d))
+        break
+    except Exception:
+        pass
+PYEOF
 
 # 3. Attempt to reboot via hardware UART0 console (GP16/GP17 at 115200 baud)
 UART_DEV="${MULTIPLEXER_UART:-${PICO_UART:-}}"

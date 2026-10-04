@@ -29,8 +29,29 @@ tusb_desc_device_t const desc_device = {
     .bNumConfigurations = 0x01
 };
 
+bool g_usb_serial_enabled = false;
+
+// Without the CDC serial port there is no interface association, so the device class is defined per
+// interface.
+tusb_desc_device_t const desc_device_hid_only = {
+    .bLength            = sizeof(tusb_desc_device_t),
+    .bDescriptorType    = TUSB_DESC_DEVICE,
+    .bcdUSB             = 0x0200,
+    .bDeviceClass       = 0x00,
+    .bDeviceSubClass    = 0x00,
+    .bDeviceProtocol    = 0x00,
+    .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+    .idVendor           = 0x2E8A,
+    .idProduct          = 0x000C,
+    .bcdDevice          = 0x0100,
+    .iManufacturer      = 0x01,
+    .iProduct           = 0x02,
+    .iSerialNumber      = 0x03,
+    .bNumConfigurations = 0x01
+};
+
 uint8_t const * tud_descriptor_device_cb(void) {
-    return (uint8_t const *) &desc_device;
+    return g_usb_serial_enabled ? (uint8_t const *) &desc_device : (uint8_t const *) &desc_device_hid_only;
 }
 
 // HID 0 Report Descriptor: Composite Keyboard + Mouse
@@ -89,9 +110,24 @@ uint8_t const desc_configuration[] = {
                              EPNUM_HID_RAWHID_OUT, EPNUM_HID_RAWHID_IN, 32, 1)
 };
 
+// The same two HID interfaces without the CDC serial port (interface numbers start at 0).
+#define CONFIG_TOTAL_LEN_HID_ONLY  (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
+
+uint8_t const desc_configuration_hid_only[] = {
+    TUD_CONFIG_DESCRIPTOR(1, 2, 0, CONFIG_TOTAL_LEN_HID_ONLY, 0x00, 100),
+
+    // Interface 0: HID Keyboard & Mouse
+    TUD_HID_INOUT_DESCRIPTOR(0, 5, HID_ITF_PROTOCOL_KEYBOARD, sizeof(desc_hid_kbd_mouse_report),
+                             EPNUM_HID_KBD_MOUSE_OUT, EPNUM_HID_KBD_MOUSE_IN, 16, 1),
+
+    // Interface 1: HID VIAL RawHID
+    TUD_HID_INOUT_DESCRIPTOR(1, 6, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_rawhid_report),
+                             EPNUM_HID_RAWHID_OUT, EPNUM_HID_RAWHID_IN, 32, 1)
+};
+
 uint8_t const * tud_descriptor_configuration_cb(uint8_t index) {
     (void) index;
-    return desc_configuration;
+    return g_usb_serial_enabled ? desc_configuration : desc_configuration_hid_only;
 }
 
 // String Descriptors

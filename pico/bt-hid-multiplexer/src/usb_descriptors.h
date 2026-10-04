@@ -21,6 +21,10 @@ enum {
     ITF_NUM_TOTAL
 };
 
+// Whether the USB device includes the CDC serial port. Must be set before tusb_init(): the USB
+// descriptors cannot change while the device is attached.
+extern bool g_usb_serial_enabled;
+
 // RawHID buffer size for VIAL protocol transfers
 #define RAWHID_REPORT_SIZE 32
 

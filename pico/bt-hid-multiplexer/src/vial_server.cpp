@@ -13,6 +13,7 @@
 #define VIA_CMD_DYNAMIC_KEYMAP_GET_KEYCODE  0x04
 #define VIA_CMD_DYNAMIC_KEYMAP_SET_KEYCODE  0x05
 #define VIA_CMD_DYNAMIC_KEYMAP_RESET        0x06
+#define VIA_CMD_BOOTLOADER_JUMP             0x0B
 #define VIA_CMD_MACRO_GET_COUNT             0x0C
 #define VIA_CMD_MACRO_GET_BUFFER_SIZE       0x0D
 #define VIA_CMD_DYNAMIC_KEYMAP_GET_LAYER_COUNT 0x11
@@ -34,6 +35,12 @@
 #define VIAL_CMD_QMK_SETTINGS_SET           0x0B
 #define VIAL_CMD_QMK_SETTINGS_RESET         0x0C
 #define VIAL_CMD_DYNAMIC_ENTRY_OP           0x0D
+
+bool VialServer::bootloader_requested_ = false;
+
+bool VialServer::bootloaderRequested() {
+    return bootloader_requested_;
+}
 
 void VialServer::init() {
     VirtualMatrix::init();
@@ -104,6 +111,11 @@ void VialServer::handleViaCommand(const uint8_t *in_buf, uint8_t *out_buf) {
 
         case VIA_CMD_DYNAMIC_KEYMAP_RESET: // 0x06
             VirtualMatrix::resetKeymap();
+            break;
+
+        case VIA_CMD_BOOTLOADER_JUMP: // 0x0B
+            // The reply (an echo) goes out first; the main loop then reboots.
+            bootloader_requested_ = true;
             break;
 
         case VIA_CMD_MACRO_GET_COUNT: // 0x0C

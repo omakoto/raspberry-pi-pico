@@ -17,7 +17,7 @@ Example used throughout this manual: a Logitech device with a vertical wheel, a 
 - The multiplexer flashed and running (see the main [README](../README.md)).
 - The device paired with the multiplexer (see [How to Pair a Device](../README.md#how-to-pair-a-device)) and working.
 - VIAL access from Chrome (on Linux, run `~/cbin/setup/config-hidraw-permission` once, see [Keymapping with VIAL](../README.md#keymapping-with-vial)).
-- The serial console, which is where the binding is made: run `./02-monitor.sh` from the project directory. Anything you type there is a *console command*.
+- The serial console, which is where the binding is made. The USB serial port is only present when pin `GP10` (pin 14) is connected to GND before the board is plugged in (see the README); alternatively use the hardware UART. Run `./02-monitor.sh` from the project directory. Anything you type there is a *console command*.
 
 ---
 

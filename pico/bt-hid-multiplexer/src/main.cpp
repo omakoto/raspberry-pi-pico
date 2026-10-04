@@ -71,7 +71,17 @@ int main() {
     // 4. Initialize Multi-device Multiplexer
     Multiplexer::init();
 
-    // 5. Initialize TinyUSB Device Stack
+    // 5. Initialize TinyUSB Device Stack. The USB serial port is only part of the device when
+    //    PIN_USB_SERIAL_ENABLE is grounded at boot (or when forced at build time).
+    gpio_init(PIN_USB_SERIAL_ENABLE);
+    gpio_set_dir(PIN_USB_SERIAL_ENABLE, GPIO_IN);
+    gpio_pull_up(PIN_USB_SERIAL_ENABLE);
+    sleep_us(200);  // let the pull-up settle before sampling
+#ifdef USB_SERIAL_ALWAYS
+    g_usb_serial_enabled = true;
+#else
+    g_usb_serial_enabled = !gpio_get(PIN_USB_SERIAL_ENABLE);
+#endif
     tusb_init();
 
     // 6. Initialize CYW43 wireless controller and BTstack integration
@@ -98,6 +108,9 @@ int main() {
         tud_task();
         flush_vial_reply();
         VirtualMatrix::flushPendingSave();
+        if (VialServer::bootloaderRequested() && !s_vial_reply_pending && tud_hid_n_ready(1)) {
+            reboot_to_bootsel();  // after the reply to the jump command has gone out
+        }
         dual_console_update();
 
         // Flush any pending keyboard reports or accumulated mouse/trackpad movement

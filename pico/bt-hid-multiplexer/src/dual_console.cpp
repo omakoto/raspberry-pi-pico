@@ -1,4 +1,5 @@
 #include "dual_console.h"
+#include "usb_descriptors.h"
 #include "config.h"
 #include "ble_hid_host.h"
 #include "classic_hid_host.h"
@@ -516,6 +517,7 @@ void print_welcome_banner() {
     dual_printf ("  Hardware : %s\r\n", board_name);
     dual_printf ("  Firmware : v1.0.0 (Built %s %s)\r\n", __DATE__, __TIME__);
     dual_printf ("  Status   : %s\r\n", BleHidHost::isConnected() ? "Connected" : "Ready / Idle");
+    dual_printf ("  USB serial : %s\r\n", g_usb_serial_enabled ? "enabled" : "disabled (ground GP10 and re-plug to enable)");
     dual_println("  Type 'help' for available console commands.");
     dual_println("==================================================\r\n");
 }

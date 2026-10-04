@@ -17,6 +17,10 @@
 
 // Hardware UART0 Console (matches nsbackend-pico pinout)
 #define UART_PORT               uart0
+// The USB serial port is only added to the USB device when this pin is connected to GND while the
+// board powers up, so that it does not clutter the host with another serial port during other
+// projects' development. The hardware UART console is always available.
+#define PIN_USB_SERIAL_ENABLE   10 // GP10 (Physical Pin 14), internal pull-up, low = serial on
 #define PIN_UART_TX             16 // GP16 (Physical Pin 21)
 #define PIN_UART_RX             17 // GP17 (Physical Pin 22)
 #define UART_BAUDRATE           115200
