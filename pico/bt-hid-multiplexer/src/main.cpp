@@ -15,9 +15,9 @@
 #include "usb_descriptors.h"
 #include "dual_console.h"
 
-// Track LED heartbeat state
+// Track pairing indicator LED state
 static bool s_led_state = false;
-static uint32_t s_last_heartbeat_ms = 0;
+static uint32_t s_last_led_toggle_ms = 0;
 static uint32_t s_last_display_update_ms = 0;
 static char s_toast_msg[32] = {0};
 static uint32_t s_toast_expiry_ms = 0;
@@ -66,7 +66,7 @@ int main() {
 
     // Hold boot splash screen on display for 2.0 seconds from startup
     const uint32_t splash_end_ms = to_ms_since_boot(get_absolute_time()) + 2000;
-    s_last_heartbeat_ms = to_ms_since_boot(get_absolute_time());
+    s_last_led_toggle_ms = to_ms_since_boot(get_absolute_time());
     s_last_display_update_ms = splash_end_ms;
 
     while (true) {
@@ -110,11 +110,16 @@ int main() {
             Multiplexer::acknowledgeLeds();
         }
 
-        // Heartbeat LED (1 Hz blink rate: 500ms on, 500ms off)
-        if (now - s_last_heartbeat_ms >= HEARTBEAT_INTERVAL_MS) {
-            s_last_heartbeat_ms = now;
-            s_led_state = !s_led_state;
-            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, s_led_state);
+        // Pairing Mode LED indicator: rapid-blinks at 5 Hz (100ms on, 100ms off) during pairing mode; OFF otherwise
+        if (BleHidHost::isPairingMode()) {
+            if (now - s_last_led_toggle_ms >= PAIRING_LED_BLINK_INTERVAL_MS) {
+                s_last_led_toggle_ms = now;
+                s_led_state = !s_led_state;
+                cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, s_led_state);
+            }
+        } else if (s_led_state) {
+            s_led_state = false;
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
         }
 
         // Ensure background scanning is active whenever there are unconnected bonded devices or pairing mode is active

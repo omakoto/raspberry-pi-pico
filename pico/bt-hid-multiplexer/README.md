@@ -33,8 +33,8 @@ This project connects wireless BLE keyboards, mice, and integrated trackpads and
   - Keymaps are persisted across reboots in RP2350 flash memory.
 - **Reverse Lock LED Sync:**
   - Forward CapsLock, NumLock, and ScrollLock status from the host PC back over BLE to connected keyboards.
-- **Visual Heartbeat Indicator:**
-  - Onboard wireless LED blinks at 1 Hz (500 ms on, 500 ms off) to verify microcontroller execution health.
+- **Pairing Mode LED Indicator:**
+  - Onboard wireless LED rapid-blinks at 5 Hz (100 ms on, 100 ms off) during active BLE pairing mode; remains completely OFF otherwise.
 
 ---
 

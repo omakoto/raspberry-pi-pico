@@ -61,7 +61,7 @@
 
 // UI and Timer Intervals
 #define STATUS_UPDATE_INTERVAL_MS   100
-#define HEARTBEAT_INTERVAL_MS       500
+#define PAIRING_LED_BLINK_INTERVAL_MS 100 // 5 Hz blink rate (100ms on, 100ms off) in pairing mode
 #define PAIRING_SCAN_TIMEOUT_MS     60000
 
 #endif // CONFIG_H_
