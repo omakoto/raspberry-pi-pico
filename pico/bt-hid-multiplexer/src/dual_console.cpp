@@ -236,10 +236,10 @@ static void handle_command(const char *cmd) {
     if (strcmp(cmd, "bootloader") == 0 || strcmp(cmd, "bootsel") == 0 || strcmp(cmd, "reboot bootloader") == 0) {
         reboot_to_bootsel();
     } else if (strcmp(cmd, "pair") == 0 || strcmp(cmd, "scan") == 0) {
-        dual_println("Starting BLE pairing mode (60s)...");
+        dual_println("Starting pairing mode (60s)...");
         BleHidHost::startPairingMode();
     } else if (strcmp(cmd, "stop") == 0) {
-        dual_println("Stopping BLE pairing mode and scan.");
+        dual_println("Stopping pairing mode and scan.");
         BleHidHost::stopPairingMode();
         BleHidHost::stopScan();
     } else if (strcmp(cmd, "status") == 0) {
@@ -471,8 +471,8 @@ static void handle_command(const char *cmd) {
     } else if (strcmp(cmd, "help") == 0) {
         dual_println("Available Commands:");
         dual_println("  bootloader     - Reboot board directly into USB BOOTSEL ROM");
-        dual_println("  pair / scan    - Start BLE pairing mode (60s window for new devices)");
-        dual_println("  stop           - Stop active BLE pairing mode and discovery scan");
+        dual_println("  pair / scan    - Start pairing mode (60s window for new BLE and classic devices)");
+        dual_println("  stop           - Stop active pairing mode and discovery scan");
         dual_println("  status         - Display connection status, layer, and uptime");
         dual_println("  devices        - List all connected BLE devices and slot details");
         dual_println("  bonds          - Dump bonded peripheral database and cache (BLE and classic)");

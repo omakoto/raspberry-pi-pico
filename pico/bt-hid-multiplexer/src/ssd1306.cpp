@@ -243,7 +243,7 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
             drawString("USB: Active | VIAL: Ready", 2, 40, true, false);
         }
     } else if (pairing_active) {
-        drawString("BLE PAIRING...", 4, 18, true, true);
+        drawString("BT PAIRING...", 4, 18, true, true);
         drawString("Place device in pair mode", 2, 38, true, false);
     } else {
         drawString("DISCONNECTED", 4, 18, true, true);
