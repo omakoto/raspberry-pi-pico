@@ -195,6 +195,14 @@ static void handle_command(const char *cmd) {
         } else {
             dual_println("Usage: cconnect <classic_bond_idx>   (indices from 'bonds', [cN])");
         }
+    } else if (strncmp(cmd, "cqos", 4) == 0) {
+        int slot = -1, type = 1;
+        unsigned long latency_us = 0;
+        if (sscanf(cmd + 4, "%d %d %lu", &slot, &type, &latency_us) >= 1 && slot >= 0) {
+            ClassicHidHost::setQos((uint8_t)slot, (uint8_t)type, (uint32_t)latency_us);
+        } else {
+            dual_println("Usage: cqos <classic_slot> [service_type 0-2] [latency_us]");
+        }
     } else if (strncmp(cmd, "cdisconnect", 11) == 0) {
         int slot = -1;
         if (sscanf(cmd + 11, "%d", &slot) == 1 && slot >= 0) {
@@ -384,6 +392,7 @@ static void handle_command(const char *cmd) {
         dual_println("  bonds          - Dump bonded peripheral database and cache (BLE and classic)");
         dual_println("  cconnect <n>   - Connect to classic bond [cN] from 'bonds' (host-initiated reconnect)");
         dual_println("  cdisconnect <n>- Drop classic Bluetooth HID slot n");
+        dual_println("  cqos <n> [t] [us] - Experimental: set classic slot n link QoS (type t 0-2, latency in us)");
         dual_println("  desc           - Dump stored BLE HID report descriptor");
         dual_println("  mousespeed [..]- Get/set mouse sensitivity: [<percent>] or [<slot> <percent>]");
         dual_println("  notif [slot]   - Re-enable BLE HID notifications on slot(s)");

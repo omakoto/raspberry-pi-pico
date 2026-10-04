@@ -8,6 +8,9 @@ This project connects wireless BLE keyboards, mice, and integrated trackpads and
 
 ## Features
 
+- **Bluetooth Classic (BR/EDR) HID Host:**
+  - Connects keyboards, numeric keypads, trackpads and mice that only speak the classic HID profile and are therefore invisible to the BLE scan (up to 4 at once, `MAX_CLASSIC_DEVICES`). Their input is merged into the same USB output as the BLE devices.
+  - Pairing mode also runs a classic inquiry. See [Bluetooth Classic devices](#bluetooth-classic-devices).
 - **BLE Central / HOGP Host:**
   - Connects to Bluetooth Low Energy keyboards, mice, and composite keyboard+trackpad peripherals (HID over GATT Profile).
   - **Integrated Trackpad & Mouse Support:** Supports multi-touch trackpads (e.g. ProtoArc XK01 TP) with 16-bit relative X/Y motion vectors, vertical scroll wheel, horizontal pan, standard 8-bit mice, and Logitech 12-bit packed coordinate mice (e.g. Logitech Lift, MX Master).
@@ -86,8 +89,8 @@ Commands supported on either console:
 - `pair` / `scan`: Initiates 60-second BLE discovery pairing window
 - `stop`: Halts BLE scanning
 - `status`: Displays uptime, connection state, device name, and active layer
-- `bonds`: Dumps bonded peripheral database and cache
-- `devices`: Lists connected slots with connection handles and HIDS CIDs
+- `bonds`: Dumps bonded peripheral database and cache (BLE bonds, then classic bonds as `[c0]`, `[c1]`, ...)
+- `devices`: Lists connected BLE slots with connection handles and HIDS CIDs, then connected classic slots. For each classic slot it also prints the mouse-report statistics collected since the previous `devices` call (reports/s, longest gap, histogram of gaps between reports) and whether the Pico is master or slave on the link, which is how trackpad stutter is diagnosed. The counters are reset by every call
 - `desc` / `descriptor`: Dumps stored BLE HID report descriptors
 - `mousespeed [<percent>] | [<slot> <percent>]`: Get or set mouse speed scaling percentage (e.g. `mousespeed 50` for 50% speed, `mousespeed 0 75` for slot 0)
 - `notif [slot]`, `getreport <slot> [id]`, `getmode <slot>`, `mode <slot> <0|1>`, `suspend <slot>`: HID-over-GATT diagnostics (re-enable notifications, read an input report, read/write Protocol Mode, send Exit Suspend)
@@ -95,7 +98,9 @@ Commands supported on either console:
 - `authreq [legacy|sc] [mitm|nomitm]`: Shows or sets the pairing policy used for *new* pairings (default `legacy nomitm`, see below)
 - `log on|off`: Verbose mode, off by default: BTstack's internal `log_info` output (SM pairing method, GATT timeouts and security errors, HIDS client steps) plus advertising reports of non-HID devices nearby
 - `hcilog on|off`, `reports on|off`: Raw ATT packet dump (ACL only) and per-report/per-keystroke dump of incoming HID reports, both off by default because every console line blocks the BTstack context for milliseconds and shows up as input latency
-- `disconnect <slot>`, `unbond <idx>`, `clearbonds`: Drop a link, forget one bond, or forget all bonds
+- `disconnect <slot>`, `unbond <idx>`, `clearbonds`: Drop a BLE link, forget one BLE bond, or forget all bonds (BLE and classic)
+- `cconnect <n>`, `cdisconnect <slot>`: Bluetooth Classic only. `cconnect` makes the Pico page the classic bond `[cN]` listed by `bonds` (a host-initiated reconnect, for devices that do not reconnect by themselves); `cdisconnect` drops classic slot `<slot>`
+- `cqos <slot> [type] [latency_us]`: Bluetooth Classic only, experimental. Requests a QoS (poll interval) setting on a classic slot's link, `type` 0 = no traffic, 1 = best effort, 2 = guaranteed (default 1). A latency bound of 5000 µs is already applied automatically to every classic link
 - `reset`: Clears all bonded devices and resets keymap to default
 - `help`: Lists all console commands
 
@@ -109,12 +114,23 @@ Commands supported on either console:
 ### CCCD discovery: Read By Type (`ENABLE_GATT_LEGACY_CCC_DISCOVERY`)
 BTstack's default Find-Information walk for locating a report's Client Characteristic Configuration Descriptor loses the CCCD write when a peripheral returns one descriptor per response (small ATT MTU, e.g. the ProtoArc XK01 at MTU 23): every notification enable then ends in a 30 s GATT timeout and only reports whose CCCD the device restored from its own bond ever arrive. `btstack_config.h` therefore selects the Read-By-Type lookup. If a device connects but some of its reports stay silent, check `log on` output for `GATT client timeout` and `hcilog on` for missing ATT Write Requests (`12 <handle> 01 00`).
 
+### Bluetooth Classic devices
+Classic-only peripherals never advertise over BLE, so the BLE scan cannot see them. `ClassicHidHost` (`src/classic_hid_host.cpp`) handles them with BTstack's `hid_host`:
+- **Pairing:** during pairing mode (`pair` / button) the Pico runs repeating ~10 s classic inquiry bursts and connects to the first peripheral-class device it finds (log lines `Found '<name>' …`; `Inquiry: ignoring …` for other classic devices in range). Put the device in its own pairing mode first; if the first attempt fails, the next burst retries. Pairing uses Secure Simple Pairing (just works, or a passkey shown on the OLED for keyboards) and falls back to the legacy PIN `0000`. Pairing from devices that were not found during pairing mode is refused.
+- **Re-pairing a bonded device:** works the same way. If the device forgot its key, authentication fails, BTstack drops the Pico's stale key and a following attempt pairs afresh.
+- **Reconnecting:** the Pico is always connectable and accepts incoming connections from bonded devices, so a bonded device normally reconnects when its user presses a key. Link keys are stored in the flash TLV and survive reboots. If a device does not come back by itself, use `cconnect <n>` (index from `bonds`). `unbond` only affects BLE bonds; `clearbonds` / `reset` and the 8 s button press clear classic bonds too.
+- **Reports:** the HID report descriptor is parsed to find the keyboard, mouse and LED reports (any axis width, report IDs supported); reports that arrive before the descriptor is known are dropped, since their report IDs would otherwise be misread as keyboard data. Host Caps/Num Lock state is mirrored to classic keyboards.
+- **Slots:** classic devices use multiplexer device indices `MAX_BLE_DEVICES` and up, so `MAX_KEYBOARDS` / `MAX_MICE` cover both.
+- **Trackpad smoothness:** the Pico requests master role on every classic link and a 5 ms QoS latency bound (`LINK_QOS_LATENCY_US`), which turned reports arriving in 3–4 report bursts every ~40 ms into a steady ~10 ms cadence. Known limitation: while BLE devices are connected as well, classic reports occasionally stall for 60–300 ms because the single CYW43 radio is shared, and roughly 10 % of gaps stay at 30–60 ms.
+
 ### Pairing policy: LE legacy pairing by default
 The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Request by default. LE Secure Connections is compiled in but opt-in (`authreq sc`), because the ProtoArc XK01 keyboard pairs and encrypts fine over Secure Connections yet never sends a single HID input notification afterwards, while it works with legacy pairing. A keyboard that insists on MITM still gets passkey entry (the PIN shows on the OLED), and `authreq legacy mitm` forces it. The policy only affects new pairings: `unbond <idx>` a device and re-pair it to apply a new policy.
 
 ---
 
 ## How to Pair a Device
+
+(For classic-only keyboards, keypads and mice the same steps apply; see [Bluetooth Classic devices](#bluetooth-classic-devices).)
 
 1. **Enter Pairing Mode:**
    - Press the push button on `GP6` (or hold for 2s, or run `pair` from console) until the OLED screen displays `BLE PAIRING...` (or toast `Pairing Mode (60s)`).

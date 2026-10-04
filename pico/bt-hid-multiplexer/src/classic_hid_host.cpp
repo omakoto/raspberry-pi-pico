@@ -28,6 +28,17 @@
 
 #define HID_BOOT_KBD_REPORT_LEN 8
 
+// Latency bound requested from the controller for each classic HID link. Without it the CYW43
+// polls an idle-looking peripheral rarely enough that a trackpad's reports arrive in bursts of 3-4
+// every ~40 ms; with 5 ms they arrive at a steady ~10 ms cadence. Tighter values (2.5 ms) were
+// measured to be no better.
+#define LINK_QOS_LATENCY_US     5000
+
+// An inter-report gap above this is visible as a stutter on a pointing device.
+#define SLOW_GAP_US             30000
+// Upper bounds (us) of the gap histogram buckets; the last bucket is open-ended.
+static const uint32_t GAP_BUCKET_US[5] = {2000, 8000, 16000, 30000, 60000};
+
 struct FieldLoc {
     bool valid;
     bool is_signed;
@@ -55,8 +66,17 @@ struct ClassicSlot {
     char name[32];
     uint8_t dev_idx;
     bool report_protocol;   // false: boot protocol (fixed-layout reports, no report IDs)
+    bool descriptor_pending; // reports cannot be told apart until the descriptor has been resolved
     ReportMap map;
     uint32_t last_used_ms;
+    // Mouse report arrival statistics since the last 'devices' dump (diagnoses motion stutter).
+    uint32_t stat_start_us;
+    uint32_t stat_last_us;
+    uint32_t stat_count;
+    uint32_t stat_max_gap_us;
+    uint32_t stat_slow_gaps;   // gaps above SLOW_GAP_US
+    uint32_t stat_hist[6];     // gap histogram, see GAP_BUCKET_US
+    hci_con_handle_t con_handle;
 };
 
 static ClassicSlot s_slots[MAX_CLASSIC_DEVICES];
@@ -99,6 +119,7 @@ static ClassicSlot* alloc_slot() {
             s_slots[i].in_use = true;
             s_slots[i].dev_idx = MAX_BLE_DEVICES + i;
             s_slots[i].report_protocol = true;
+            s_slots[i].descriptor_pending = true;
             return &s_slots[i];
         }
     }
@@ -301,7 +322,24 @@ static T clamp_to(int32_t v, int32_t lo, int32_t hi) {
 // Report handling
 // ---------------------------------------------------------------------------------------------
 
+static void record_mouse_arrival(ClassicSlot *s) {
+    uint32_t now = time_us_32();
+    if (s->stat_count == 0) {
+        s->stat_start_us = now;
+    } else {
+        uint32_t gap = now - s->stat_last_us;
+        if (gap > s->stat_max_gap_us) s->stat_max_gap_us = gap;
+        if (gap > SLOW_GAP_US) s->stat_slow_gaps++;
+        uint8_t b = 0;
+        while (b < 5 && gap >= GAP_BUCKET_US[b]) b++;
+        s->stat_hist[b]++;
+    }
+    s->stat_last_us = now;
+    s->stat_count++;
+}
+
 static void handle_mouse(ClassicSlot *s, const uint8_t *d, uint16_t len, const ReportMap &m) {
+    record_mouse_arrival(s);
     uint8_t buttons = m.buttons.valid ? (uint8_t)get_field(d, len, m.buttons) : 0;
     int16_t dx = m.x.valid ? clamp_to<int16_t>(get_field(d, len, m.x), -32768, 32767) : 0;
     int16_t dy = m.y.valid ? clamp_to<int16_t>(get_field(d, len, m.y), -32768, 32767) : 0;
@@ -311,6 +349,10 @@ static void handle_mouse(ClassicSlot *s, const uint8_t *d, uint16_t len, const R
 }
 
 static void handle_report(ClassicSlot *s, const uint8_t *rep, uint16_t len) {
+    // A peripheral that reconnects by itself may send reports before its descriptor is known. Its
+    // report IDs would then be misread as boot-layout data (a mouse report with ID 5 decodes as
+    // modifier byte 0x05), leaving modifier keys stuck, so such reports are dropped.
+    if (s->descriptor_pending) return;
     // The first byte is the HIDP DATA|INPUT header.
     if (len < 2 || rep[0] != 0xA1) return;
     rep++;
@@ -346,6 +388,14 @@ static void handle_report(ClassicSlot *s, const uint8_t *rep, uint16_t len) {
         boot.y = FieldLoc{true, true, 8, 16};
         if (len == 4) boot.wheel = FieldLoc{true, true, 8, 24};
         handle_mouse(s, rep, len, boot);
+    }
+}
+
+static void apply_link_qos(ClassicSlot *s) {
+    uint8_t status = gap_qos_set(s->con_handle, HCI_SERVICE_TYPE_BEST_EFFORT, 0xFFFFFFFF, 0xFFFFFFFF,
+                                 LINK_QOS_LATENCY_US, 0xFFFFFFFF);
+    if (status != ERROR_CODE_SUCCESS) {
+        printf("[Classic Host] Slot %u: QoS request failed (0x%02X)\n", s->dev_idx - MAX_BLE_DEVICES, status);
     }
 }
 
@@ -465,6 +515,27 @@ static void handle_hci_event(uint8_t packet_type, uint16_t channel, uint8_t *pac
                    hci_event_authentication_complete_get_status(packet));
             break;
 
+        case HCI_EVENT_ROLE_CHANGE:
+            hci_event_role_change_get_bd_addr(packet, addr);
+            if (hci_event_role_change_get_status(packet) == ERROR_CODE_SUCCESS) {
+                ClassicSlot *s = find_slot_by_addr(addr);
+                if (s) apply_link_qos(s);
+            }
+            printf("[Classic Host] Role change: status 0x%02X, we are now %s\n",
+                   hci_event_role_change_get_status(packet),
+                   hci_event_role_change_get_role(packet) == HCI_ROLE_MASTER ? "master" : "slave");
+            break;
+
+        case HCI_EVENT_QOS_SETUP_COMPLETE:
+            printf("[Classic Host] QoS setup complete: status 0x%02X\n", packet[2]);
+            break;
+
+        case HCI_EVENT_MODE_CHANGE:
+            printf("[Classic Host] Mode change: status 0x%02X, mode %u (0=active 2=sniff), interval %u slots\n",
+                   hci_event_mode_change_get_status(packet), hci_event_mode_change_get_mode(packet),
+                   hci_event_mode_change_get_interval(packet));
+            break;
+
         case HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE: {
             if (hci_event_remote_name_request_complete_get_status(packet) != ERROR_CODE_SUCCESS) break;
             hci_event_remote_name_request_complete_get_bd_addr(packet, addr);
@@ -515,7 +586,15 @@ static void handle_hid_event(uint8_t packet_type, uint16_t channel, uint8_t *pac
                 break;
             }
             s->hid_cid = hid_subevent_connection_opened_get_hid_cid(packet);
+            s->con_handle = hid_subevent_connection_opened_get_con_handle(packet);
             bd_addr_copy(s->addr, addr);
+            // As master we schedule the polling of the peripheral; a peripheral that paged us
+            // would otherwise stay master and decide how often we can hear from it.
+            printf("[Classic Host] Link role: we are %s\n",
+                   gap_get_role(s->con_handle) == HCI_ROLE_MASTER ? "master" : "slave");
+            if (gap_get_role(s->con_handle) != HCI_ROLE_MASTER) {
+                gap_request_role(addr, HCI_ROLE_MASTER);
+            }
             if (bd_addr_cmp(addr, s_connecting_addr) == 0 && s_connecting_name[0]) {
                 snprintf(s->name, sizeof(s->name), "%s", s_connecting_name);
             }
@@ -534,6 +613,8 @@ static void handle_hid_event(uint8_t packet_type, uint16_t channel, uint8_t *pac
             uint16_t cid = hid_subevent_descriptor_available_get_hid_cid(packet);
             ClassicSlot *s = find_slot_by_cid(cid);
             if (!s) break;
+            s->descriptor_pending = false;
+            apply_link_qos(s);
             if (hid_subevent_descriptor_available_get_status(packet) == ERROR_CODE_SUCCESS) {
                 parse_report_map(hid_descriptor_storage_get_descriptor_data(cid),
                                  hid_descriptor_storage_get_descriptor_len(cid), &s->map);
@@ -657,6 +738,22 @@ void ClassicHidHost::dumpDevices() {
                i, s.name, bd_addr_to_str(s.addr), s.hid_cid, s.report_protocol ? "report" : "boot",
                s.map.has_kbd, s.map.has_mouse, s.map.has_led,
                (unsigned long)((to_ms_since_boot(get_absolute_time()) - s.last_used_ms) / 1000));
+        if (s.stat_count > 1) {
+            uint32_t span_us = s.stat_last_us - s.stat_start_us;
+            printf("    mouse reports since last dump: %lu in %lu ms (%lu/s), max gap %lu ms, gaps > %d ms: %lu\n",
+                   (unsigned long)s.stat_count, (unsigned long)(span_us / 1000),
+                   (unsigned long)((uint64_t)(s.stat_count - 1) * 1000000 / (span_us ? span_us : 1)),
+                   (unsigned long)(s.stat_max_gap_us / 1000), SLOW_GAP_US / 1000,
+                   (unsigned long)s.stat_slow_gaps);
+            printf("    gap histogram: <2ms %lu, 2-8ms %lu, 8-16ms %lu, 16-30ms %lu, 30-60ms %lu, >60ms %lu\n",
+                   (unsigned long)s.stat_hist[0], (unsigned long)s.stat_hist[1], (unsigned long)s.stat_hist[2],
+                   (unsigned long)s.stat_hist[3], (unsigned long)s.stat_hist[4], (unsigned long)s.stat_hist[5]);
+        }
+        printf("    link: we are %s\n", gap_get_role(s.con_handle) == HCI_ROLE_MASTER ? "master" : "slave");
+        s_slots[i].stat_count = 0;
+        s_slots[i].stat_max_gap_us = 0;
+        s_slots[i].stat_slow_gaps = 0;
+        memset(s_slots[i].stat_hist, 0, sizeof(s_slots[i].stat_hist));
     }
 }
 
@@ -701,6 +798,17 @@ void ClassicHidHost::disconnectSlot(uint8_t slot_idx) {
     if (slot_idx < MAX_CLASSIC_DEVICES && s_slots[slot_idx].in_use) {
         hid_host_disconnect(s_slots[slot_idx].hid_cid);
     }
+}
+
+void ClassicHidHost::setQos(uint8_t slot_idx, uint8_t service_type, uint32_t latency_us) {
+    if (slot_idx >= MAX_CLASSIC_DEVICES || !s_slots[slot_idx].in_use) {
+        printf("[Classic Host] No classic slot %u\n", slot_idx);
+        return;
+    }
+    uint8_t status = gap_qos_set(s_slots[slot_idx].con_handle, (hci_service_type_t)service_type,
+                                 0xFFFFFFFF, 0xFFFFFFFF, latency_us, 0xFFFFFFFF);
+    printf("[Classic Host] QoS request (type %u, latency %lu us) status 0x%02X\n", service_type,
+           (unsigned long)latency_us, status);
 }
 
 void ClassicHidHost::clearBonds() {

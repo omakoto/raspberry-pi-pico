@@ -30,6 +30,9 @@ public:
     static void dumpBonds();
     static void connectBonded(uint8_t bond_idx);
     static void disconnectSlot(uint8_t slot_idx);
+    // Experiment: ask the controller for a QoS (poll interval) setting on a slot's ACL link.
+    // service_type: 0 no traffic, 1 best effort, 2 guaranteed; latency in microseconds.
+    static void setQos(uint8_t slot_idx, uint8_t service_type, uint32_t latency_us);
     static void clearBonds();
 };
 
