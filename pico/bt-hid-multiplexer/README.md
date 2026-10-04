@@ -152,7 +152,8 @@ The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Reques
 
 ## Keymapping with VIAL
 
-1. Connect the Pico 2 W upstream USB cable to your computer.
-2. Open **[https://vial.rocks/](https://vial.rocks/)** in Google Chrome or any Chromium-based browser.
-3. Click **Start** and select **Pico 2 W BLE HID Multiplexer**.
-4. Remap keys across 4 layers (Base, Nav/Media, Function, NumPad). Changes take effect instantly and are stored in flash.
+1. On Linux, run `~/cbin/setup/config-hidraw-permission` once (idempotent) so Chrome may open the board's VIAL hidraw node. It installs a udev rule for all Raspberry Pi USB devices (vendor `2e8a`: Pico, Pico W, Pico 2, Pico 2 W); without it vial.rocks hangs on "Connecting to the device...". Re-plug the board afterwards.
+2. Connect the Pico 2 W upstream USB cable to your computer.
+3. Open **[https://vial.rocks/](https://vial.rocks/)** in Google Chrome or any Chromium-based browser.
+4. Click **Start** and select **Pico 2 W BLE HID Multiplexer**.
+5. Remap keys across 4 layers (Base, Nav/Media, Function, NumPad). Changes take effect instantly and are stored in flash.

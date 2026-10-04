@@ -23,6 +23,18 @@ static uint32_t s_last_display_update_ms = 0;
 static char s_toast_msg[32] = {0};
 static uint32_t s_toast_expiry_ms = 0;
 
+// Reply to the last VIAL request. The IN endpoint can still be busy when the request arrives, and
+// a dropped reply leaves the web configurator waiting forever, so unsent replies are retried from
+// the main loop.
+static uint8_t s_vial_reply[32];
+static bool s_vial_reply_pending = false;
+
+static void flush_vial_reply() {
+    if (s_vial_reply_pending && tud_hid_n_ready(1) && tud_hid_n_report(1, 0, s_vial_reply, sizeof(s_vial_reply))) {
+        s_vial_reply_pending = false;
+    }
+}
+
 static void show_toast(const char *msg, uint32_t duration_ms = 3000) {
     snprintf(s_toast_msg, sizeof(s_toast_msg), "%s", msg);
     s_toast_expiry_ms = to_ms_since_boot(get_absolute_time()) + duration_ms;
@@ -75,6 +87,7 @@ int main() {
 
         // Service TinyUSB Device stack and Dual Console (USB CDC + Hardware UART0)
         tud_task();
+        flush_vial_reply();
         dual_console_update();
 
         // Flush any pending keyboard reports or accumulated mouse/trackpad movement
@@ -217,9 +230,9 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     } else if (instance == 1) {
         // HID Instance 1: VIAL RawHID WebHID report
         if (bufsize >= 32) {
-            uint8_t out_buf[32];
-            VialServer::handleRawReport(buffer, out_buf);
-            tud_hid_n_report(1, 0, out_buf, 32);
+            VialServer::handleRawReport(buffer, s_vial_reply);
+            s_vial_reply_pending = true;
+            flush_vial_reply();
         }
     }
 }
