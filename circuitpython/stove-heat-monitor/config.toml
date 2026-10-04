@@ -1,0 +1,58 @@
+# Kitchen Stove Heat Monitor Configuration
+#
+# Copy to config-override.toml to customize local credentials and settings
+# without modifying this base configuration file.
+
+# Wi-Fi Credentials (supports fallback APs: wifi_ssid1 / wifi_password1, etc.)
+wifi_ssid="WIFI-SSID"
+wifi_password="PASSWORD"
+# wifi_ssid1="BACKUP-SSID"
+# wifi_password1="BACKUP-PASSWORD"
+
+# Pushover Notification Settings
+# Get your Application Token from https://pushover.net/apps/build
+# Get your User Key from your Pushover account dashboard
+pushover_token="YOUR_PUSHOVER_APP_TOKEN"
+pushover_user_key="YOUR_PUSHOVER_USER_KEY"
+
+# Endpoint URL for Pushover messages.
+# Defaults to official HTTPS endpoint. Change to an HTTP URL if using a local HTTP proxy/relay.
+pushover_url="https://api.pushover.net/1/messages.json"
+
+# Thermal Detection Settings
+# Temperature threshold in Celsius to consider the stove actively hot
+threshold_c=60.0
+
+# Temperature drop below threshold (in Celsius) required to consider stove cooled down
+hysteresis_c=5.0
+
+# Time in minutes that temperature must remain above threshold before triggering alert.
+# Helps avoid alerts during normal intentional cooking.
+alert_delay_minutes=15.0
+
+# Repeat alert interval in minutes if stove continues to remain hot after initial alert
+alert_repeat_minutes=15.0
+
+# Send a notification when stove cools down after having triggered an alert
+notify_on_cooldown=true
+
+# Monitoring loop interval in seconds (MLX90640 frame capture + check rate)
+monitoring_interval_s=2.0
+
+# Serial Output & Visualization
+# Output the complete 32x24 temperature matrix to UART / USB serial
+dump_matrix=true
+
+# Colorize matrix values using ANSI escape codes for quick terminal visual inspection
+color_matrix=true
+
+# Hardware Configuration (SoC GPIO numbers, or leave unset for automatic board defaults)
+# Seeed Studio XIAO ESP32-S3 defaults: SCL=6 (D5), SDA=5 (D4)
+# Generic ESP32-S3 DevKit: board.SCL and board.SDA
+# i2c_scl=6
+# i2c_sda=5
+i2c_frequency=400000
+
+# General System Settings
+log=true
+led_active_low=false

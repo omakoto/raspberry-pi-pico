@@ -1,0 +1,14 @@
+# Example configuration override for Kitchen Stove Heat Monitor
+#
+# Rename or copy this file to config-override.toml to override any settings in config.toml.
+# Any keys specified here take precedence over config.toml.
+
+wifi_ssid="MyHomeWiFi"
+wifi_password="MySecretPassword"
+
+pushover_token="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5"
+pushover_user_key="u1v2w3x4y5z6a7b8c9d0e1f2g3h4i5"
+
+# If testing with a lower threshold or shorter delay:
+# threshold_c=45.0
+# alert_delay_minutes=1.0

@@ -61,6 +61,10 @@ while IFS= read -r line; do
     if [[ -f "$tagged_src_path" ]]; then
       echo "Copying tagged file '$tagged_file' to '$tagged_dest_path'..."
       ee cp "$tagged_src_path" "$tagged_dest_path"
+    elif [[ "$tagged_file" == "config-override.toml" && -n "${ESP32_CONFIG_TOML:-${PICO_CONFIG_TOML:-}}" && -f "${ESP32_CONFIG_TOML:-${PICO_CONFIG_TOML:-}}" ]]; then
+      override_src="${ESP32_CONFIG_TOML:-${PICO_CONFIG_TOML:-}}"
+      echo "Copying external config override from '$override_src' to '$tagged_dest_path'..."
+      ee cp "$override_src" "$tagged_dest_path"
     elif [[ -d "$tagged_src_path" ]]; then
       echo "Copying tagged directory '$tagged_file' to '$tagged_dest_path'..."
       ee rm -rf "$tagged_dest_path"
@@ -70,6 +74,7 @@ while IFS= read -r line; do
     fi
   fi
 done < "$src_file"
+
 
 ee sync
 

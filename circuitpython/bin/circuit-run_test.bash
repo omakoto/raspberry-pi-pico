@@ -121,4 +121,29 @@ if [[ ! -f "$EXTRA_DEST_DIR/module.py" ]]; then
   exit 1
 fi
 
+# Test 7: Copy external config override when ESP32_CONFIG_TOML is set
+EXTERNAL_OVERRIDE="$TEMP_DIR/external_override.toml"
+echo "wifi_ssid = 'ExternalSSID'" > "$EXTERNAL_OVERRIDE"
+export ESP32_CONFIG_TOML="$EXTERNAL_OVERRIDE"
+
+SRC_FILE_OVERRIDE="$TEMP_DIR/test_script_override.py"
+echo "print('Hello Override')" > "$SRC_FILE_OVERRIDE"
+echo "#file:config-override.toml" >> "$SRC_FILE_OVERRIDE"
+
+"$BIN_DIR/circuit-run" "$SRC_FILE_OVERRIDE"
+
+OVERRIDE_DEST_FILE="$MOCK_MOUNT/config-override.toml"
+if [[ ! -f "$OVERRIDE_DEST_FILE" ]]; then
+  echo "FAIL: External config override $OVERRIDE_DEST_FILE was not copied"
+  exit 1
+fi
+
+override_content=$(cat "$OVERRIDE_DEST_FILE")
+if [[ "$override_content" != "wifi_ssid = 'ExternalSSID'" ]]; then
+  echo "FAIL: External config override content incorrect: '$override_content'"
+  exit 1
+fi
+unset ESP32_CONFIG_TOML
+
 echo "All tests passed!"
+
