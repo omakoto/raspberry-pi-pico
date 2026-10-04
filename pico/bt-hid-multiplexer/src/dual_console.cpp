@@ -217,8 +217,17 @@ static void handle_devlayer(const char *arg) {
     }
     if (clear) {
         dual_println(DeviceBindings::unbind(dev) ? "Binding removed." : "That device is not connected or not bound.");
-    } else if (layer < 1 || layer >= NUM_LAYERS) {
-        dual_printf("Layer must be 1-%d (layer 0 is the base layer).\r\n", NUM_LAYERS - 1);
+    } else if (layer == 0) {
+        // Layer 0 is the base layer every device uses anyway, so binding to it means no binding.
+        uint8_t addr[6];
+        if (!DeviceBindings::addressOf(dev, addr)) {
+            dual_println("That device is not connected.");
+        } else {
+            DeviceBindings::unbind(dev);
+            dual_printf("Device %u uses the base layer (layer 0), no binding.\r\n", dev);
+        }
+    } else if (layer < 0 || layer >= NUM_LAYERS) {
+        dual_printf("Layer must be 0-%d (0 is the base layer, which means no binding).\r\n", NUM_LAYERS - 1);
     } else if (DeviceBindings::bind(dev, (uint8_t)layer)) {
         dual_printf("Device %u bound to layer %d. Edit that layer in VIAL.\r\n", dev, layer);
     } else {

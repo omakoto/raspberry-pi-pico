@@ -23,7 +23,7 @@ Example used throughout this manual: a Logitech device with a vertical wheel, a 
 
 ## Step 1. Pick a layer for the device
 
-The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device. Each layer can be used by several devices, but a layer you also use for `MO(n)` layer keys then changes what those keys do for the bound device, so pick one you are not using for anything else.
+The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device (binding a device to layer 0, with `devlayer 0`, just means "no binding": it uses the base layer like every device without one). Each layer can be used by several devices, but a layer you also use for `MO(n)` layer keys then changes what those keys do for the bound device, so pick one you are not using for anything else.
 
 This manual uses **layer 3**.
 
@@ -116,8 +116,8 @@ Not available: other media keys (play/pause, next, previous), macros, tap dance,
 | To do this | Type |
 | --- | --- |
 | Move a device to another layer | move the device, then `devlayer 2` |
-| Unbind the device used last | `devlayer clear` |
-| Unbind a specific device | `devlayer clear <idx>` |
+| Unbind the device used last | `devlayer clear` (or `devlayer 0`) |
+| Unbind a specific device | `devlayer clear <idx>` (or `devlayer <idx> 0`) |
 | See devices and bindings | `devlayer list` |
 | Reset the keymap but keep the bindings | `resetkeymap` |
 | Remove all bindings (together with bonds and keymap) | `reset` |
