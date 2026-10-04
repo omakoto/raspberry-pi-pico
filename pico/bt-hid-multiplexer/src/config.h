@@ -40,9 +40,12 @@
 
 // Virtual keys for modifiers (bit n of the HID modifier byte is key VKEY_MODIFIER_BASE + n).
 #define VKEY_MODIFIER_BASE      0xE0
-// Virtual keys for mouse buttons 1-5 (bit n of the mouse button byte is VKEY_MOUSE_BTN_BASE + n).
+// Virtual keys for mouse buttons 1-8 (bit n of the mouse button byte is VKEY_MOUSE_BTN_BASE + n).
+// Only buttons 1-5 can be sent to the host (that is all the USB mouse report and the VIAL keycodes
+// have), but all 8 can be remapped to other things.
 #define VKEY_MOUSE_BTN_BASE     0xE8
-#define VKEY_MOUSE_BTN_COUNT    5
+#define VKEY_MOUSE_BTN_COUNT    8
+#define MOUSE_OUTPUT_BTN_COUNT  5
 // Virtual keys for mouse motion directions, in this order.
 #define VKEY_MOTION_BASE        0xF0
 #define VKEY_MOTION_UP          (VKEY_MOTION_BASE + 0)  // dy < 0
@@ -77,6 +80,13 @@
 // QMK system/consumer/mouse range (0xA5-0xFF, minus the modifiers) that is not a HID keyboard usage
 // and has no USB report here.
 #define KC_SPECIAL_FIRST_       0x00A5
+
+// QMK keycodes for the consumer volume keys, sent as the equivalent HID keyboard-page usages
+// (Mute 0x7F, Volume Up 0x80, Volume Down 0x81), which the host also understands as volume keys
+// and which need no separate consumer report.
+#define KC_MUTE_                0x00A8
+#define KC_VOLU_                0x00A9
+#define KC_VOLD_                0x00AA
 
 // QMK layer actions: the action in bits 8-15, the layer number in bits 0-7.
 #define ACTION_LAYER_TO         0x5000 // TO(layer)

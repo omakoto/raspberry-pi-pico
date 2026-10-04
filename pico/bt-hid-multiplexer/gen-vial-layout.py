@@ -3,7 +3,7 @@
 
 The matrix is 16x16 and a key's matrix position is its virtual key (row * 16 + col), which for
 keyboard keys is the HID usage (see "Virtual Matrix configuration" in src/config.h). The mouse
-buttons and motion directions are virtual keys 0xE8-0xEC and 0xF0-0xF7.
+buttons and motion directions are virtual keys 0xE8-0xEF and 0xF0-0xF7.
 
 Usage:
     ./gen-vial-layout.py            # rewrites src/vial_layout.h
@@ -87,9 +87,9 @@ def build_keys() -> List[Key]:
     # F13-F24.
     run(list(range(0x68, 0x74)), 0, 8.25)
 
-    # Mouse: buttons 1-5, then cursor up/down/left/right and wheel up/down/left/right.
-    run(list(range(0xE8, 0xED)), 0, 9.75)
-    run(list(range(0xF0, 0xF8)), 6, 9.75)
+    # Mouse: buttons 1-8, then cursor up/down/left/right and wheel up/down/left/right.
+    run(list(range(0xE8, 0xF0)), 0, 9.75)
+    run(list(range(0xF0, 0xF8)), 9, 9.75)
     return keys
 
 

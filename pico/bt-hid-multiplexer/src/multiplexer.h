@@ -51,6 +51,18 @@ private:
     // a wheel keycode (and vice versa).
     static int32_t wheel_remainder_;
     static int32_t pan_remainder_;
+
+    // Keys tapped by mouse movement/wheel that is mapped to a key: each is sent as a press report
+    // followed by a release report, one at a time.
+    static const uint8_t TAP_QUEUE_SIZE = 16;
+    static uint16_t tap_queue_[TAP_QUEUE_SIZE];
+    static uint8_t tap_head_;
+    static uint8_t tap_count_;
+    static uint16_t tap_active_;      // keycode currently held down by a tap, or 0
+    static bool tap_pressed_sent_;    // the report with tap_active_ down has been sent
+    // Motion counts accumulated towards the next tap, per motion virtual key.
+    static int32_t tap_remainder_[8];
+    static void enqueueTap(uint16_t action);
     static uint8_t merged_mouse_buttons_;
 
     // Host LED state

@@ -13,6 +13,12 @@ int32_t Multiplexer::accum_wheel_ = 0;
 int32_t Multiplexer::accum_pan_ = 0;
 int32_t Multiplexer::wheel_remainder_ = 0;
 int32_t Multiplexer::pan_remainder_ = 0;
+uint16_t Multiplexer::tap_queue_[Multiplexer::TAP_QUEUE_SIZE];
+uint8_t Multiplexer::tap_head_ = 0;
+uint8_t Multiplexer::tap_count_ = 0;
+uint16_t Multiplexer::tap_active_ = 0;
+bool Multiplexer::tap_pressed_sent_ = false;
+int32_t Multiplexer::tap_remainder_[8];
 uint8_t Multiplexer::merged_mouse_buttons_ = 0;
 
 uint8_t Multiplexer::host_leds_ = 0;
@@ -28,6 +34,11 @@ void Multiplexer::init() {
     accum_pan_ = 0;
     wheel_remainder_ = 0;
     pan_remainder_ = 0;
+    tap_head_ = 0;
+    tap_count_ = 0;
+    tap_active_ = 0;
+    tap_pressed_sent_ = false;
+    memset(tap_remainder_, 0, sizeof(tap_remainder_));
     merged_mouse_buttons_ = 0;
     host_leds_ = 0;
     last_synced_leds_ = 0xFF;
@@ -116,6 +127,11 @@ void Multiplexer::addAction(OutputState &out, uint16_t action) {
         return;
     }
 
+    // Consumer volume keys are sent as the keyboard-page volume usages.
+    if (action == KC_MUTE_) action = 0x7F;
+    else if (action == KC_VOLU_) action = 0x80;
+    else if (action == KC_VOLD_) action = 0x81;
+
     uint8_t mods = 0;
     if (IS_MODS_KEYCODE(action)) {
         mods = MODS_KEYCODE_MODS(action);
@@ -143,6 +159,9 @@ void Multiplexer::addAction(OutputState &out, uint16_t action) {
 void Multiplexer::collectOutputs(OutputState &out) {
     memset(&out, 0, sizeof(out));
 
+    if (tap_active_ != 0) {
+        addAction(out, tap_active_);
+    }
     for (uint8_t d = 0; d < MAX_KEYBOARDS; d++) {
         if (!keyboards_[d].connected) continue;
 
@@ -177,6 +196,17 @@ void Multiplexer::flushKeyboard() {
         return;
     }
 
+    // A tapped key needs a report with it down and then a report with it up, even when the same key
+    // is tapped again right away.
+    if (tap_pressed_sent_) {
+        tap_active_ = 0;
+        tap_pressed_sent_ = false;
+    } else if (tap_active_ == 0 && tap_count_ > 0) {
+        tap_active_ = tap_queue_[tap_head_];
+        tap_head_ = (tap_head_ + 1) % TAP_QUEUE_SIZE;
+        tap_count_--;
+    }
+
     OutputState out;
     collectOutputs(out);
 
@@ -186,12 +216,24 @@ void Multiplexer::flushKeyboard() {
     memcpy(&report[2], out.keys, 6);
 
     tud_hid_n_report(0, REPORT_ID_KEYBOARD, report, sizeof(report));
-    kbd_dirty_ = false;
+    if (tap_active_ != 0) {
+        tap_pressed_sent_ = true;
+    }
+    // Stay dirty until the pending release / the remaining taps have gone out.
+    kbd_dirty_ = (tap_active_ != 0) || (tap_count_ > 0);
+}
+
+void Multiplexer::enqueueTap(uint16_t action) {
+    if (tap_count_ >= TAP_QUEUE_SIZE) return;  // Fast movement: drop the excess taps.
+    tap_queue_[(tap_head_ + tap_count_) % TAP_QUEUE_SIZE] = action;
+    tap_count_++;
+    kbd_dirty_ = true;
 }
 
 void Multiplexer::routeMotion(int32_t value, uint8_t vkey_positive, uint8_t vkey_negative, bool wheel_units) {
     if (value == 0) return;
-    uint16_t action = VirtualMatrix::resolveAction(value > 0 ? vkey_positive : vkey_negative);
+    uint8_t vkey = (value > 0) ? vkey_positive : vkey_negative;
+    uint16_t action = VirtualMatrix::resolveAction(vkey);
     int32_t magnitude = (value > 0) ? value : -value;
     // Both kinds of source are converted to cursor counts, so any source can drive any target.
     int32_t counts = wheel_units ? magnitude * MOUSE_COUNTS_PER_WHEEL_NOTCH : magnitude;
@@ -214,7 +256,18 @@ void Multiplexer::routeMotion(int32_t value, uint8_t vkey_positive, uint8_t vkey
             pan_remainder_ %= MOUSE_COUNTS_PER_WHEEL_NOTCH;
             break;
         default:
-            break;  // Disabled (KC_NO) or not a mouse keycode: the motion is dropped.
+            // A key (or modifier/volume key): tap it once per wheel notch worth of movement. Mouse
+            // buttons, layer actions and KC_NO are not tappable, so the movement is dropped.
+            if (action != 0 && action < 0x2000 && !(action >= KC_BTN1_ && action <= KC_BTN5_)) {
+                uint8_t index = vkey - VKEY_MOTION_BASE;
+                tap_remainder_[index ^ 1] = 0;  // Reversing direction starts over.
+                tap_remainder_[index] += counts;
+                while (tap_remainder_[index] >= MOUSE_COUNTS_PER_WHEEL_NOTCH) {
+                    tap_remainder_[index] -= MOUSE_COUNTS_PER_WHEEL_NOTCH;
+                    enqueueTap(action);
+                }
+            }
+            break;
     }
 }
 
@@ -222,7 +275,7 @@ void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx
     if (dev_idx >= MAX_MICE) return;
 
     mice_[dev_idx].connected = true;
-    uint8_t mask = (1 << VKEY_MOUSE_BTN_COUNT) - 1;
+    uint8_t mask = (uint8_t)((1u << VKEY_MOUSE_BTN_COUNT) - 1);
     uint8_t changed = (mice_[dev_idx].buttons ^ buttons) & mask;
     uint8_t old_buttons = mice_[dev_idx].buttons;
     mice_[dev_idx].buttons = buttons & mask;
@@ -251,8 +304,8 @@ void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx
     if (changed) {
         // A button may have been remapped to a key or modifier.
         kbd_dirty_ = true;
-        flushKeyboard();
     }
+    flushKeyboard();
     flushMouse();
 }
 

@@ -174,10 +174,10 @@ void VirtualMatrix::resetKeymap() {
     // to the QMK mouse keycodes that reproduce the physical behaviour.
     for (int vkey = 0; vkey < 256; vkey++) {
         uint16_t kc = (vkey < 4) ? KC_NO_ : (uint16_t)vkey;  // usages 1-3 are not real keys
-        if (vkey >= VKEY_MOUSE_BTN_BASE && vkey < VKEY_MOUSE_BTN_BASE + VKEY_MOUSE_BTN_COUNT) {
+        if (vkey >= VKEY_MOUSE_BTN_BASE && vkey < VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT) {
             kc = KC_BTN1_ + (vkey - VKEY_MOUSE_BTN_BASE);
-        } else if (vkey >= VKEY_MOUSE_BTN_BASE + VKEY_MOUSE_BTN_COUNT && vkey < VKEY_MOTION_BASE) {
-            kc = KC_NO_;
+        } else if (vkey >= VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT && vkey < VKEY_MOTION_BASE) {
+            kc = KC_NO_;  // Mouse buttons 6-8 have no VIAL keycode to default to.
         } else if (vkey >= VKEY_MOTION_BASE) {
             static const uint16_t motion_kc[8] = {
                 KC_MS_U_, KC_MS_D_, KC_MS_L_, KC_MS_R_, KC_WH_U_, KC_WH_D_, KC_WH_L_, KC_WH_R_,

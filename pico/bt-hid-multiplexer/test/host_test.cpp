@@ -136,6 +136,58 @@ int main() {
     Multiplexer::handleKeyboardReport(0, 0, a, 1);
     CHECK(lastKbd().keys[0] == 0x05);
 
+    // Mouse movement mapped to a key taps it once per wheel notch worth of movement (press, release,
+    // press, release...), and the wheel taps once per notch. Volume keys go out as the keyboard
+    // page volume usages.
+    reset();
+    set(0, VKEY_MOTION_UP, KC_VOLU_);
+    set(0, VKEY_MOTION_DOWN, KC_VOLD_);
+    set(0, VKEY_WHEEL_UP, 0x04);  // KC_A
+    g_sent_keyboard.clear();
+    Multiplexer::handleMouseReport(0, 0, 0, -50, 0, 0);  // 50 counts = 2 taps, 2 counts left
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 4);
+    if (g_sent_keyboard.size() == 4) {
+        CHECK(g_sent_keyboard[0].keys[0] == 0x80 && g_sent_keyboard[1].keys[0] == 0);
+        CHECK(g_sent_keyboard[2].keys[0] == 0x80 && g_sent_keyboard[3].keys[0] == 0);
+    }
+    CHECK(g_sent_mouse.empty() || (lastMouse().dy == 0 && lastMouse().wheel == 0));
+    g_sent_keyboard.clear();
+    Multiplexer::handleMouseReport(0, 0, 0, 22, 0, 0);   // down: remainder is reset, 22 < 24
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.empty());
+    Multiplexer::handleMouseReport(0, 0, 0, 2, 0, 0);    // 24 in total -> volume down
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x81);
+    g_sent_keyboard.clear();
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 1, 0);    // one wheel notch up -> one tap of A
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x04 && g_sent_keyboard[1].keys[0] == 0);
+
+    // The same key tapped twice in a row still gets a release in between; modifiers work too.
+    reset();
+    set(0, VKEY_WHEEL_UP, 0x0204);  // LSFT(A)
+    g_sent_keyboard.clear();
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 2, 0);
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 4);
+    if (g_sent_keyboard.size() == 4) {
+        CHECK(g_sent_keyboard[0].mods == 0x02 && g_sent_keyboard[0].keys[0] == 0x04);
+        CHECK(g_sent_keyboard[1].mods == 0 && g_sent_keyboard[1].keys[0] == 0);
+        CHECK(g_sent_keyboard[2].keys[0] == 0x04);
+    }
+
+    // Mouse buttons 6 and 7 (BTN_FORWARD / BTN_BACK) can be remapped to keys; they default to nothing.
+    reset();
+    Multiplexer::handleMouseReport(0, 0x20, 0, 0, 0, 0);
+    CHECK(g_sent_keyboard.empty() || lastKbd().keys[0] == 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    set(0, VKEY_MOUSE_BTN_BASE + 6, KC_VOLD_);
+    Multiplexer::handleMouseReport(0, 0x40, 0, 0, 0, 0);
+    CHECK(lastKbd().keys[0] == 0x81);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(lastKbd().keys[0] == 0);
+
     if (g_failures) { printf("%d FAILURES\n", g_failures); return 1; }
     printf("All host tests passed\n");
     return 0;
