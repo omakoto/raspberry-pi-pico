@@ -3,6 +3,7 @@
 #include "vial_layout.h"
 #include "config.h"
 #include "pico/time.h"
+#include <stdio.h>
 #include <string.h>
 
 // VIA Commands
@@ -27,6 +28,12 @@
 #define VIAL_CMD_GET_UNLOCK_STATUS          0x05
 #define VIAL_CMD_UNLOCK_START               0x06
 #define VIAL_CMD_UNLOCK_POLL                0x07
+#define VIAL_CMD_LOCK                       0x08
+#define VIAL_CMD_QMK_SETTINGS_QUERY         0x09
+#define VIAL_CMD_QMK_SETTINGS_GET           0x0A
+#define VIAL_CMD_QMK_SETTINGS_SET           0x0B
+#define VIAL_CMD_QMK_SETTINGS_RESET         0x0C
+#define VIAL_CMD_DYNAMIC_ENTRY_OP           0x0D
 
 void VialServer::init() {
     VirtualMatrix::init();
@@ -156,6 +163,7 @@ void VialServer::handleViaCommand(const uint8_t *in_buf, uint8_t *out_buf) {
         }
 
         default:
+            printf("[Vial] Unhandled VIA command 0x%02X\n", cmd);
             out_buf[0] = 0xFF; // Unhandled
             break;
     }
@@ -217,7 +225,30 @@ void VialServer::handleVialCommand(const uint8_t *in_buf, uint8_t *out_buf) {
             out_buf[0] = 1; // Already unlocked
             break;
 
+        case VIAL_CMD_LOCK: // 0x08
+            // Always unlocked; nothing to lock.
+            break;
+
+        case VIAL_CMD_QMK_SETTINGS_QUERY: // 0x09
+            // The client pages through the supported QSIDs until it sees 0xFFFF. We support none, so
+            // answer with an immediate terminator; any other reply makes it poll forever.
+            memset(out_buf, 0xFF, 32);
+            break;
+
+        case VIAL_CMD_QMK_SETTINGS_GET:   // 0x0A
+        case VIAL_CMD_QMK_SETTINGS_SET:   // 0x0B
+        case VIAL_CMD_QMK_SETTINGS_RESET: // 0x0C
+            // No settings; the all-zero reply is a valid "nothing" answer.
+            break;
+
+        case VIAL_CMD_DYNAMIC_ENTRY_OP: // 0x0D
+            // Sub-op 0 asks for the tap dance / combo / key override entry counts (bytes 0..2). We
+            // have none, so the all-zero reply is right; a non-zero count would make the client
+            // request that many entries.
+            break;
+
         default:
+            printf("[Vial] Unhandled VIAL sub-command 0x%02X\n", sub_cmd);
             out_buf[0] = 0xFF; // Unhandled
             break;
     }

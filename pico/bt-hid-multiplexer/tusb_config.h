@@ -18,7 +18,10 @@ extern "C" {
 #define CFG_TUD_HID                 2
 
 // HID Configuration
-#define CFG_TUD_HID_EP_BUFSIZE      64
+// Must equal the VIAL RawHID endpoint size (32). TinyUSB arms the OUT endpoint for this many bytes
+// and a transfer only completes at a short packet or when the buffer is full, so a larger value
+// leaves every 32-byte VIAL request pending until the next one arrives.
+#define CFG_TUD_HID_EP_BUFSIZE      32
 
 // CDC Configuration
 #define CFG_TUD_CDC_RX_BUFSIZE      1024
