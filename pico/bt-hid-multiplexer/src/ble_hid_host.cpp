@@ -33,10 +33,14 @@ struct BleSlot {
     char name[32];
     uint8_t dev_idx;
     bool connected;
-    uint16_t conn_interval; // last reported LL connection interval, 1.25 ms units (0 = unknown)
-    uint16_t conn_latency;  // last reported slave latency
-    uint8_t latency_forced; // how often slave latency 0 was requested on this connection
-    btstack_timer_source_t latency_timer; // delays the latency-0 request past the peer's settling window
+    uint16_t conn_interval;     // last reported LL connection interval, 1.25 ms units (0 = unknown)
+    uint16_t min_conn_interval; // shortest LL connection interval observed on this connection (1.25 ms units)
+    uint16_t conn_latency;      // last reported slave latency
+    uint8_t latency_forced;     // how often parameter optimization was requested on this connection
+    btstack_timer_source_t latency_timer; // delays parameter optimization past the peer's settling window
+    bool has_led_report;        // peripheral provides an LED output report
+    bool led_report_resolved;   // report descriptor has been inspected for LED output report
+    uint8_t led_report_id;      // report ID for LED output report (0 if no report ID)
 };
 
 // Peripherals defend their preferred parameters for a while after connecting: the ProtoArc XK01
@@ -396,14 +400,16 @@ static void onPairingDelayTimeout(btstack_timer_source_t *ts) {
 #if BLE_ZERO_SLAVE_LATENCY
 static void onZeroLatencyTimeout(btstack_timer_source_t *ts) {
     BleSlot *slot = (BleSlot *)btstack_run_loop_get_timer_context(ts);
-    if (!slot || slot->con_handle == HCI_CON_HANDLE_INVALID || slot->conn_latency == 0) return;
+    if (!slot || slot->con_handle == HCI_CON_HANDLE_INVALID) return;
+    uint16_t target_interval = (slot->min_conn_interval > 0) ? slot->min_conn_interval : slot->conn_interval;
+    if (slot->conn_latency == 0 && (target_interval == 0 || slot->conn_interval <= target_interval)) return;
     if (slot->latency_forced >= MAX_ZERO_LATENCY_ATTEMPTS) {
-        printf("[BLE Host] Slot %u keeps requesting slave latency %u; leaving it alone.\n",
-               slot->dev_idx, slot->conn_latency);
+        printf("[BLE Host] Slot %u keeps renegotiating non-optimal params (interval %.2f ms, latency %u); leaving it alone.\n",
+               slot->dev_idx, slot->conn_interval * 1.25f, slot->conn_latency);
         return;
     }
     slot->latency_forced++;
-    BleHidHost::updateConnectionParams(slot->dev_idx, slot->conn_interval, 0);
+    BleHidHost::updateConnectionParams(slot->dev_idx, target_interval, 0);
 }
 
 static void scheduleZeroLatency(BleSlot *slot) {
@@ -752,10 +758,20 @@ void BleHidHost::dumpDevices() {
     printf("[BLE Host] Connected Devices (%u / %u):\n", getConnectedCount(), MAX_BLE_DEVICES);
     for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
         if (s_slots[i].connected) {
-            printf("  Slot %u: '%s' (%s, handle 0x%04X, cid 0x%04X, interval %.2f ms, latency %u)\n",
+            printf("  Slot %u: '%s' (%s, handle 0x%04X, cid 0x%04X, interval %.2f ms",
                    i, s_slots[i].name, bd_addr_to_str(s_slots[i].addr),
                    s_slots[i].con_handle, s_slots[i].hids_cid,
-                   s_slots[i].conn_interval * 1.25f, s_slots[i].conn_latency);
+                   s_slots[i].conn_interval * 1.25f);
+            if (s_slots[i].min_conn_interval > 0 && s_slots[i].min_conn_interval != s_slots[i].conn_interval) {
+                printf(" [min %.2f ms]", s_slots[i].min_conn_interval * 1.25f);
+            }
+            printf(", latency %u", s_slots[i].conn_latency);
+            if (s_slots[i].has_led_report) {
+                printf(", led_id %u", s_slots[i].led_report_id);
+            } else if (s_slots[i].led_report_resolved) {
+                printf(", no_leds");
+            }
+            printf(")\n");
         }
     }
 }
@@ -784,11 +800,104 @@ void BleHidHost::dumpBonds() {
     }
 }
 
+// Scan HID Report Descriptor for an Output item under Usage Page 0x08 (LEDs)
+static bool find_led_output_report_id(const uint8_t *desc, uint16_t desc_len, uint8_t *out_report_id) {
+    if (!desc || desc_len == 0) return false;
+
+    struct GlobalState {
+        uint32_t usage_page;
+        uint8_t report_id;
+    };
+    GlobalState current_state = {0, 0};
+    GlobalState state_stack[4];
+    uint8_t stack_depth = 0;
+
+    uint16_t i = 0;
+    while (i < desc_len) {
+        uint8_t b = desc[i++];
+        if (b == 0xFE) { // Long item: 0xFE, bDataSize, bLongItemTag, data...
+            if (i + 2 > desc_len) break;
+            uint8_t data_len = desc[i];
+            i += 2 + data_len;
+            continue;
+        }
+
+        uint8_t bTag = (b >> 4) & 0x0F;
+        uint8_t bType = (b >> 2) & 0x03;
+        uint8_t bSize = b & 0x03;
+        if (bSize == 3) bSize = 4;
+        if (i + bSize > desc_len) break;
+
+        uint32_t val = 0;
+        for (uint8_t j = 0; j < bSize; j++) {
+            val |= ((uint32_t)desc[i + j]) << (8 * j);
+        }
+        i += bSize;
+
+        if (bType == 1) { // Global item
+            if (bTag == 0) { // Usage Page
+                current_state.usage_page = val;
+            } else if (bTag == 8) { // Report ID
+                current_state.report_id = (uint8_t)val;
+            } else if (bTag == 10) { // Push
+                if (stack_depth < 4) {
+                    state_stack[stack_depth++] = current_state;
+                }
+            } else if (bTag == 11) { // Pop
+                if (stack_depth > 0) {
+                    current_state = state_stack[--stack_depth];
+                }
+            }
+        } else if (bType == 0) { // Main item
+            if (bTag == 9) { // Output
+                if (current_state.usage_page == 0x08) { // Usage Page: LEDs
+                    if (out_report_id) {
+                        *out_report_id = current_state.report_id;
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static void resolve_led_report(BleSlot *slot) {
+    if (!slot || slot->hids_cid == 0) return;
+    const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(slot->hids_cid, 0);
+    uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(slot->hids_cid, 0);
+    if (!desc || desc_len == 0) return;
+
+    uint8_t led_id = 0;
+    if (find_led_output_report_id(desc, desc_len, &led_id)) {
+        slot->has_led_report = true;
+        slot->led_report_id = led_id;
+        slot->led_report_resolved = true;
+        printf("[BLE Host] Slot %u '%s': detected LED output report ID %u\n",
+               slot->dev_idx, slot->name, led_id);
+    } else {
+        slot->has_led_report = false;
+        slot->led_report_resolved = true;
+        printf("[BLE Host] Slot %u '%s': no LED output report found in descriptor\n",
+               slot->dev_idx, slot->name);
+    }
+}
+
 void BleHidHost::sendHostLeds(uint8_t leds) {
     uint8_t led_report = leds;
     for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
         if (s_slots[i].connected && s_slots[i].hids_cid != 0) {
-            hids_client_send_write_report(s_slots[i].hids_cid, 0, HID_REPORT_TYPE_OUTPUT, &led_report, 1);
+            if (!s_slots[i].led_report_resolved) {
+                resolve_led_report(&s_slots[i]);
+            }
+            if (s_slots[i].has_led_report) {
+                uint8_t status = hids_client_send_write_report(s_slots[i].hids_cid, s_slots[i].led_report_id,
+                                                               HID_REPORT_TYPE_OUTPUT, &led_report, 1);
+                if (status != ERROR_CODE_SUCCESS && s_stack_logging) {
+                    printf("[BLE Host] Slot %u: sendHostLeds(id %u) status 0x%02X\n",
+                           i, s_slots[i].led_report_id, status);
+                }
+            }
         }
     }
 }
@@ -864,8 +973,8 @@ void BleHidHost::updateConnectionParams(uint8_t slot_idx, uint16_t interval_unit
     }
     BleSlot *slot = &s_slots[slot_idx];
     if (interval_units == 0) {
-        // Fall back to the fastest legal interval (7.5 ms) if the peer never told us its own
-        interval_units = slot->conn_interval ? slot->conn_interval : 6;
+        // Fall back to the shortest recorded interval (or 7.5 ms if unknown)
+        interval_units = slot->min_conn_interval ? slot->min_conn_interval : (slot->conn_interval ? slot->conn_interval : 6);
     }
     // Supervision timeout (10 ms units) must exceed (1 + latency) * interval * 2; keep 4 s unless
     // the requested latency needs more.
@@ -946,6 +1055,12 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
 
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
 
+                    resolve_led_report(slot);
+                    if (slot->has_led_report) {
+                        uint8_t current_leds = Multiplexer::getHostLeds();
+                        hids_client_send_write_report(slot->hids_cid, slot->led_report_id, HID_REPORT_TYPE_OUTPUT, &current_leds, 1);
+                    }
+
                     // In Report mode BTstack has already written every input report's CCCD before
                     // emitting this event, so no extra enable_notifications() call is needed here. Doing
                     // it anyway rewrites all CCCDs and keeps the HIDS client busy (every other request
@@ -972,6 +1087,17 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
                     BleHidHost::startScan();
                 }
+            }
+            break;
+        }
+
+        case GATTSERVICE_SUBEVENT_HID_REPORT_WRITTEN: {
+            if (s_stack_logging) {
+                uint16_t cid = gattservice_subevent_hid_report_written_get_hids_cid(packet);
+                uint8_t rep_id = gattservice_subevent_hid_report_written_get_report_id(packet);
+                BleSlot *slot = find_slot_by_cid(cid);
+                printf("[BLE Host] HID Report Written (slot %u, cid 0x%04X, id %u)\n",
+                       slot ? slot->dev_idx : 0xFF, cid, rep_id);
             }
             break;
         }
@@ -1012,6 +1138,9 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             if (slot) {
                 slot->connected = false;
                 slot->hids_cid = 0;
+                slot->led_report_resolved = false;
+                slot->has_led_report = false;
+                slot->led_report_id = 0;
                 Multiplexer::purgeKeyboard(slot->dev_idx);
                 Multiplexer::purgeMouse(slot->dev_idx);
             }
@@ -1034,6 +1163,9 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             // reports for a long while before the slot is marked connected, so accept them here.
             if (!slot->connected) {
                 slot->connected = true;
+            }
+            if (!slot->led_report_resolved) {
+                resolve_led_report(slot);
             }
 
             const uint8_t *report = gattservice_subevent_hid_report_get_report(packet);
@@ -1387,8 +1519,15 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
 
                 if (slot) {
                     slot->con_handle = handle;
-                    printf("[BLE Host] LE Connection established for '%s' (slot %u, handle 0x%04X). Scheduling security in 200ms...\n",
-                           slot->name, slot->dev_idx, handle);
+                    uint16_t interval = gap_subevent_le_connection_complete_get_conn_interval(packet);
+                    uint16_t latency = gap_subevent_le_connection_complete_get_conn_latency(packet);
+                    slot->conn_interval = interval;
+                    slot->conn_latency = latency;
+                    if (interval > 0) {
+                        slot->min_conn_interval = interval;
+                    }
+                    printf("[BLE Host] LE Connection established for '%s' (slot %u, handle 0x%04X, interval %.2f ms, latency %u). Scheduling security in 200ms...\n",
+                           slot->name, slot->dev_idx, handle, interval * 1.25f, latency);
                     s_pending_pairing_handle = handle;
                     btstack_run_loop_remove_timer(&s_pairing_timer);
                     btstack_run_loop_set_timer(&s_pairing_timer, 200);
@@ -1421,13 +1560,18 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 if (slot) {
                     slot->conn_interval = interval;
                     slot->conn_latency = latency;
+                    if (slot->min_conn_interval == 0 || (interval > 0 && interval < slot->min_conn_interval)) {
+                        slot->min_conn_interval = interval;
+                    }
                 }
-                printf("[BLE Host] Connection parameters updated (slot %u): interval %.2f ms, latency %u, timeout %u ms\n",
-                       slot ? slot->dev_idx : 0xFF, interval * 1.25f, latency, timeout * 10);
+                printf("[BLE Host] Connection parameters updated (slot %u): interval %.2f ms (min %.2f ms), latency %u, timeout %u ms\n",
+                       slot ? slot->dev_idx : 0xFF, interval * 1.25f,
+                       slot ? slot->min_conn_interval * 1.25f : 0.0f,
+                       latency, timeout * 10);
 #if BLE_ZERO_SLAVE_LATENCY
-                // Keep the peripheral's preferred interval but drop its slave latency once it
-                // has stopped changing parameters itself.
-                if (slot && latency > 0) {
+                // Keep the peripheral's shortest observed interval and zero its slave latency
+                // once it has stopped changing parameters itself.
+                if (slot && (latency > 0 || (slot->min_conn_interval > 0 && interval > slot->min_conn_interval))) {
                     scheduleZeroLatency(slot);
                 }
 #endif

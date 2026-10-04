@@ -1,6 +1,7 @@
 #include "dual_console.h"
 #include "config.h"
 #include "ble_hid_host.h"
+#include "multiplexer.h"
 #include "virtual_matrix.h"
 #include "pico/bootrom.h"
 #include "pico/time.h"
@@ -298,6 +299,25 @@ static void handle_command(const char *cmd) {
         } else {
             dual_println("Usage: suspend <slot_idx> (sends exit suspend)");
         }
+    } else if (strncmp(cmd, "leds", 4) == 0 && (cmd[4] == '\0' || cmd[4] == ' ')) {
+        const char *arg = cmd + 4;
+        while (*arg == ' ') arg++;
+        if (*arg == '\0') {
+            uint8_t cur = Multiplexer::getHostLeds();
+            dual_printf("Host Lock LEDs: 0x%02X (Num=%d, Caps=%d, Scroll=%d)\r\n",
+                        cur, (cur & 0x01) ? 1 : 0, (cur & 0x02) ? 1 : 0, (cur & 0x04) ? 1 : 0);
+        } else {
+            int val = 0;
+            if (sscanf(arg, "%i", &val) == 1) {
+                uint8_t mask = (uint8_t)val;
+                Multiplexer::setHostLeds(mask);
+                BleHidHost::sendHostLeds(mask);
+                dual_printf("Host Lock LEDs set to 0x%02X (Num=%d, Caps=%d, Scroll=%d)\r\n",
+                            mask, (mask & 0x01) ? 1 : 0, (mask & 0x02) ? 1 : 0, (mask & 0x04) ? 1 : 0);
+            } else {
+                dual_println("Usage: leds [mask]  (e.g. 'leds 2' for CapsLock, 'leds 0' for off)");
+            }
+        }
     } else if (strcmp(cmd, "clearbonds") == 0) {
         dual_println("Clearing BLE bonds...");
         BleHidHost::clearBonds();
@@ -321,6 +341,7 @@ static void handle_command(const char *cmd) {
         dual_println("  mode <s> <m>   - Set HID protocol mode (0=boot, 1=report)");
         dual_println("  getmode <s>    - Read HID Protocol Mode from slot <s>");
         dual_println("  connparam <s> <lat> [ms] - Request LL connection params (slave latency, interval)");
+        dual_println("  leds [mask]    - Show or set host Lock LED state (1=Num, 2=Caps, 4=Scroll)");
         dual_println("  suspend <s>    - Send HID Exit Suspend command to slot <s>");
         dual_println("  authreq [..]   - Show/set pairing policy: [legacy|sc] [mitm|nomitm]");
         dual_println("  log on|off     - Toggle BTstack internal log_info output");

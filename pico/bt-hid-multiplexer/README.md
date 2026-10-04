@@ -84,6 +84,7 @@ Commands supported on either console:
 - `devices`: Lists connected slots with connection handles and HIDS CIDs
 - `desc` / `descriptor`: Dumps stored BLE HID report descriptors
 - `notif [slot]`, `getreport <slot> [id]`, `getmode <slot>`, `mode <slot> <0|1>`, `suspend <slot>`: HID-over-GATT diagnostics (re-enable notifications, read an input report, read/write Protocol Mode, send Exit Suspend)
+- `connparam <slot> <lat> [ms]`, `leds [mask]`: Request LL connection parameters (slave latency, interval) or view/set host Lock LED states
 - `authreq [legacy|sc] [mitm|nomitm]`: Shows or sets the pairing policy used for *new* pairings (default `legacy nomitm`, see below)
 - `log on|off`: Verbose mode, off by default: BTstack's internal `log_info` output (SM pairing method, GATT timeouts and security errors, HIDS client steps) plus advertising reports of non-HID devices nearby
 - `hcilog on|off`, `reports on|off`: Raw ATT packet dump (ACL only) and per-report/per-keystroke dump of incoming HID reports, both off by default because every console line blocks the BTstack context for milliseconds and shows up as input latency
@@ -92,7 +93,7 @@ Commands supported on either console:
 - `help`: Lists all console commands
 
 ### Input latency
-- Peripherals negotiate their own connection interval (7.5–8.75 ms) but ask for slave latency ~30, which lets them skip up to 30 connection events. With `BLE_ZERO_SLAVE_LATENCY` (default on in `config.h`) the Pico re-requests the same interval with latency 0 about 10 s after the peripheral's last parameter change (peripherals defend their own parameters right after connecting), up to three times per connection; `connparam <slot> <latency> [interval_ms]` changes it at runtime and `devices` shows the current values.
+- Peripherals negotiate their own connection interval (7.5–8.75 ms) but ask for slave latency ~30, which lets them skip up to 30 connection events. With `BLE_ZERO_SLAVE_LATENCY` (default on in `config.h`) the Pico enforces the shortest connection interval observed on that link with latency 0 about 10 s after the peripheral's last parameter change (peripherals defend their own parameters right after connecting), preventing interval drift (e.g. from 8.75 ms to 11.25 ms); `connparam <slot> <latency> [interval_ms]` changes it at runtime and `devices` shows the current and minimum values.
   > **Warning:** this overrides what the peripheral asked for. Verified only with the Keychron Nape Pro (accepts it immediately) and the ProtoArc XK01 (re-asserts latency 32 for the first seconds after connecting, then accepts the delayed request). Other devices may drain their battery much faster at latency 0, re-negotiate repeatedly, or in the worst case drop the link right after the update. If a device misbehaves, set `BLE_ZERO_SLAVE_LATENCY` to `0` in `config.h` and rebuild, or test first with `connparam <slot> 0` on the console.
 - Console output from the BTstack context blocks on the UART, so all per-event dumps are opt-in (`reports`, `log`, `hcilog`).
 - The OLED is redrawn only when its content changes: `SSD1306::show()` is a ~25 ms blocking I2C transfer and TinyUSB releases the HID endpoint only from `tud_task()` in the main loop.
