@@ -1,6 +1,7 @@
 #include "dual_console.h"
 #include "config.h"
 #include "ble_hid_host.h"
+#include "classic_hid_host.h"
 #include "multiplexer.h"
 #include "virtual_matrix.h"
 #include "pico/bootrom.h"
@@ -178,11 +179,29 @@ static void handle_command(const char *cmd) {
         }
         dual_printf("  Passkey PIN:  %lu\r\n", (unsigned long)BleHidHost::getActivePasskey());
         BleHidHost::dumpDevices();
+        ClassicHidHost::dumpDevices();
         BleHidHost::dumpBonds();
+        ClassicHidHost::dumpBonds();
     } else if (strcmp(cmd, "devices") == 0) {
         BleHidHost::dumpDevices();
+        ClassicHidHost::dumpDevices();
     } else if (strcmp(cmd, "bonds") == 0) {
         BleHidHost::dumpBonds();
+        ClassicHidHost::dumpBonds();
+    } else if (strncmp(cmd, "cconnect", 8) == 0) {
+        int idx = -1;
+        if (sscanf(cmd + 8, "%d", &idx) == 1 && idx >= 0) {
+            ClassicHidHost::connectBonded((uint8_t)idx);
+        } else {
+            dual_println("Usage: cconnect <classic_bond_idx>   (indices from 'bonds', [cN])");
+        }
+    } else if (strncmp(cmd, "cdisconnect", 11) == 0) {
+        int slot = -1;
+        if (sscanf(cmd + 11, "%d", &slot) == 1 && slot >= 0) {
+            ClassicHidHost::disconnectSlot((uint8_t)slot);
+        } else {
+            dual_println("Usage: cdisconnect <classic_slot_idx>");
+        }
     } else if (strcmp(cmd, "desc") == 0 || strcmp(cmd, "descriptor") == 0) {
         BleHidHost::dumpDescriptor();
     } else if (strncmp(cmd, "unbond", 6) == 0) {
@@ -362,7 +381,9 @@ static void handle_command(const char *cmd) {
         dual_println("  stop           - Stop active BLE pairing mode and discovery scan");
         dual_println("  status         - Display connection status, layer, and uptime");
         dual_println("  devices        - List all connected BLE devices and slot details");
-        dual_println("  bonds          - Dump bonded peripheral database and cache");
+        dual_println("  bonds          - Dump bonded peripheral database and cache (BLE and classic)");
+        dual_println("  cconnect <n>   - Connect to classic bond [cN] from 'bonds' (host-initiated reconnect)");
+        dual_println("  cdisconnect <n>- Drop classic Bluetooth HID slot n");
         dual_println("  desc           - Dump stored BLE HID report descriptor");
         dual_println("  mousespeed [..]- Get/set mouse sensitivity: [<percent>] or [<slot> <percent>]");
         dual_println("  notif [slot]   - Re-enable BLE HID notifications on slot(s)");

@@ -30,6 +30,7 @@ set(APP_SOURCES
     src/storage.cpp
     src/multiplexer.cpp
     src/ble_hid_host.cpp
+    src/classic_hid_host.cpp
     src/dual_console.cpp
 )
 
@@ -57,6 +58,7 @@ target_compile_definitions(bt-hid-multiplexer PRIVATE
 target_link_libraries(bt-hid-multiplexer PRIVATE
     pico_stdlib
     pico_btstack_ble
+    pico_btstack_classic
     pico_btstack_cyw43
     pico_cyw43_arch_threadsafe_background
     tinyusb_device

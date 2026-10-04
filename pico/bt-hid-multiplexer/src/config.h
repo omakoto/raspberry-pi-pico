@@ -23,8 +23,10 @@
 
 // Multi-device limits
 #define MAX_BLE_DEVICES         8
-#define MAX_KEYBOARDS           8
-#define MAX_MICE                8
+// Bluetooth Classic HID devices get device indices after the BLE ones.
+#define MAX_CLASSIC_DEVICES     4
+#define MAX_KEYBOARDS           (MAX_BLE_DEVICES + MAX_CLASSIC_DEVICES)
+#define MAX_MICE                (MAX_BLE_DEVICES + MAX_CLASSIC_DEVICES)
 
 // Virtual Matrix configuration
 #define NUM_LAYERS              4

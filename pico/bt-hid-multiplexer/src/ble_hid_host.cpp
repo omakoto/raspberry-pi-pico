@@ -1,4 +1,5 @@
 #include "ble_hid_host.h"
+#include "classic_hid_host.h"
 #include "multiplexer.h"
 #include "config.h"
 #include "btstack.h"
@@ -305,6 +306,7 @@ static void save_bonded_devices() {
 // Load bonded devices table from TLV, migrating single-device legacy entries if present
 static void load_bonded_devices() {
     memset(&s_bonded_table, 0, sizeof(s_bonded_table));
+    ClassicHidHost::clearBonds();
 
     const btstack_tlv_t *tlv_impl = nullptr;
     void *tlv_context = nullptr;
@@ -681,6 +683,8 @@ void BleHidHost::init() {
 
     hids_client_init(s_hid_descriptor_storage, sizeof(s_hid_descriptor_storage));
 
+    ClassicHidHost::init();
+
     s_hci_event_callback_registration.callback = &packetHandler;
     hci_add_event_handler(&s_hci_event_callback_registration);
 
@@ -744,6 +748,7 @@ void BleHidHost::startPairingMode(uint32_t timeout_ms) {
     btstack_run_loop_add_timer(&s_pairing_mode_timer);
     printf("[BLE Host] Pairing mode started (%lu s timeout). Unbonded HID peripherals accepted.\n",
            (unsigned long)(timeout_ms / 1000));
+    ClassicHidHost::startPairingMode();
     BleHidHost::startScan();
 }
 
@@ -752,6 +757,7 @@ void BleHidHost::stopPairingMode() {
     s_is_pairing_mode = false;
     btstack_run_loop_remove_timer(&s_pairing_mode_timer);
     printf("[BLE Host] Pairing mode stopped.\n");
+    ClassicHidHost::stopPairingMode();
     if (!BleHidHost::hasUnconnectedBonds()) {
         BleHidHost::stopScan();
     } else {

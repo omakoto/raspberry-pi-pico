@@ -6,6 +6,12 @@
 #define ENABLE_LE_PERIPHERAL
 #define ENABLE_L2CAP_LE_CREDIT_BASED_FLOW_CONTROL_MODE
 
+// Bluetooth Classic HID host (keyboards, keypads and mice without BLE support)
+#ifndef ENABLE_CLASSIC
+#define ENABLE_CLASSIC
+#endif
+#define MAX_NR_HID_HOST_CONNECTIONS 4
+
 // Locate CCCDs with ATT Read By Type instead of the default Find Information walk. BTstack's
 // Find Information handler loses the CCCD write when a peripheral spreads a characteristic's
 // descriptors over several responses (small ATT MTU, one descriptor per reply): it finds the

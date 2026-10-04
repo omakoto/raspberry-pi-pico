@@ -12,6 +12,7 @@
 #include "virtual_matrix.h"
 #include "vial_server.h"
 #include "ble_hid_host.h"
+#include "classic_hid_host.h"
 #include "usb_descriptors.h"
 #include "dual_console.h"
 
@@ -107,6 +108,7 @@ int main() {
         if (Multiplexer::hasLedsChanged()) {
             uint8_t leds = Multiplexer::getHostLeds();
             BleHidHost::sendHostLeds(leds);
+            ClassicHidHost::sendHostLeds(leds);
             Multiplexer::acknowledgeLeds();
         }
 
@@ -140,12 +142,16 @@ int main() {
         static uint32_t s_last_passkey = 0;
         static bool s_last_has_toast = false;
 
-        uint8_t cur_ble_count = BleHidHost::getConnectedCount();
+        uint8_t cur_ble_count = BleHidHost::getConnectedCount() + ClassicHidHost::getConnectedCount();
         bool cur_ble_connected = (cur_ble_count > 0);
         const char *cur_dev_name = BleHidHost::getConnectedDeviceName();
+        if (BleHidHost::getConnectedCount() == 0) {
+            cur_dev_name = ClassicHidHost::getConnectedDeviceName();
+        }
         int cur_active_layer = VirtualMatrix::getActiveLayer();
         bool cur_is_pairing = BleHidHost::isPairingMode();
         uint32_t cur_passkey = BleHidHost::getActivePasskey();
+        if (cur_passkey == 0) cur_passkey = ClassicHidHost::getActivePasskey();
         bool cur_has_toast = (now < s_toast_expiry_ms);
 
         bool state_changed = (cur_ble_count != s_last_ble_count) ||
