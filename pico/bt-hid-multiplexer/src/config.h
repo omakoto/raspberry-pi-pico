@@ -61,15 +61,15 @@
 // QMK keycodes, in the numbering the VIAL client uses at the VIAL protocol version this firmware
 // reports (3), i.e. the pre-0.19 QMK numbering: the layer actions and mouse keycodes differ from
 // current QMK. Verified against what vial.rocks stores in the keymap (e.g. MO(1) = 0x5101,
-// KC_WH_U = 0x00F9).
+// KC_WH_U = 0x00F9, KC_MS_U = 0x00F0 as labelled by the client).
 #define KC_NO_                  0x0000
 #define KC_TRNS_                0x0001  // transparent: use the keycode of the layers below
-#define KC_MS_U_                0x00ED  // mouse cursor up/down/left/right
-#define KC_MS_D_                0x00EE
-#define KC_MS_L_                0x00EF
-#define KC_MS_R_                0x00F0
-#define KC_BTN1_                0x00F1  // KC_BTN1..KC_BTN5 = mouse button 1..5 (up to BTN8 = 0x00F8)
-#define KC_BTN5_                0x00F5
+#define KC_MS_U_                0x00F0  // mouse cursor up/down/left/right
+#define KC_MS_D_                0x00F1
+#define KC_MS_L_                0x00F2
+#define KC_MS_R_                0x00F3
+#define KC_BTN1_                0x00F4  // KC_BTN1..KC_BTN5 = mouse button 1..5
+#define KC_BTN5_                0x00F8
 #define KC_WH_U_                0x00F9  // wheel up/down/left/right
 #define KC_WH_D_                0x00FA
 #define KC_WH_L_                0x00FB
@@ -98,7 +98,7 @@
 #define FLASH_KEYMAP_OFFSET     (PICO_FLASH_SIZE_BYTES - (64 * 1024))
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 // Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded.
-#define FLASH_KEYMAP_VERSION    3
+#define FLASH_KEYMAP_VERSION    4
 
 // After a peripheral has negotiated its own LL connection parameters and left them alone for a
 // while, re-request the same interval with slave latency 0 (see ZERO_LATENCY_DELAY_MS and
