@@ -1501,7 +1501,16 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 printf(" ]\n");
             }
 
-            if (report_id == 1 || (report_id == 0 && (data_len == 8 || data_len == 7))) {
+            // The mouse report ID comes from the device's own report descriptor, so it takes
+            // precedence over the usual ID guesses: some mice (e.g. the Keychron M5 8K) send their
+            // mouse reports as ID 1, which would otherwise be taken for keyboard reports and turn
+            // every motion into random key presses. Without a known mouse ID, ID 2 is assumed to be
+            // the mouse, as before.
+            bool is_mouse_report = (slot->mouse_report_id != 0)
+                                   ? (report_id == slot->mouse_report_id)
+                                   : (report_id == 2);
+
+            if (!is_mouse_report && (report_id == 1 || (report_id == 0 && (data_len == 8 || data_len == 7)))) {
                 if (data_len == 8) {
                     Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[2], 6);
                 } else if (data_len == 7) {
@@ -1513,7 +1522,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     printf("[BLE Host] Key press on slot %u ('%s'): mod=0x%02X key=0x%02X\n",
                            dev_idx, slot->name, data[0], (data_len == 8 ? data[2] : data[1]));
                 }
-            } else if (report_id == 2 || (slot->mouse_report_id != 0 && report_id == slot->mouse_report_id)) {
+            } else if (is_mouse_report) {
                 if (slot->mouse_format == MOUSE_FORMAT_LOGITECH_12BIT ||
                     (slot->mouse_format == MOUSE_FORMAT_UNKNOWN && (strstr(slot->name, "LIFT") || strstr(slot->name, "Logi") || strstr(slot->name, "MX ")))) {
                     // Logitech 12-bit packed mouse report:
