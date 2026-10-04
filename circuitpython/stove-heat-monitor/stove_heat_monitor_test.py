@@ -92,6 +92,43 @@ class TestStoveHeatMonitor(unittest.TestCase):
         self.assertIsNone(parse(b"POST / HTTP/1.1\r\n\r\n"))
         self.assertIsNone(parse(b""))
 
+    def test_poll_idle_and_normal_connections(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        class FakeClient:
+            def __init__(self, request: bytes | None) -> None:
+                self.request, self.sent, self.closed = request, b"", False
+
+            def settimeout(self, t: float) -> None:
+                pass
+
+            def recv_into(self, buf: bytearray) -> int:
+                if self.request is None:
+                    raise OSError(116, "ETIMEDOUT")
+                buf[: len(self.request)] = self.request
+                return len(self.request)
+
+            def send(self, data) -> int:
+                self.sent += bytes(data)
+                return len(data)
+
+            def close(self) -> None:
+                self.closed = True
+
+        server = stove_heat_monitor.FrameServer.__new__(stove_heat_monitor.FrameServer)
+        server.threshold_c, server.status, server.frame, server.refresh_s = 60.0, "st", [25.0] * 768, 2
+
+        for request, expect_response in ((None, False), (b"", False), (b"GET /index.txt HTTP/1.1\r\n\r\n", True)):
+            client = FakeClient(request)
+            server.sock = types.SimpleNamespace(accept=lambda c=client: (c, None))
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                server.poll()
+            self.assertTrue(client.closed)
+            self.assertEqual(buf.getvalue(), "")  # idle connections are not logged as failures
+            self.assertEqual(client.sent.startswith(b"HTTP/1.0 200 OK"), expect_response)
+
     def test_log_config(self) -> None:
         import io
         from contextlib import redirect_stdout

@@ -607,9 +607,16 @@ class FrameServer:
         except OSError:
             return  # No pending connection
         try:
-            client.settimeout(1.0)
+            # Browsers often open extra speculative connections that never send a request. Give up on
+            # those quickly and quietly, since polling happens in the main loop and must not stall it.
+            client.settimeout(0.5)
             buf = bytearray(512)
-            n: int = client.recv_into(buf)
+            try:
+                n: int = client.recv_into(buf)
+            except OSError:
+                return
+            if n == 0:
+                return
             path = parse_request_path(bytes(buf[:n]))
             # "/" and "/frame" serve an HTML view for browsers; "/index.txt" is plain text
             content_type: str = "text/plain; charset=utf-8"
@@ -638,7 +645,7 @@ class FrameServer:
                         raise
                     time.sleep(0.02)
         except Exception as e:
-            print(f"HTTP request failed: {e}")
+            print(f"HTTP response failed (client gone or stalled): {e}")
         finally:
             client.close()
 
