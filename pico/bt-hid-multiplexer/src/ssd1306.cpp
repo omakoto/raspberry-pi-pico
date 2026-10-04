@@ -209,7 +209,7 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
     // 1. Header Banner (0..11px)
     rect(0, 0, OLED_WIDTH, 11, true, true);
     if (pairing_active && ble_connected) {
-        drawString("MULTIPLEXER [SCAN]", 4, 2, false, false);
+        drawString("MULTIPLEXER [PAIR]", 4, 2, false, false);
     } else {
         drawString("PICO MULTIPLEXER", 4, 2, false, false);
     }
@@ -237,21 +237,21 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
         if (toast_msg && toast_msg[0] != '\0') {
             drawString(toast_msg, 2, 40, true, false);
         } else if (pairing_active) {
-            drawString("Scanning for dev... | USB", 2, 40, true, false);
+            drawString("Pairing mode (60s)... | USB", 2, 40, true, false);
         } else {
             drawString("USB: Active | VIAL: Ready", 2, 40, true, false);
         }
     } else if (pairing_active) {
-        drawString("BLE SCANNING...", 4, 18, true, true);
-        drawString("Place keyboard in pair mode", 2, 38, true, false);
+        drawString("BLE PAIRING...", 4, 18, true, true);
+        drawString("Place device in pair mode", 2, 38, true, false);
     } else {
         drawString("DISCONNECTED", 4, 18, true, true);
-        drawString("Hold button 2s to pair", 2, 38, true, false);
+        drawString("Press button to pair", 2, 38, true, false);
     }
 
     // 3. Footer Divider and Instructions (50..63px)
     line(0, 52, OLED_WIDTH - 1, 52, true);
-    drawString("[Btn] Hold 2s: Pair | 8s: Reset", 2, 55, true, false);
+    drawString("[Btn] Press: Pair | 8s: Reset", 2, 55, true, false);
 
     show();
 }

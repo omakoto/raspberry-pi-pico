@@ -157,10 +157,11 @@ static void handle_command(const char *cmd) {
     if (strcmp(cmd, "bootloader") == 0 || strcmp(cmd, "bootsel") == 0 || strcmp(cmd, "reboot bootloader") == 0) {
         reboot_to_bootsel();
     } else if (strcmp(cmd, "pair") == 0 || strcmp(cmd, "scan") == 0) {
-        dual_println("Starting BLE discovery scan...");
-        BleHidHost::startScan();
+        dual_println("Starting BLE pairing mode (60s)...");
+        BleHidHost::startPairingMode();
     } else if (strcmp(cmd, "stop") == 0) {
-        dual_println("Stopping BLE scan.");
+        dual_println("Stopping BLE pairing mode and scan.");
+        BleHidHost::stopPairingMode();
         BleHidHost::stopScan();
     } else if (strcmp(cmd, "status") == 0) {
         uint32_t ms = to_ms_since_boot(get_absolute_time());
@@ -170,6 +171,11 @@ static void handle_command(const char *cmd) {
         dual_printf("  Summary:      %s\r\n", BleHidHost::getConnectedDeviceName());
         dual_printf("  Active Layer: %u\r\n", VirtualMatrix::getActiveLayer());
         dual_printf("  Scanning:     %s\r\n", BleHidHost::isScanning() ? "Active" : "Idle");
+        if (BleHidHost::isPairingMode()) {
+            dual_printf("  Pairing Mode: Active (%lu s remaining)\r\n", (unsigned long)BleHidHost::getPairingModeRemainingSec());
+        } else {
+            dual_printf("  Pairing Mode: Inactive (bonded-only scan)\r\n");
+        }
         dual_printf("  Passkey PIN:  %lu\r\n", (unsigned long)BleHidHost::getActivePasskey());
         BleHidHost::dumpDevices();
         BleHidHost::dumpBonds();
@@ -330,8 +336,8 @@ static void handle_command(const char *cmd) {
     } else if (strcmp(cmd, "help") == 0) {
         dual_println("Available Commands:");
         dual_println("  bootloader     - Reboot board directly into USB BOOTSEL ROM");
-        dual_println("  pair / scan    - Start BLE discovery pairing");
-        dual_println("  stop           - Stop active BLE discovery scan");
+        dual_println("  pair / scan    - Start BLE pairing mode (60s window for new devices)");
+        dual_println("  stop           - Stop active BLE pairing mode and discovery scan");
         dual_println("  status         - Display connection status, layer, and uptime");
         dual_println("  devices        - List all connected BLE devices and slot details");
         dual_println("  bonds          - Dump bonded peripheral database and cache");

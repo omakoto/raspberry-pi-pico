@@ -41,6 +41,7 @@ struct BleSlot {
     bool has_led_report;        // peripheral provides an LED output report
     bool led_report_resolved;   // report descriptor has been inspected for LED output report
     uint8_t led_report_id;      // report ID for LED output report (0 if no report ID)
+    uint32_t last_used_ms;      // timestamp (ms since boot) of last input report or connection
 };
 
 // Peripherals defend their preferred parameters for a while after connecting: the ProtoArc XK01
@@ -61,6 +62,19 @@ static hci_con_handle_t s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
 static hid_protocol_mode_t s_protocol_mode = HID_PROTOCOL_MODE_REPORT;
 static char s_dev_name_summary[64] = {0};
 
+// Pairing mode state: when active, unbonded target HID devices are accepted for connection.
+// When inactive, background scanning strictly reconnects to already-bonded devices.
+static bool s_is_pairing_mode = false;
+static uint32_t s_pairing_mode_start_ms = 0;
+static uint32_t s_pairing_mode_duration_ms = 0;
+static btstack_timer_source_t s_pairing_mode_timer;
+
+// Pending connection queued while disconnecting the least-recently-used slot
+static bool s_eviction_pending = false;
+static bd_addr_t s_pending_connect_addr;
+static bd_addr_type_t s_pending_connect_addr_type;
+static char s_pending_connect_name[32];
+
 // Authentication requirements we put in our SMP Pairing Request. Only affects new pairings;
 // existing bonds re-encrypt with their stored LTK regardless.
 //
@@ -78,8 +92,10 @@ static btstack_timer_source_t s_pairing_timer;
 
 static void onReconnectTimeout(btstack_timer_source_t *ts);
 static void onPairingDelayTimeout(btstack_timer_source_t *ts);
+static void onPairingModeTimeout(btstack_timer_source_t *ts);
 static void tryAutoReconnectOrScan();
 static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name);
+static void evict_lru_and_connect(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name);
 
 // Storage buffer for HID Report Descriptors across all active HOGP instances
 static uint8_t s_hid_descriptor_storage[4096];
@@ -380,11 +396,18 @@ static void onReconnectTimeout(btstack_timer_source_t *ts) {
     (void)ts;
     if (s_is_connecting) {
         printf("[BLE Host] Connection attempt timed out. Cancelling...\n");
+        s_eviction_pending = false;
         // Instruct BTstack controller to cancel the pending LE connection.
         // The controller will emit GAP_SUBEVENT_LE_CONNECTION_COMPLETE with an error status,
         // which cleanly clears the connecting slot and safely resumes scanning without HCI race conditions.
         gap_connect_cancel();
     }
+}
+
+static void onPairingModeTimeout(btstack_timer_source_t *ts) {
+    (void)ts;
+    printf("[BLE Host] Pairing mode timed out (60s). Returning to bonded-only scan.\n");
+    BleHidHost::stopPairingMode();
 }
 
 // Delay timer to let link layer connection anchors stabilize before initiating SMP security
@@ -431,6 +454,45 @@ static void reset_slot(BleSlot *slot) {
     slot->con_handle = HCI_CON_HANDLE_INVALID;
 }
 
+// Disconnect the least-recently-used connected slot to make room for a new connection
+static void evict_lru_and_connect(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
+    if (s_eviction_pending || s_is_connecting) return;
+
+    int8_t lru_idx = -1;
+    uint32_t oldest_ms = 0xFFFFFFFF;
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (s_connecting_slot_idx == (int8_t)i) continue;
+        if (s_slots[i].connected || s_slots[i].con_handle != HCI_CON_HANDLE_INVALID) {
+            if (s_slots[i].last_used_ms < oldest_ms) {
+                oldest_ms = s_slots[i].last_used_ms;
+                lru_idx = i;
+            }
+        }
+    }
+    if (lru_idx < 0) {
+        printf("[BLE Host] Max connection limit reached (%d devices). No connected slot eligible for eviction.\n", MAX_BLE_DEVICES);
+        return;
+    }
+
+    BleSlot *evicted = &s_slots[lru_idx];
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t idle_s = (now >= evicted->last_used_ms) ? (now - evicted->last_used_ms) / 1000 : 0;
+    printf("[BLE Host] Connection capacity (%d) reached. Evicting LRU slot %u ('%s', idle %lu s) to connect '%s'...\n",
+           MAX_BLE_DEVICES, lru_idx, evicted->name, (unsigned long)idle_s,
+           (name && name[0] != '\0') ? name : bd_addr_to_str(addr));
+
+    s_eviction_pending = true;
+    bd_addr_copy(s_pending_connect_addr, addr);
+    s_pending_connect_addr_type = addr_type;
+    if (name && name[0] != '\0') {
+        snprintf(s_pending_connect_name, sizeof(s_pending_connect_name), "%s", name);
+    } else {
+        snprintf(s_pending_connect_name, sizeof(s_pending_connect_name), "%s", bd_addr_to_str(addr));
+    }
+
+    gap_disconnect(evicted->con_handle);
+}
+
 // Centralized connection routine with 10-second timeout
 static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
     if (s_is_connecting) return;
@@ -438,13 +500,14 @@ static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, cons
 
     BleSlot *slot = find_free_slot();
     if (!slot) {
-        printf("[BLE Host] Max connection limit reached (%d devices). Cannot connect new peripheral.\n", MAX_BLE_DEVICES);
+        evict_lru_and_connect(addr, addr_type, name);
         return;
     }
 
     slot->con_handle = HCI_CON_HANDLE_INVALID;
     slot->hids_cid = 0;
     slot->connected = false;
+    slot->last_used_ms = to_ms_since_boot(get_absolute_time());
     bd_addr_copy(slot->addr, addr);
     slot->addr_type = addr_type;
     if (name && name[0] != '\0') {
@@ -474,7 +537,7 @@ static void tryAutoReconnectOrScan() {
     uint8_t conn_count = BleHidHost::getConnectedCount();
     printf("[BLE Host] %u / %u devices connected, %u bonded device(s) stored.\n",
            conn_count, MAX_BLE_DEVICES, s_bonded_table.count);
-    if (conn_count < MAX_BLE_DEVICES) {
+    if (BleHidHost::hasUnconnectedBonds() || BleHidHost::isPairingMode()) {
         BleHidHost::startScan();
     }
 }
@@ -661,6 +724,42 @@ bool BleHidHost::isScanning() {
     return s_is_scanning;
 }
 
+void BleHidHost::startPairingMode(uint32_t timeout_ms) {
+    s_is_pairing_mode = true;
+    s_pairing_mode_start_ms = to_ms_since_boot(get_absolute_time());
+    s_pairing_mode_duration_ms = timeout_ms;
+    btstack_run_loop_remove_timer(&s_pairing_mode_timer);
+    btstack_run_loop_set_timer(&s_pairing_mode_timer, timeout_ms);
+    btstack_run_loop_set_timer_handler(&s_pairing_mode_timer, &onPairingModeTimeout);
+    btstack_run_loop_add_timer(&s_pairing_mode_timer);
+    printf("[BLE Host] Pairing mode started (%lu s timeout). Unbonded HID peripherals accepted.\n",
+           (unsigned long)(timeout_ms / 1000));
+    BleHidHost::startScan();
+}
+
+void BleHidHost::stopPairingMode() {
+    if (!s_is_pairing_mode) return;
+    s_is_pairing_mode = false;
+    btstack_run_loop_remove_timer(&s_pairing_mode_timer);
+    printf("[BLE Host] Pairing mode stopped.\n");
+    if (!BleHidHost::hasUnconnectedBonds()) {
+        BleHidHost::stopScan();
+    } else {
+        BleHidHost::startScan();
+    }
+}
+
+bool BleHidHost::isPairingMode() {
+    return s_is_pairing_mode;
+}
+
+uint32_t BleHidHost::getPairingModeRemainingSec() {
+    if (!s_is_pairing_mode) return 0;
+    uint32_t elapsed = to_ms_since_boot(get_absolute_time()) - s_pairing_mode_start_ms;
+    if (elapsed >= s_pairing_mode_duration_ms) return 0;
+    return (s_pairing_mode_duration_ms - elapsed + 999) / 1000;
+}
+
 bool BleHidHost::isConnected() {
     return (getConnectedCount() > 0);
 }
@@ -755,9 +854,11 @@ void BleHidHost::clearBonds() {
 }
 
 void BleHidHost::dumpDevices() {
+    uint32_t now = to_ms_since_boot(get_absolute_time());
     printf("[BLE Host] Connected Devices (%u / %u):\n", getConnectedCount(), MAX_BLE_DEVICES);
     for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
         if (s_slots[i].connected) {
+            uint32_t idle_s = (now >= s_slots[i].last_used_ms) ? (now - s_slots[i].last_used_ms) / 1000 : 0;
             printf("  Slot %u: '%s' (%s, handle 0x%04X, cid 0x%04X, interval %.2f ms",
                    i, s_slots[i].name, bd_addr_to_str(s_slots[i].addr),
                    s_slots[i].con_handle, s_slots[i].hids_cid,
@@ -771,7 +872,7 @@ void BleHidHost::dumpDevices() {
             } else if (s_slots[i].led_report_resolved) {
                 printf(", no_leds");
             }
-            printf(")\n");
+            printf(", idle %lu s)\n", (unsigned long)idle_s);
         }
     }
 }
@@ -1067,10 +1168,14 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     // returns COMMAND_DISALLOWED) for as long as the peripheral takes to answer, which on
                     // the ProtoArc XK01 is a 30 s GATT timeout per write. 'notif <slot>' remains for manual use.
 
-                    // Keep looking for bonded devices that are still missing; once every bonded
+                    // If pairing mode was active, exit now that the new device has paired and connected.
+                    // Otherwise keep looking for bonded devices that are still missing; once every bonded
                     // device is connected, stop scanning so it no longer takes radio time from the
                     // links (the main loop restarts it when a device drops off).
-                    if (BleHidHost::hasUnconnectedBonds() && BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
+                    if (s_is_pairing_mode) {
+                        printf("[BLE Host] Peripheral paired and connected successfully. Exiting pairing mode.\n");
+                        BleHidHost::stopPairingMode();
+                    } else if (BleHidHost::hasUnconnectedBonds() && BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
                         BleHidHost::startScan();
                     } else {
                         BleHidHost::stopScan();
@@ -1084,9 +1189,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                         gap_disconnect(slot->con_handle);
                     }
                 }
-                if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
-                    BleHidHost::startScan();
-                }
+                tryAutoReconnectOrScan();
             }
             break;
         }
@@ -1144,9 +1247,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 Multiplexer::purgeKeyboard(slot->dev_idx);
                 Multiplexer::purgeMouse(slot->dev_idx);
             }
-            if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
-                BleHidHost::startScan();
-            }
+            tryAutoReconnectOrScan();
             break;
         }
 
@@ -1157,6 +1258,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 printf("[BLE Host] REPORT on unknown cid 0x%04X\n", cid);
                 break;
             }
+            slot->last_used_ms = to_ms_since_boot(get_absolute_time());
             // BTstack registers the notification listener for each input report as soon as its CCCD
             // write is issued, well before it emits HID_SERVICE_CONNECTED for the whole service. A
             // keyboard whose remaining CCCD writes are slow (or time out) can therefore deliver valid
@@ -1405,8 +1507,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
 
         case GAP_EVENT_ADVERTISING_REPORT: {
             if (!s_is_scanning) break;
-            if (s_is_connecting) break;
-            if (find_free_slot() == nullptr) break;
+            if (s_is_connecting || s_eviction_pending) break;
 
             bd_addr_t addr;
             gap_event_advertising_report_get_address(packet, addr);
@@ -1423,22 +1524,22 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             uint32_t now = to_ms_since_boot(get_absolute_time());
             bool should_log = update_and_should_log_device(addr, now, &info);
             bool is_bonded = is_bonded_device_addr(addr);
-            // Background scanning runs whenever a bonded device is absent, so in a busy RF
-            // environment this fires for dozens of devices every few seconds. Printing each one
-            // stalls the BTstack context on the UART and shows up as input latency, so unrelated
-            // named devices are only listed in verbose mode ('log on'); HID candidates and bonded
-            // devices are always announced.
-            bool is_candidate = is_bonded || is_target_hid_device(info);
+            bool is_target = is_target_hid_device(info);
+            // In pairing mode, allow new unbonded target HID devices.
+            // In regular background scanning, strictly reconnect to already-bonded devices.
+            bool is_candidate = is_bonded || (s_is_pairing_mode && is_target);
             if (should_log && (is_candidate || (s_stack_logging && info.name[0] != '\0'))) {
                 if (info.name[0] != '\0') {
-                    printf("[BLE Host] Adv: '%s' (%s, RSSI %d dBm, HID=%d, App=0x%04X)\n",
-                           info.name, bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance);
+                    printf("[BLE Host] Adv: '%s' (%s, RSSI %d dBm, HID=%d, App=0x%04X)%s\n",
+                           info.name, bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance,
+                           is_bonded ? " [bonded]" : (s_is_pairing_mode ? " [pair-candidate]" : ""));
                 } else {
-                    printf("[BLE Host] Adv: %s (RSSI %d dBm, HID=%d, App=0x%04X)\n",
-                           bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance);
+                    printf("[BLE Host] Adv: %s (RSSI %d dBm, HID=%d, App=0x%04X)%s\n",
+                           bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance,
+                           is_bonded ? " [bonded]" : (s_is_pairing_mode ? " [pair-candidate]" : ""));
                 }
             }
-            if (is_bonded || is_target_hid_device(info)) {
+            if (is_candidate) {
                 const char *dev_name = (info.name[0] != '\0') ? info.name : "";
                 if (dev_name[0] == '\0' && is_bonded) {
                     for (uint8_t b = 0; b < s_bonded_table.count; b++) {
@@ -1450,7 +1551,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 }
 
                 printf("[BLE Host] %s found: '%s' (%s)\n",
-                       is_bonded ? "Bonded device" : "Target HID device",
+                       is_bonded ? "Bonded device" : "Pairing candidate",
                        dev_name[0] != '\0' ? dev_name : bd_addr_to_str(addr),
                        bd_addr_to_str(addr));
                 connectToDevice(addr, (bd_addr_type_t)addr_type, dev_name);
@@ -1476,7 +1577,14 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 btstack_run_loop_remove_timer(&s_pairing_timer);
             }
 
-            tryAutoReconnectOrScan();
+            if (s_eviction_pending) {
+                s_eviction_pending = false;
+                printf("[BLE Host] Slot freed after LRU eviction. Proceeding to connect '%s'...\n",
+                       s_pending_connect_name);
+                connectToDevice(s_pending_connect_addr, s_pending_connect_addr_type, s_pending_connect_name);
+            } else {
+                tryAutoReconnectOrScan();
+            }
             break;
         }
 
@@ -1495,9 +1603,8 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     s_is_connecting = false;
                     s_connecting_slot_idx = -1;
                     s_is_scanning = false;
-                    if (BleHidHost::getConnectedCount() < MAX_BLE_DEVICES) {
-                        BleHidHost::startScan();
-                    }
+                    s_eviction_pending = false;
+                    tryAutoReconnectOrScan();
                     break;
                 }
 
@@ -1518,6 +1625,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 s_connecting_slot_idx = -1;
 
                 if (slot) {
+                    slot->last_used_ms = to_ms_since_boot(get_absolute_time());
                     slot->con_handle = handle;
                     uint16_t interval = gap_subevent_le_connection_complete_get_conn_interval(packet);
                     uint16_t latency = gap_subevent_le_connection_complete_get_conn_latency(packet);

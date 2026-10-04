@@ -10,6 +10,10 @@ public:
     static void startScan();
     static void stopScan();
     static bool isScanning();
+    static void startPairingMode(uint32_t timeout_ms = 60000);
+    static void stopPairingMode();
+    static bool isPairingMode();
+    static uint32_t getPairingModeRemainingSec();
     static bool isConnected();
     static uint8_t getConnectedCount();
     static uint8_t getBondedCount();

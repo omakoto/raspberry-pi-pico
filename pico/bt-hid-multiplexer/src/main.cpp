@@ -83,19 +83,19 @@ int main() {
         // Check Push Button Events
         ButtonEvent btn_ev = ButtonHandler::update();
         if (btn_ev == BUTTON_EVENT_SHORT_PRESS) {
-            if (BleHidHost::isScanning()) {
-                printf("[Button] Short press: Stopping BLE scan.\n");
-                BleHidHost::stopScan();
-                show_toast("BLE Scan Stopped", 1500);
+            if (BleHidHost::isPairingMode()) {
+                printf("[Button] Short press: Stopping pairing mode.\n");
+                BleHidHost::stopPairingMode();
+                show_toast("Pairing Stopped", 1500);
             } else {
-                printf("[Button] Short press: Starting BLE scan.\n");
-                BleHidHost::startScan();
-                show_toast("BLE Scan Started", 1500);
+                printf("[Button] Short press: Starting pairing mode (60s).\n");
+                BleHidHost::startPairingMode();
+                show_toast("Pairing Mode (60s)", 1500);
             }
         } else if (btn_ev == BUTTON_EVENT_LONG_PRESS_PAIR) {
-            printf("[Button] Long press: Entering pairing mode.\n");
-            BleHidHost::startScan();
-            show_toast("BLE Scan Started", 3000);
+            printf("[Button] Long press: Starting pairing mode (60s).\n");
+            BleHidHost::startPairingMode();
+            show_toast("Pairing Mode (60s)", 3000);
         } else if (btn_ev == BUTTON_EVENT_EXTRA_LONG_PRESS_RESET) {
             printf("[Button] Extra long press: Resetting bonds and keymap!\n");
             BleHidHost::clearBonds();
@@ -117,11 +117,11 @@ int main() {
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, s_led_state);
         }
 
-        // Ensure background scanning is active whenever there are unconnected bonded devices
+        // Ensure background scanning is active whenever there are unconnected bonded devices or pairing mode is active
         static uint32_t s_last_scan_check_ms = 0;
         if (now - s_last_scan_check_ms >= 1000) {
             s_last_scan_check_ms = now;
-            if (BleHidHost::hasUnconnectedBonds() && !BleHidHost::isScanning()) {
+            if ((BleHidHost::hasUnconnectedBonds() || BleHidHost::isPairingMode()) && !BleHidHost::isScanning()) {
                 BleHidHost::startScan();
             }
         }
@@ -131,7 +131,7 @@ int main() {
         static uint8_t s_last_ble_count = 0xFF;
         static char s_last_dev_name[64] = {0};
         static int s_last_active_layer = -1;
-        static bool s_last_is_scanning = false;
+        static bool s_last_is_pairing = false;
         static uint32_t s_last_passkey = 0;
         static bool s_last_has_toast = false;
 
@@ -139,14 +139,14 @@ int main() {
         bool cur_ble_connected = (cur_ble_count > 0);
         const char *cur_dev_name = BleHidHost::getConnectedDeviceName();
         int cur_active_layer = VirtualMatrix::getActiveLayer();
-        bool cur_is_scanning = BleHidHost::isScanning();
+        bool cur_is_pairing = BleHidHost::isPairingMode();
         uint32_t cur_passkey = BleHidHost::getActivePasskey();
         bool cur_has_toast = (now < s_toast_expiry_ms);
 
         bool state_changed = (cur_ble_count != s_last_ble_count) ||
                              (strcmp(cur_dev_name, s_last_dev_name) != 0) ||
                              (cur_active_layer != s_last_active_layer) ||
-                             (cur_is_scanning != s_last_is_scanning) ||
+                             (cur_is_pairing != s_last_is_pairing) ||
                              (cur_passkey != s_last_passkey) ||
                              (cur_has_toast != s_last_has_toast);
 
@@ -160,7 +160,7 @@ int main() {
             strncpy(s_last_dev_name, cur_dev_name, sizeof(s_last_dev_name) - 1);
             s_last_dev_name[sizeof(s_last_dev_name) - 1] = '\0';
             s_last_active_layer = cur_active_layer;
-            s_last_is_scanning = cur_is_scanning;
+            s_last_is_pairing = cur_is_pairing;
             s_last_passkey = cur_passkey;
             s_last_has_toast = cur_has_toast;
 
@@ -169,7 +169,7 @@ int main() {
                 cur_ble_connected,
                 cur_dev_name,
                 cur_active_layer,
-                cur_is_scanning,
+                cur_is_pairing,
                 cur_passkey,
                 toast
             );

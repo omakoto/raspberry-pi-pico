@@ -18,9 +18,14 @@ This project connects wireless BLE keyboards, mice, and integrated trackpads and
   - Displays connection status, connected peripheral names, active keymap layer, and USB connection health.
   - **Pairing Passkey Display:** When pairing a keyboard requiring Secure Simple Pairing / Passkey Entry, the 6-digit PIN is displayed prominently on the OLED (`Type 123456 + Enter on keyboard`).
 - **Push Button Pairing Controller:**
-  - Short press: Refresh status screen / clear toasts.
-  - Long press (2s): Start BLE scanning and pairing mode (60-second discovery window).
+  - Short press: Toggle BLE pairing mode on/off (60-second discovery window).
+  - Long press (2s): Start BLE pairing mode (60-second discovery window).
   - Extra long press (8s): Factory reset (wipes all bonded BLE devices and resets keymap to default).
+  - **Non-Aggressive Pairing:** Background scanning strictly reconnects to already-bonded peripherals and will never hijack unbonded devices advertising in pairing mode nearby. New devices are only discovered and paired during an active Pairing Mode window.
+- **LRU Active Connection Eviction (Up to 8 Concurrent Devices):**
+  - Supports up to 8 active BLE connections simultaneously (`MAX_BLE_DEVICES = 8`).
+  - Tracks the least-recently-used active connection (based on keystroke and mouse motion reports).
+  - When all 8 slots are filled and an eligible bonded or newly-paired peripheral connects, the oldest idle connection is cleanly disconnected to make room while preserving its bond in flash.
 - **VIAL Dynamic Keymapping (WebHID):**
   - Exposes standard Vendor RawHID interface (`0xFF60:0x0061`).
   - Open [https://vial.rocks/](https://vial.rocks/) in Chrome to configure 4 layers, macros, tap-dance, and key remappings in real-time.
@@ -110,7 +115,7 @@ The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Reques
 ## How to Pair a Device
 
 1. **Enter Pairing Mode:**
-   - Press and hold the push button on `GP6` for **2 seconds** until the OLED screen displays `BLE SCANNING...`.
+   - Press the push button on `GP6` (or hold for 2s, or run `pair` from console) until the OLED screen displays `BLE PAIRING...` (or toast `Pairing Mode (60s)`).
 2. **Put Peripheral in Pairing Mode:**
    - Put your Bluetooth keyboard or mouse into pairing / discoverable mode.
 3. **Passkey Verification (Keyboards):**

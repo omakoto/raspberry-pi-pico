@@ -13,6 +13,8 @@ void ButtonHandler::init() {
     gpio_init(PIN_PAIR_BUTTON);
     gpio_set_dir(PIN_PAIR_BUTTON, GPIO_IN);
     gpio_pull_up(PIN_PAIR_BUTTON); // Active LOW: resting HIGH, pressed LOW
+    // Allow internal pull-up to charge pin capacitance before reading baseline
+    sleep_ms(2);
 
     last_raw_state_ = gpio_get(PIN_PAIR_BUTTON);
     debounced_state_ = last_raw_state_;
@@ -43,8 +45,9 @@ ButtonEvent ButtonHandler::update() {
                 extra_long_press_fired_ = false;
             } else {
                 // Button transitioned to RELEASED (HIGH)
-                if (!long_press_fired_ && !extra_long_press_fired_) {
+                if (!long_press_fired_ && !extra_long_press_fired_ && press_start_time_ > 0) {
                     uint32_t duration = now - press_start_time_;
+                    press_start_time_ = 0;
                     if (duration >= 50 && duration < 1500) {
                         event = BUTTON_EVENT_SHORT_PRESS;
                     }
