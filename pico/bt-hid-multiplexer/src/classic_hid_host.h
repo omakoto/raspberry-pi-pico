@@ -21,6 +21,8 @@ public:
     static uint8_t getConnectedCount();
     static const char* getConnectedDeviceName();
     static uint32_t getActivePasskey();
+    // Bluetooth address of the connected device with this multiplexer device index.
+    static bool getSlotAddress(uint8_t dev_idx, uint8_t addr[6]);
 
     // Mirror the host PC's lock LEDs to connected classic keyboards.
     static void sendHostLeds(uint8_t leds);

@@ -1,5 +1,6 @@
 #include "multiplexer.h"
 #include "virtual_matrix.h"
+#include "device_bindings.h"
 #include "usb_descriptors.h"
 #include "tusb.h"
 #include <string.h>
@@ -49,6 +50,7 @@ void Multiplexer::handleKeyboardReport(uint8_t dev_idx, uint8_t modifiers, const
     if (dev_idx >= MAX_KEYBOARDS) return;
 
     keyboards_[dev_idx].connected = true;
+    DeviceBindings::noteActivity(dev_idx);
     uint8_t old_mods = keyboards_[dev_idx].modifiers;
     keyboards_[dev_idx].modifiers = modifiers;
 
@@ -113,6 +115,7 @@ void Multiplexer::handleKeyboardReport(uint8_t dev_idx, uint8_t modifiers, const
 void Multiplexer::purgeKeyboard(uint8_t dev_idx) {
     if (dev_idx >= MAX_KEYBOARDS) return;
     VirtualMatrix::purgeDevice(dev_idx);
+    DeviceBindings::deviceChanged(dev_idx);
     memset(&keyboards_[dev_idx], 0, sizeof(KeyboardDeviceState));
     kbd_dirty_ = true;
     flushKeyboard();
@@ -230,10 +233,10 @@ void Multiplexer::enqueueTap(uint16_t action) {
     kbd_dirty_ = true;
 }
 
-void Multiplexer::routeMotion(int32_t value, uint8_t vkey_positive, uint8_t vkey_negative, bool wheel_units) {
+void Multiplexer::routeMotion(uint8_t dev_idx, int32_t value, uint8_t vkey_positive, uint8_t vkey_negative, bool wheel_units) {
     if (value == 0) return;
     uint8_t vkey = (value > 0) ? vkey_positive : vkey_negative;
-    uint16_t action = VirtualMatrix::resolveAction(vkey);
+    uint16_t action = VirtualMatrix::resolveAction(dev_idx, vkey);
     int32_t magnitude = (value > 0) ? value : -value;
     // Both kinds of source are converted to cursor counts, so any source can drive any target.
     int32_t counts = wheel_units ? magnitude * MOUSE_COUNTS_PER_WHEEL_NOTCH : magnitude;
@@ -275,6 +278,10 @@ void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx
     if (dev_idx >= MAX_MICE) return;
 
     mice_[dev_idx].connected = true;
+    // Only real input counts as activity, not empty reports.
+    if (buttons != mice_[dev_idx].buttons || dx != 0 || dy != 0 || wheel != 0 || pan != 0) {
+        DeviceBindings::noteActivity(dev_idx);
+    }
     uint8_t mask = (uint8_t)((1u << VKEY_MOUSE_BTN_COUNT) - 1);
     uint8_t changed = (mice_[dev_idx].buttons ^ buttons) & mask;
     uint8_t old_buttons = mice_[dev_idx].buttons;
@@ -296,10 +303,10 @@ void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx
         }
     }
 
-    routeMotion(dx, VKEY_MOTION_RIGHT, VKEY_MOTION_LEFT, false);
-    routeMotion(dy, VKEY_MOTION_DOWN, VKEY_MOTION_UP, false);
-    routeMotion(wheel, VKEY_WHEEL_UP, VKEY_WHEEL_DOWN, true);
-    routeMotion(pan, VKEY_WHEEL_RIGHT, VKEY_WHEEL_LEFT, true);
+    routeMotion(dev_idx, dx, VKEY_MOTION_RIGHT, VKEY_MOTION_LEFT, false);
+    routeMotion(dev_idx, dy, VKEY_MOTION_DOWN, VKEY_MOTION_UP, false);
+    routeMotion(dev_idx, wheel, VKEY_WHEEL_UP, VKEY_WHEEL_DOWN, true);
+    routeMotion(dev_idx, pan, VKEY_WHEEL_RIGHT, VKEY_WHEEL_LEFT, true);
 
     if (changed) {
         // A button may have been remapped to a key or modifier.
@@ -319,6 +326,7 @@ void Multiplexer::purgeMouse(uint8_t dev_idx) {
         }
     }
     memset(&mice_[dev_idx], 0, sizeof(MouseDeviceState));
+    DeviceBindings::deviceChanged(dev_idx);
     kbd_dirty_ = true;
     flushKeyboard();
     flushMouse();

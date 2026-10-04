@@ -101,8 +101,9 @@ Commands supported on either console:
 - `disconnect <slot>`, `unbond <idx>`, `clearbonds`: Drop a BLE link, forget one BLE bond, or forget all bonds (BLE and classic)
 - `cconnect <n>`, `cdisconnect <slot>`: Bluetooth Classic only. `cconnect` makes the Pico page the classic bond `[cN]` listed by `bonds` (a host-initiated reconnect, for devices that do not reconnect by themselves); `cdisconnect` drops classic slot `<slot>`
 - `cqos <slot> [type] [latency_us]`: Bluetooth Classic only, experimental. Requests a QoS (poll interval) setting on a classic slot's link, `type` 0 = no traffic, 1 = best effort, 2 = guaranteed (default 1). A latency bound of 5000 µs is already applied automatically to every classic link
+- `devlayer` (alias `dl`) `[<layer> | <dev> <layer> | clear [<dev>] | list]`: Binds a device to a keymap layer so it can be remapped on its own, see [manual/per-device-mapping.md](manual/per-device-mapping.md)
 - `resetkeymap`: Resets the VIAL keymap (all layers) to the defaults and keeps all bonds
-- `reset`: Clears all bonded devices and resets keymap to default
+- `reset`: Clears all bonded devices and per-device layer bindings and resets keymap to default
 - `help`: Lists all console commands
 
 ### Input latency
@@ -164,9 +165,10 @@ The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Reques
 - **Keys:** the matrix is 16×16, one cell per HID keyboard usage, so every key and modifier on any connected keyboard can be remapped. Keys on upper layers that are left as `Transparent` use the layer below. Only the base layer is non-transparent by default.
 - **Keycodes that work:** basic keys, modifiers (`LCTL`…`RGUI`), modifier-wrapped keys such as `LSFT(KC_A)`, `MO`/`TG`/`TO`/`DF` layer keys (keycodes use the numbering of the VIAL protocol version the firmware reports, see `src/config.h`), `KC_NO`, `KC_TRNS`, mouse buttons 1–5 and the mouse wheel/cursor keycodes below.
 - **Not supported:** media/consumer and system keys (the USB device has no consumer report), macros, tap dance, mod-tap/layer-tap, combos, and the 6-key rollover limit still applies.
-- **Mouse:** the bottom two rows of the Vial key map are the mouse. The eight keys on the left are mouse buttons 1–8 (only 1–5 can be sent on to the host as mouse buttons; 6–8 can be remapped to anything else). The eight keys on the right are the directions of mouse movement in the order cursor up, down, left, right, then wheel up, down, left, right. By default they are mapped to `KC_MS_U/D/L/R` and `KC_WH_U/D/L/R`, which reproduces the physical behaviour.
+- **Mouse:** the bottom row of the Vial key map is the mouse. The eight keys on the left are mouse buttons 1–8 (only 1–5 can be sent on to the host as mouse buttons; 6–8 default to F13–F15 and can be remapped to anything). The eight keys on the right are the directions of mouse movement in the order cursor up, down, left, right, then wheel up, down, left, right. By default they are mapped to `KC_MS_U/D/L/R` and `KC_WH_U/D/L/R`, which reproduces the physical behaviour.
   - **Remap a button:** put any key, modifier or `KC_BTN1`…`KC_BTN5` on it.
   - **Button + movement = something else:** map one mouse button to `MO(1)` on layer 0, then on layer 1 map "cursor up" to `KC_WH_U` and "cursor down" to `KC_WH_D`. While the button is held, moving the mouse up/down scrolls; `KC_MS_L/R` ↔ `KC_WH_L/R` does the same for horizontal movement. A movement can also be turned into another movement (e.g. swap or invert axes), into a key (one tap per wheel notch of movement or per real wheel notch, e.g. `KC_VOLU`/`KC_VOLD` for volume), or disabled with `KC_NO`. `KC_MUTE`/`KC_VOLU`/`KC_VOLD` are sent as the keyboard-page volume keys, which Linux sees as `KEY_MUTE`/`KEY_VOLUMEUP`/`KEY_VOLUMEDOWN`. `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `src/config.h` sets how many counts of movement are one wheel notch.
+- **Per device:** a Bluetooth device can be bound to a layer so that remapping applies to it alone (for example one mouse's wheel as volume): see [manual/per-device-mapping.md](manual/per-device-mapping.md).
 - **Persistence:** keymap edits are written to flash about half a second after the last change.
 - **Changing the key list:** edit `gen-vial-layout.py`, run it, and rebuild. `test/run-host-test.sh` tests the remapping logic on the host.
 

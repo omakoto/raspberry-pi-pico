@@ -4,6 +4,7 @@
 #include "classic_hid_host.h"
 #include "multiplexer.h"
 #include "virtual_matrix.h"
+#include "device_bindings.h"
 #include "pico/bootrom.h"
 #include "pico/time.h"
 #include "pico/stdio.h"
@@ -146,6 +147,82 @@ void dual_printf(const char *fmt, ...) {
 void dual_println(const char *str) {
     if (!str) return;
     dual_printf("%s\r\n", str);
+}
+
+static void print_addr(const uint8_t a[6]) {
+    dual_printf("%02X:%02X:%02X:%02X:%02X:%02X", a[0], a[1], a[2], a[3], a[4], a[5]);
+}
+
+static void print_device_bindings() {
+    dual_println("Connected devices (idx, name, address, bound layer):");
+    for (uint8_t i = 0; i < MAX_KEYBOARDS; i++) {
+        uint8_t addr[6];
+        if (!DeviceBindings::addressOf(i, addr)) continue;
+        uint8_t layer = DeviceBindings::layerFor(i);
+        dual_printf("  %u  %-24s ", i, i < MAX_BLE_DEVICES ? BleHidHost::getConnectedDeviceName(i) : "(classic)");
+        print_addr(addr);
+        if (layer == DeviceBindings::NO_LAYER) {
+            dual_println("  -");
+        } else {
+            dual_printf("  layer %u\r\n", layer);
+        }
+    }
+    dual_println("Saved bindings:");
+    uint8_t n = DeviceBindings::entryCount();
+    for (uint8_t i = 0; i < n; i++) {
+        uint8_t addr[6], layer = 0;
+        DeviceBindings::getEntry(i, addr, &layer);
+        dual_printf("  ");
+        print_addr(addr);
+        dual_printf("  layer %u\r\n", layer);
+    }
+    if (n == 0) dual_println("  (none)");
+    uint8_t last = DeviceBindings::lastActiveDevice();
+    if (last != DeviceBindings::NO_DEVICE) dual_printf("Device used last: %u\r\n", last);
+}
+
+// devlayer <layer> | <dev> <layer> | clear [<dev>] | list
+static void handle_devlayer(const char *arg) {
+    while (*arg == ' ') arg++;
+    int a = -1, b = -1;
+    if (*arg == '\0' || strcmp(arg, "list") == 0) {
+        print_device_bindings();
+        if (*arg == '\0') {
+            dual_println("Usage: devlayer <layer> | <dev> <layer> | clear [<dev>] | list");
+            dual_println("  e.g. move the device, then 'devlayer 3' binds it to layer 3");
+        }
+        return;
+    }
+    bool clear = strncmp(arg, "clear", 5) == 0;
+    uint8_t dev = DeviceBindings::lastActiveDevice();
+    int layer = -1;
+    if (clear) {
+        if (sscanf(arg + 5, "%d", &a) == 1) dev = (uint8_t)a;
+    } else {
+        int count = sscanf(arg, "%d %d", &a, &b);
+        if (count == 1) {
+            layer = a;
+        } else if (count == 2) {
+            dev = (uint8_t)a;
+            layer = b;
+        } else {
+            dual_println("Usage: devlayer <layer> | <dev> <layer> | clear [<dev>] | list");
+            return;
+        }
+    }
+    if (dev == DeviceBindings::NO_DEVICE) {
+        dual_println("No device has sent input yet: move or click the device first, or give its index (see 'devlayer list').");
+        return;
+    }
+    if (clear) {
+        dual_println(DeviceBindings::unbind(dev) ? "Binding removed." : "That device is not connected or not bound.");
+    } else if (layer < 1 || layer >= NUM_LAYERS) {
+        dual_printf("Layer must be 1-%d (layer 0 is the base layer).\r\n", NUM_LAYERS - 1);
+    } else if (DeviceBindings::bind(dev, (uint8_t)layer)) {
+        dual_printf("Device %u bound to layer %d. Edit that layer in VIAL.\r\n", dev, layer);
+    } else {
+        dual_println("Could not bind: the device is not connected, or all binding slots are used.");
+    }
 }
 
 static void handle_command(const char *cmd) {
@@ -377,6 +454,10 @@ static void handle_command(const char *cmd) {
         dual_println("Clearing BLE bonds...");
         BleHidHost::clearBonds();
         dual_println("Bonds cleared.");
+    } else if (strncmp(cmd, "devlayer", 8) == 0) {
+        handle_devlayer(cmd + 8);
+    } else if (strncmp(cmd, "dl", 2) == 0 && (cmd[2] == '\0' || cmd[2] == ' ')) {
+        handle_devlayer(cmd + 2);
     } else if (strcmp(cmd, "resetkeymap") == 0) {
         VirtualMatrix::resetKeymap();
         dual_println("Keymap reset to defaults (bonds untouched).");
@@ -384,6 +465,7 @@ static void handle_command(const char *cmd) {
         dual_println("Clearing BLE bonds and resetting virtual matrix...");
         BleHidHost::clearBonds();
         VirtualMatrix::resetKeymap();
+        DeviceBindings::clearAll();
         dual_println("Factory reset complete.");
     } else if (strcmp(cmd, "help") == 0) {
         dual_println("Available Commands:");
@@ -412,6 +494,8 @@ static void handle_command(const char *cmd) {
         dual_println("  disconnect <s> - Disconnect link on slot <s>");
         dual_println("  unbond <idx>   - Remove bonded device index from table");
         dual_println("  clearbonds     - Clear all BLE bonds without resetting keymap");
+        dual_println("  devlayer [..]  - (alias: dl) Bind a device to a keymap layer: 'devlayer <layer>' (device used last),");
+        dual_println("                   'devlayer <dev> <layer>', 'devlayer clear [<dev>]', 'devlayer list'");
         dual_println("  resetkeymap    - Reset the VIAL keymap to defaults, keeping bonds");
         dual_println("  reset          - Factory reset (clear bonds and reset keymap)");
         dual_println("  help           - Show this help summary");

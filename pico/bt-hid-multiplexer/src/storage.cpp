@@ -56,3 +56,39 @@ void StorageManager::clearKeymap() {
     flash_range_erase(FLASH_KEYMAP_OFFSET, FLASH_SECTOR_SIZE);
     restore_interrupts(ints);
 }
+
+static uint16_t binding_checksum(const DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]) {
+    const uint8_t *p = (const uint8_t *)entries;
+    uint16_t sum = 0xB1D5;
+    for (size_t i = 0; i < sizeof(DeviceBindingEntry) * MAX_DEVICE_BINDINGS; i++) {
+        sum = (sum << 1) ^ p[i];
+    }
+    return sum;
+}
+
+bool StorageManager::loadBindings(DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]) {
+    const DeviceBindingStorageData *data = (const DeviceBindingStorageData *)(XIP_BASE + FLASH_BINDINGS_OFFSET);
+    if (data->magic != FLASH_BINDINGS_MAGIC || data->version != 1 ||
+        data->checksum != binding_checksum(data->entries)) {
+        return false;
+    }
+    memcpy(entries, data->entries, sizeof(data->entries));
+    return true;
+}
+
+void StorageManager::saveBindings(const DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]) {
+    DeviceBindingStorageData data;
+    data.magic = FLASH_BINDINGS_MAGIC;
+    data.version = 1;
+    data.checksum = binding_checksum(entries);
+    memcpy(data.entries, entries, sizeof(data.entries));
+
+    static uint8_t page_buf[(sizeof(DeviceBindingStorageData) + FLASH_PAGE_SIZE - 1) / FLASH_PAGE_SIZE * FLASH_PAGE_SIZE];
+    memset(page_buf, 0xFF, sizeof(page_buf));
+    memcpy(page_buf, &data, sizeof(data));
+
+    uint32_t ints = save_and_disable_interrupts();
+    flash_range_erase(FLASH_BINDINGS_OFFSET, FLASH_SECTOR_SIZE);
+    flash_range_program(FLASH_BINDINGS_OFFSET, page_buf, sizeof(page_buf));
+    restore_interrupts(ints);
+}

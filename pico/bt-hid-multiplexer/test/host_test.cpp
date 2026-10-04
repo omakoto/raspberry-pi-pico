@@ -7,6 +7,7 @@
 #include "multiplexer.h"
 #include "virtual_matrix.h"
 #include "storage.h"
+#include "device_bindings.h"
 
 std::vector<SentKeyboard> g_sent_keyboard;
 std::vector<SentMouse> g_sent_mouse;
@@ -21,6 +22,20 @@ void StorageManager::saveKeymap(const uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRI
     g_saves++;
 }
 void StorageManager::clearKeymap() {}
+static DeviceBindingEntry g_flash_bindings[MAX_DEVICE_BINDINGS];
+bool StorageManager::loadBindings(DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) { (void)e; return false; }
+void StorageManager::saveBindings(const DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) {
+    memcpy(g_flash_bindings, e, sizeof(g_flash_bindings));
+}
+
+// Fake Bluetooth addresses: device d is 00:00:00:00:00:d+1, except the ones marked disconnected.
+static bool g_connected[MAX_KEYBOARDS];
+static bool fake_address(uint8_t dev_idx, uint8_t addr[6]) {
+    if (dev_idx >= MAX_KEYBOARDS || !g_connected[dev_idx]) return false;
+    memset(addr, 0, 6);
+    addr[5] = dev_idx + 1;
+    return true;
+}
 
 static int g_failures = 0;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); g_failures++; } } while (0)
@@ -28,6 +43,10 @@ static int g_failures = 0;
 static void reset() {
     g_sent_keyboard.clear();
     g_sent_mouse.clear();
+    memset(g_connected, 0, sizeof(g_connected));
+    g_connected[0] = g_connected[1] = true;
+    DeviceBindings::init(fake_address);
+    DeviceBindings::clearAll();
     Multiplexer::init();
     VirtualMatrix::init();
 }
@@ -177,16 +196,63 @@ int main() {
         CHECK(g_sent_keyboard[2].keys[0] == 0x04);
     }
 
-    // Mouse buttons 6 and 7 (BTN_FORWARD / BTN_BACK) can be remapped to keys; they default to nothing.
+    // Mouse buttons 6-8 default to F13-F15 and can be remapped to anything else.
     reset();
     Multiplexer::handleMouseReport(0, 0x20, 0, 0, 0, 0);
-    CHECK(g_sent_keyboard.empty() || lastKbd().keys[0] == 0);
+    CHECK(lastKbd().keys[0] == 0x68);
+    Multiplexer::handleMouseReport(0, 0x40, 0, 0, 0, 0);
+    CHECK(lastKbd().keys[0] == 0x69);
+    Multiplexer::handleMouseReport(0, 0x80, 0, 0, 0, 0);
+    CHECK(lastKbd().keys[0] == 0x6A);
     Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(lastKbd().keys[0] == 0);
     set(0, VKEY_MOUSE_BTN_BASE + 6, KC_VOLD_);
     Multiplexer::handleMouseReport(0, 0x40, 0, 0, 0, 0);
     CHECK(lastKbd().keys[0] == 0x81);
     Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
     CHECK(lastKbd().keys[0] == 0);
+
+    // Per-device layers: device 1 is bound to layer 3, where the wheel is volume; device 0 keeps its
+    // wheel. Entries left transparent on the device layer use the base layer.
+    reset();
+    CHECK(DeviceBindings::lastActiveDevice() == DeviceBindings::NO_DEVICE);
+    set(3, VKEY_WHEEL_UP, KC_VOLU_);
+    set(3, VKEY_WHEEL_DOWN, KC_VOLD_);
+    Multiplexer::handleMouseReport(1, 0, 3, 0, 0, 0);  // device 1 moved last
+    CHECK(DeviceBindings::lastActiveDevice() == 1);
+    CHECK(DeviceBindings::bind(1, 3));
+    CHECK(!DeviceBindings::bind(1, 0) && !DeviceBindings::bind(1, NUM_LAYERS));
+    CHECK(!DeviceBindings::bind(5, 2));  // not connected
+    CHECK(DeviceBindings::layerFor(1) == 3 && DeviceBindings::layerFor(0) == DeviceBindings::NO_LAYER);
+    g_sent_keyboard.clear();
+    g_sent_mouse.clear();
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 1, 0);  // device 0: plain wheel
+    CHECK(!g_sent_mouse.empty() && lastMouse().wheel == 1);
+    CHECK(g_sent_keyboard.empty());
+    g_sent_mouse.clear();
+    Multiplexer::handleMouseReport(1, 0, 4, 0, 1, 0);  // device 1: wheel is volume, motion passes
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x80);
+    CHECK(!g_sent_mouse.empty() && lastMouse().dx == 4 && lastMouse().wheel == 0);
+
+    // A held layer key outranks the device layer; the device layer outranks the base layer.
+    set(0, VKEY_MOUSE_BTN_BASE + 3, 0x5101);       // button 4 -> MO(1)
+    set(1, VKEY_WHEEL_UP, 0x04);                   // layer 1: wheel up -> A
+    g_sent_keyboard.clear();
+    Multiplexer::handleMouseReport(1, 0x08, 0, 0, 1, 0);
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x04);
+    Multiplexer::handleMouseReport(1, 0, 0, 0, 0, 0);
+
+    // The binding follows the device's address across reconnects and is removed again.
+    Multiplexer::purgeMouse(1);
+    g_connected[1] = false;
+    CHECK(DeviceBindings::layerFor(1) == DeviceBindings::NO_LAYER);
+    g_connected[1] = true;
+    CHECK(DeviceBindings::layerFor(1) == 3);
+    CHECK(DeviceBindings::entryCount() == 1);
+    CHECK(DeviceBindings::unbind(1) && DeviceBindings::layerFor(1) == DeviceBindings::NO_LAYER);
+    CHECK(DeviceBindings::entryCount() == 0);
 
     if (g_failures) { printf("%d FAILURES\n", g_failures); return 1; }
     printf("All host tests passed\n");

@@ -1,5 +1,6 @@
 #include "virtual_matrix.h"
 #include "storage.h"
+#include "device_bindings.h"
 #include "pico/time.h"
 #include <string.h>
 
@@ -53,11 +54,26 @@ uint8_t VirtualMatrix::getActiveLayer() {
     return computeActiveLayer();
 }
 
-uint16_t VirtualMatrix::resolveAction(uint8_t raw_keycode) {
+uint16_t VirtualMatrix::resolveAction(uint8_t dev_idx, uint8_t raw_keycode) {
     uint8_t row = raw_keycode / MATRIX_COLS;
     uint8_t col = raw_keycode % MATRIX_COLS;
-    for (int l = computeActiveLayer(); l >= 0; l--) {
-        uint16_t action = keymap_[l][row][col];
+    uint8_t active = computeActiveLayer();
+    uint8_t device_layer = DeviceBindings::layerFor(dev_idx);
+
+    if (device_layer == DeviceBindings::NO_LAYER) {
+        for (int l = active; l >= 0; l--) {
+            uint16_t action = keymap_[l][row][col];
+            if (action != KC_TRNS_) return action;
+        }
+        return KC_NO_;
+    }
+
+    // Bound device: a held layer key still wins, then the device's own layer, then the base layer.
+    // The base layer must come last even while it is the active layer.
+    const uint8_t order[3] = {active != 0 ? active : device_layer, device_layer, 0};
+    for (int i = 0; i < 3; i++) {
+        if (i > 0 && order[i] == order[i - 1]) continue;
+        uint16_t action = keymap_[order[i]][row][col];
         if (action != KC_TRNS_) return action;
     }
     return KC_NO_;
@@ -66,7 +82,7 @@ uint16_t VirtualMatrix::resolveAction(uint8_t raw_keycode) {
 bool VirtualMatrix::processKeyPress(uint8_t dev_idx, uint8_t raw_keycode, uint16_t &out_keycode) {
     if (dev_idx >= MAX_KEYBOARDS) return false;
 
-    uint16_t action = resolveAction(raw_keycode);
+    uint16_t action = resolveAction(dev_idx, raw_keycode);
 
     // Handle Layer Switch Actions
     if (IS_ACTION_MO(action)) {
@@ -177,7 +193,9 @@ void VirtualMatrix::resetKeymap() {
         if (vkey >= VKEY_MOUSE_BTN_BASE && vkey < VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT) {
             kc = KC_BTN1_ + (vkey - VKEY_MOUSE_BTN_BASE);
         } else if (vkey >= VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT && vkey < VKEY_MOTION_BASE) {
-            kc = KC_NO_;  // Mouse buttons 6-8 have no VIAL keycode to default to.
+            // Mouse buttons 6-8 cannot be sent to the host (no VIAL keycode, 5-button USB mouse), so
+            // they default to the otherwise unused F13-F15.
+            kc = KC_F13_ + (vkey - VKEY_MOUSE_BTN_BASE - MOUSE_OUTPUT_BTN_COUNT);
         } else if (vkey >= VKEY_MOTION_BASE) {
             static const uint16_t motion_kc[8] = {
                 KC_MS_U_, KC_MS_D_, KC_MS_L_, KC_MS_R_, KC_WH_U_, KC_WH_D_, KC_WH_L_, KC_WH_R_,

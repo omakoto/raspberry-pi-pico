@@ -712,6 +712,16 @@ uint8_t ClassicHidHost::getConnectedCount() {
     return n;
 }
 
+bool ClassicHidHost::getSlotAddress(uint8_t dev_idx, uint8_t addr[6]) {
+    for (uint8_t i = 0; i < MAX_CLASSIC_DEVICES; i++) {
+        if (s_slots[i].in_use && s_slots[i].dev_idx == dev_idx) {
+            memcpy(addr, s_slots[i].addr, 6);
+            return true;
+        }
+    }
+    return false;
+}
+
 const char* ClassicHidHost::getConnectedDeviceName() {
     for (uint8_t i = 0; i < MAX_CLASSIC_DEVICES; i++) {
         if (s_slots[i].in_use) return s_slots[i].name[0] ? s_slots[i].name : "BT Classic HID";

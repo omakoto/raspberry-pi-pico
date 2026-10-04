@@ -20,6 +20,8 @@ public:
     static bool hasUnconnectedBonds();
     static const char* getConnectedDeviceName();
     static const char* getConnectedDeviceName(uint8_t slot_idx);
+    // Bluetooth address of the connected device with this multiplexer device index.
+    static bool getSlotAddress(uint8_t dev_idx, uint8_t addr[6]);
     static uint32_t getActivePasskey();
     static void clearPasskey();
     static void clearBonds();

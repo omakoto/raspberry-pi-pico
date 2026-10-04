@@ -66,6 +66,7 @@
 // current QMK. Verified against what vial.rocks stores in the keymap (e.g. MO(1) = 0x5101,
 // KC_WH_U = 0x00F9, KC_MS_U = 0x00F0 as labelled by the client).
 #define KC_NO_                  0x0000
+#define KC_F13_                 0x0068  // F13..F15 = defaults of mouse buttons 6-8
 #define KC_TRNS_                0x0001  // transparent: use the keycode of the layers below
 #define KC_MS_U_                0x00F0  // mouse cursor up/down/left/right
 #define KC_MS_D_                0x00F1
@@ -106,6 +107,10 @@
 
 // Flash storage offsets for keymap persistence (placed safely 64KB before end of flash)
 #define FLASH_KEYMAP_OFFSET     (PICO_FLASH_SIZE_BYTES - (64 * 1024))
+// Per-device layer bindings live in the sector after the keymap.
+#define FLASH_BINDINGS_OFFSET   (FLASH_KEYMAP_OFFSET + 4096)
+#define FLASH_BINDINGS_MAGIC    0x42494E44 // 'BIND'
+#define MAX_DEVICE_BINDINGS     8
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 // Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded.
 #define FLASH_KEYMAP_VERSION    4

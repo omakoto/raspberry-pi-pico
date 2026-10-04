@@ -20,10 +20,11 @@ public:
     // actions. Returns 0 if the key is not held or is mapped to KC_NO.
     static uint16_t getActiveTranslation(uint8_t dev_idx, uint8_t raw_keycode);
 
-    // Keycode mapped to a virtual key on the currently active layer, following transparent
-    // (KC_TRNS) entries down to the lower layers. Used for mouse motion, which has no
-    // press/release.
-    static uint16_t resolveAction(uint8_t raw_keycode);
+    // Keycode mapped to a virtual key of a device on the currently active layer, following
+    // transparent (KC_TRNS) entries down to the lower layers. A device bound to a layer (see
+    // DeviceBindings) is looked up on the active layer (when a layer key is held), then on its own
+    // layer, then on layer 0. Used for mouse motion, which has no press/release.
+    static uint16_t resolveAction(uint8_t dev_idx, uint8_t raw_keycode);
 
     // VIAL/VIA keymap access
     static uint16_t getKeycode(uint8_t layer, uint8_t row, uint8_t col);

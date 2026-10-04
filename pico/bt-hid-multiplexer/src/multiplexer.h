@@ -80,7 +80,7 @@ private:
     static void collectOutputs(OutputState &out);
     static void addAction(OutputState &out, uint16_t action);
     // Send one axis of mouse motion to whatever its virtual key is currently mapped to.
-    static void routeMotion(int32_t value, uint8_t vkey_positive, uint8_t vkey_negative, bool wheel_units);
+    static void routeMotion(uint8_t dev_idx, int32_t value, uint8_t vkey_positive, uint8_t vkey_negative, bool wheel_units);
 };
 
 #endif // MULTIPLEXER_H_

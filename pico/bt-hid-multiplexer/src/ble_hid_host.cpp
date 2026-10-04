@@ -825,6 +825,14 @@ const char* BleHidHost::getConnectedDeviceName(uint8_t slot_idx) {
     return "None";
 }
 
+bool BleHidHost::getSlotAddress(uint8_t dev_idx, uint8_t addr[6]) {
+    if (dev_idx < MAX_BLE_DEVICES && s_slots[dev_idx].connected) {
+        memcpy(addr, s_slots[dev_idx].addr, 6);
+        return true;
+    }
+    return false;
+}
+
 uint32_t BleHidHost::getActivePasskey() {
     return s_active_passkey;
 }

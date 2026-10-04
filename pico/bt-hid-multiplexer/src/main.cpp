@@ -11,6 +11,7 @@
 #include "multiplexer.h"
 #include "virtual_matrix.h"
 #include "vial_server.h"
+#include "device_bindings.h"
 #include "ble_hid_host.h"
 #include "classic_hid_host.h"
 #include "usb_descriptors.h"
@@ -40,6 +41,11 @@ static void show_toast(const char *msg, uint32_t duration_ms = 3000) {
     s_toast_expiry_ms = to_ms_since_boot(get_absolute_time()) + duration_ms;
 }
 
+// Resolves a multiplexer device index to the Bluetooth address of the BLE or classic device.
+static bool device_address(uint8_t dev_idx, uint8_t addr[6]) {
+    return BleHidHost::getSlotAddress(dev_idx, addr) || ClassicHidHost::getSlotAddress(dev_idx, addr);
+}
+
 int main() {
     stdio_init_all();
     dual_console_init();
@@ -58,6 +64,9 @@ int main() {
 
     // 3. Initialize Keymap and VIAL engine
     VialServer::init();
+
+    // 3b. Load the per-device layer bindings
+    DeviceBindings::init(device_address);
 
     // 4. Initialize Multi-device Multiplexer
     Multiplexer::init();
