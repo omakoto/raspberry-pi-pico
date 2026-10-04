@@ -377,6 +377,9 @@ static void handle_command(const char *cmd) {
         dual_println("Clearing BLE bonds...");
         BleHidHost::clearBonds();
         dual_println("Bonds cleared.");
+    } else if (strcmp(cmd, "resetkeymap") == 0) {
+        VirtualMatrix::resetKeymap();
+        dual_println("Keymap reset to defaults (bonds untouched).");
     } else if (strcmp(cmd, "reset") == 0) {
         dual_println("Clearing BLE bonds and resetting virtual matrix...");
         BleHidHost::clearBonds();
@@ -409,6 +412,7 @@ static void handle_command(const char *cmd) {
         dual_println("  disconnect <s> - Disconnect link on slot <s>");
         dual_println("  unbond <idx>   - Remove bonded device index from table");
         dual_println("  clearbonds     - Clear all BLE bonds without resetting keymap");
+        dual_println("  resetkeymap    - Reset the VIAL keymap to defaults, keeping bonds");
         dual_println("  reset          - Factory reset (clear bonds and reset keymap)");
         dual_println("  help           - Show this help summary");
     } else {

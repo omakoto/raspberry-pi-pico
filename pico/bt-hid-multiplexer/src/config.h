@@ -58,32 +58,36 @@
 // a wheel keycode (and the number of counts one wheel notch becomes in the opposite case).
 #define MOUSE_COUNTS_PER_WHEEL_NOTCH  24
 
-// QMK keycodes (the keycode numbering VIAL uses with VIA protocol 9).
+// QMK keycodes, in the numbering the VIAL client uses at the VIAL protocol version this firmware
+// reports (3), i.e. the pre-0.19 QMK numbering: the layer actions and mouse keycodes differ from
+// current QMK. Verified against what vial.rocks stores in the keymap (e.g. MO(1) = 0x5101,
+// KC_WH_U = 0x00F9).
 #define KC_NO_                  0x0000
 #define KC_TRNS_                0x0001  // transparent: use the keycode of the layers below
-#define KC_MS_U_                0x00CD  // mouse cursor up/down/left/right
-#define KC_MS_D_                0x00CE
-#define KC_MS_L_                0x00CF
-#define KC_MS_R_                0x00D0
-#define KC_BTN1_                0x00D1  // KC_BTN1..KC_BTN5 = mouse button 1..5
-#define KC_BTN5_                0x00D5
-#define KC_WH_U_                0x00D9  // wheel up/down/left/right
-#define KC_WH_D_                0x00DA
-#define KC_WH_L_                0x00DB
-#define KC_WH_R_                0x00DC
-#define KC_SPECIAL_FIRST_       0x00A5  // QMK system/consumer/mouse range (0xA5-0xDF) that is not a
-#define KC_SPECIAL_LAST_        0x00DF  // HID keyboard usage and has no USB report here
+#define KC_MS_U_                0x00ED  // mouse cursor up/down/left/right
+#define KC_MS_D_                0x00EE
+#define KC_MS_L_                0x00EF
+#define KC_MS_R_                0x00F0
+#define KC_BTN1_                0x00F1  // KC_BTN1..KC_BTN5 = mouse button 1..5 (up to BTN8 = 0x00F8)
+#define KC_BTN5_                0x00F5
+#define KC_WH_U_                0x00F9  // wheel up/down/left/right
+#define KC_WH_D_                0x00FA
+#define KC_WH_L_                0x00FB
+#define KC_WH_R_                0x00FC
+// QMK system/consumer/mouse range (0xA5-0xFF, minus the modifiers) that is not a HID keyboard usage
+// and has no USB report here.
+#define KC_SPECIAL_FIRST_       0x00A5
 
-// QMK layer actions.
-#define ACTION_LAYER_TO         0x5200 // TO(layer)
-#define ACTION_LAYER_MOMENTARY  0x5220 // MO(layer)
-#define ACTION_LAYER_DEFAULT    0x5240 // DF(layer)
-#define ACTION_LAYER_TOGGLE     0x5260 // TG(layer)
+// QMK layer actions: the action in bits 8-15, the layer number in bits 0-7.
+#define ACTION_LAYER_TO         0x5000 // TO(layer)
+#define ACTION_LAYER_MOMENTARY  0x5100 // MO(layer)
+#define ACTION_LAYER_DEFAULT    0x5200 // DF(layer)
+#define ACTION_LAYER_TOGGLE     0x5300 // TG(layer)
 
-#define IS_ACTION_MO(k)         (((k) & 0xFFE0) == ACTION_LAYER_MOMENTARY)
-#define IS_ACTION_TG(k)         (((k) & 0xFFE0) == ACTION_LAYER_TOGGLE)
-#define IS_ACTION_TO(k)         (((k) & 0xFFE0) == ACTION_LAYER_TO || ((k) & 0xFFE0) == ACTION_LAYER_DEFAULT)
-#define ACTION_LAYER_NUM(k)     ((k) & 0x1F)
+#define IS_ACTION_MO(k)         (((k) & 0xFF00) == ACTION_LAYER_MOMENTARY)
+#define IS_ACTION_TG(k)         (((k) & 0xFF00) == ACTION_LAYER_TOGGLE)
+#define IS_ACTION_TO(k)         (((k) & 0xFF00) == ACTION_LAYER_TO || ((k) & 0xFF00) == ACTION_LAYER_DEFAULT)
+#define ACTION_LAYER_NUM(k)     ((k) & 0xFF)
 
 // QMK modifier-wrapped keycodes (e.g. LSFT(KC_A) = 0x0204): bits 8-11 are LCTL/LSFT/LALT/LGUI,
 // bit 12 selects the right-hand modifiers.
@@ -94,7 +98,7 @@
 #define FLASH_KEYMAP_OFFSET     (PICO_FLASH_SIZE_BYTES - (64 * 1024))
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 // Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded.
-#define FLASH_KEYMAP_VERSION    2
+#define FLASH_KEYMAP_VERSION    3
 
 // After a peripheral has negotiated its own LL connection parameters and left them alone for a
 // while, re-request the same interval with slave latency 0 (see ZERO_LATENCY_DELAY_MS and

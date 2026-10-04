@@ -71,7 +71,7 @@ int main() {
     // A mouse button remapped to a key, and a key remapped to a mouse button.
     reset();
     set(0, 0xE8 + 3, 0x0028);  // mouse button 4 -> Enter
-    set(0, 0x2C, 0x00D2);      // Space -> KC_BTN2
+    set(0, 0x2C, KC_BTN1_ + 1);      // Space -> KC_BTN2
     Multiplexer::handleMouseReport(0, 0x08, 0, 0, 0, 0);
     CHECK(lastKbd().keys[0] == 0x28);
     CHECK(g_sent_mouse.empty() || lastMouse().buttons == 0);
@@ -85,7 +85,7 @@ int main() {
 
     // Hold a mouse button (MO(1)) and layer 1 turns up/down motion into wheel scrolling.
     reset();
-    set(0, 0xE8 + 3, 0x5221);        // button 4 -> MO(1)
+    set(0, 0xE8 + 3, 0x5101);        // button 4 -> MO(1)
     set(1, VKEY_MOTION_UP, KC_WH_U_);
     set(1, VKEY_MOTION_DOWN, KC_WH_D_);
     Multiplexer::handleMouseReport(0, 0, 0, -48, 0, 0);  // no layer: plain cursor motion
@@ -130,7 +130,7 @@ int main() {
     reset();
     set(0, 0x04, 0x05);
     set(2, 0x04, KC_TRNS_);
-    set(0, 0xE8, 0x5222);  // MO(2)
+    set(0, 0xE8, 0x5102);  // MO(2)
     Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
     uint8_t a[1] = {0x04};
     Multiplexer::handleKeyboardReport(0, 0, a, 1);

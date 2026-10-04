@@ -126,7 +126,7 @@ void Multiplexer::addAction(OutputState &out, uint16_t action) {
     } else if (kc >= VKEY_MODIFIER_BASE && kc < VKEY_MODIFIER_BASE + 8) {
         mods |= (uint8_t)(1 << (kc - VKEY_MODIFIER_BASE));
         kc = 0;
-    } else if (kc >= KC_SPECIAL_FIRST_ && kc <= KC_SPECIAL_LAST_) {
+    } else if (kc >= KC_SPECIAL_FIRST_) {
         return;  // Consumer/system/mouse-movement keycodes have no report here.
     }
     out.mods |= mods;

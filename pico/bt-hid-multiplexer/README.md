@@ -101,6 +101,7 @@ Commands supported on either console:
 - `disconnect <slot>`, `unbond <idx>`, `clearbonds`: Drop a BLE link, forget one BLE bond, or forget all bonds (BLE and classic)
 - `cconnect <n>`, `cdisconnect <slot>`: Bluetooth Classic only. `cconnect` makes the Pico page the classic bond `[cN]` listed by `bonds` (a host-initiated reconnect, for devices that do not reconnect by themselves); `cdisconnect` drops classic slot `<slot>`
 - `cqos <slot> [type] [latency_us]`: Bluetooth Classic only, experimental. Requests a QoS (poll interval) setting on a classic slot's link, `type` 0 = no traffic, 1 = best effort, 2 = guaranteed (default 1). A latency bound of 5000 µs is already applied automatically to every classic link
+- `resetkeymap`: Resets the VIAL keymap (all layers) to the defaults and keeps all bonds
 - `reset`: Clears all bonded devices and resets keymap to default
 - `help`: Lists all console commands
 
@@ -161,7 +162,7 @@ The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Reques
 ### Layers and what is supported
 
 - **Keys:** the matrix is 16×16, one cell per HID keyboard usage, so every key and modifier on any connected keyboard can be remapped. Keys on upper layers that are left as `Transparent` use the layer below. Only the base layer is non-transparent by default.
-- **Keycodes that work:** basic keys, modifiers (`LCTL`…`RGUI`), modifier-wrapped keys such as `LSFT(KC_A)`, `MO`/`TG`/`TO`/`DF` layer keys, `KC_NO`, `KC_TRNS`, mouse buttons 1–5 and the mouse wheel/cursor keycodes below.
+- **Keycodes that work:** basic keys, modifiers (`LCTL`…`RGUI`), modifier-wrapped keys such as `LSFT(KC_A)`, `MO`/`TG`/`TO`/`DF` layer keys (keycodes use the numbering of the VIAL protocol version the firmware reports, see `src/config.h`), `KC_NO`, `KC_TRNS`, mouse buttons 1–5 and the mouse wheel/cursor keycodes below.
 - **Not supported:** media/consumer and system keys (the USB device has no consumer report), macros, tap dance, mod-tap/layer-tap, combos, and the 6-key rollover limit still applies.
 - **Mouse:** the bottom two rows of the Vial key map are the mouse. The five keys on the left are mouse buttons 1–5. The eight keys on the right are the directions of mouse movement in the order cursor up, down, left, right, then wheel up, down, left, right. By default they are mapped to `KC_MS_U/D/L/R` and `KC_WH_U/D/L/R`, which reproduces the physical behaviour.
   - **Remap a button:** put any key, modifier or `KC_BTN1`…`KC_BTN5` on it.
