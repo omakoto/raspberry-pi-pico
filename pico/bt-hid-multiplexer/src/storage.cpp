@@ -21,7 +21,7 @@ void StorageManager::init() {
 
 bool StorageManager::loadKeymap(uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]) {
     const KeymapStorageData *data = (const KeymapStorageData *)FLASH_STORAGE_ADDR;
-    if (data->magic != FLASH_KEYMAP_MAGIC || data->version != 1) {
+    if (data->magic != FLASH_KEYMAP_MAGIC || data->version != FLASH_KEYMAP_VERSION) {
         return false;
     }
     uint16_t expected_cs = computeChecksum(data->keymap);
@@ -35,12 +35,12 @@ bool StorageManager::loadKeymap(uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_
 void StorageManager::saveKeymap(const uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]) {
     KeymapStorageData data;
     data.magic = FLASH_KEYMAP_MAGIC;
-    data.version = 1;
+    data.version = FLASH_KEYMAP_VERSION;
     data.checksum = computeChecksum(keymap);
     memcpy(data.keymap, keymap, sizeof(data.keymap));
 
-    // Pad buffer to page boundary (multiple of 256 bytes)
-    uint8_t page_buf[1024];
+    // Pad buffer to page boundary (multiple of 256 bytes). Static: too large for the stack.
+    static uint8_t page_buf[(sizeof(KeymapStorageData) + FLASH_PAGE_SIZE - 1) / FLASH_PAGE_SIZE * FLASH_PAGE_SIZE];
     memset(page_buf, 0xFF, sizeof(page_buf));
     memcpy(page_buf, &data, sizeof(data));
 

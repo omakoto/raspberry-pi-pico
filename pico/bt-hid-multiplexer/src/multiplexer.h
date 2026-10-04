@@ -45,14 +45,30 @@ private:
     // Aggregated mouse accumulation
     static int32_t accum_dx_;
     static int32_t accum_dy_;
-    static int8_t  accum_wheel_;
-    static int8_t  accum_pan_;
+    static int32_t accum_wheel_;
+    static int32_t accum_pan_;
+    // Motion counts not yet converted to a whole wheel notch when a motion direction is remapped to
+    // a wheel keycode (and vice versa).
+    static int32_t wheel_remainder_;
+    static int32_t pan_remainder_;
     static uint8_t merged_mouse_buttons_;
 
     // Host LED state
     static uint8_t host_leds_;
     static uint8_t last_synced_leds_;
     static bool kbd_dirty_;
+
+    // Everything the currently held keys, modifiers and mouse buttons of all devices translate to.
+    struct OutputState {
+        uint8_t mods;
+        uint8_t keys[6];
+        uint8_t key_count;
+        uint8_t mouse_buttons;
+    };
+    static void collectOutputs(OutputState &out);
+    static void addAction(OutputState &out, uint16_t action);
+    // Send one axis of mouse motion to whatever its virtual key is currently mapped to.
+    static void routeMotion(int32_t value, uint8_t vkey_positive, uint8_t vkey_negative, bool wheel_units);
 };
 
 #endif // MULTIPLEXER_H_

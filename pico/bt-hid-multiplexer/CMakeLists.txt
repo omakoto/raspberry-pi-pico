@@ -73,7 +73,7 @@ target_link_libraries(bt-hid-multiplexer PRIVATE
     pico_unique_id
 )
 
-pico_set_program_name(bt-hid-multiplexer "Pico 2 W BLE HID Multiplexer")
+pico_set_program_name(bt-hid-multiplexer "Pico W BLE HID Multiplexer")
 pico_set_program_version(bt-hid-multiplexer "1.0.0")
 
 # Generate UF2, HEX, and map files

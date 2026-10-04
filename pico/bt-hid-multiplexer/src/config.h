@@ -29,23 +29,72 @@
 #define MAX_MICE                (MAX_BLE_DEVICES + MAX_CLASSIC_DEVICES)
 
 // Virtual Matrix configuration
+//
+// The matrix is indexed by an 8-bit "virtual key" = row * 16 + col, so one cell exists for every
+// possible HID keyboard usage (0x00-0xFF; 0xE0-0xE7 are the modifiers). The otherwise unused
+// usages 0xE8-0xFF are used for mouse buttons and mouse motion directions, which lets VIAL remap
+// mice exactly like keys.
 #define NUM_LAYERS              4
-#define MATRIX_ROWS             4
+#define MATRIX_ROWS             16
 #define MATRIX_COLS             16
 
-// QMK / VIA Layer Action Macros
-#define ACTION_LAYER_MOMENTARY  0x5200 // MO(layer)
-#define ACTION_LAYER_TOGGLE     0x5220 // TG(layer)
-#define ACTION_LAYER_TO         0x5240 // TO(layer)
+// Virtual keys for modifiers (bit n of the HID modifier byte is key VKEY_MODIFIER_BASE + n).
+#define VKEY_MODIFIER_BASE      0xE0
+// Virtual keys for mouse buttons 1-5 (bit n of the mouse button byte is VKEY_MOUSE_BTN_BASE + n).
+#define VKEY_MOUSE_BTN_BASE     0xE8
+#define VKEY_MOUSE_BTN_COUNT    5
+// Virtual keys for mouse motion directions, in this order.
+#define VKEY_MOTION_BASE        0xF0
+#define VKEY_MOTION_UP          (VKEY_MOTION_BASE + 0)  // dy < 0
+#define VKEY_MOTION_DOWN        (VKEY_MOTION_BASE + 1)  // dy > 0
+#define VKEY_MOTION_LEFT        (VKEY_MOTION_BASE + 2)  // dx < 0
+#define VKEY_MOTION_RIGHT       (VKEY_MOTION_BASE + 3)  // dx > 0
+#define VKEY_WHEEL_UP           (VKEY_MOTION_BASE + 4)  // wheel > 0
+#define VKEY_WHEEL_DOWN         (VKEY_MOTION_BASE + 5)  // wheel < 0
+#define VKEY_WHEEL_LEFT         (VKEY_MOTION_BASE + 6)  // pan < 0
+#define VKEY_WHEEL_RIGHT        (VKEY_MOTION_BASE + 7)  // pan > 0
+
+// Mouse cursor counts that are converted to one wheel notch when a motion direction is remapped to
+// a wheel keycode (and the number of counts one wheel notch becomes in the opposite case).
+#define MOUSE_COUNTS_PER_WHEEL_NOTCH  24
+
+// QMK keycodes (the keycode numbering VIAL uses with VIA protocol 9).
+#define KC_NO_                  0x0000
+#define KC_TRNS_                0x0001  // transparent: use the keycode of the layers below
+#define KC_MS_U_                0x00CD  // mouse cursor up/down/left/right
+#define KC_MS_D_                0x00CE
+#define KC_MS_L_                0x00CF
+#define KC_MS_R_                0x00D0
+#define KC_BTN1_                0x00D1  // KC_BTN1..KC_BTN5 = mouse button 1..5
+#define KC_BTN5_                0x00D5
+#define KC_WH_U_                0x00D9  // wheel up/down/left/right
+#define KC_WH_D_                0x00DA
+#define KC_WH_L_                0x00DB
+#define KC_WH_R_                0x00DC
+#define KC_SPECIAL_FIRST_       0x00A5  // QMK system/consumer/mouse range (0xA5-0xDF) that is not a
+#define KC_SPECIAL_LAST_        0x00DF  // HID keyboard usage and has no USB report here
+
+// QMK layer actions.
+#define ACTION_LAYER_TO         0x5200 // TO(layer)
+#define ACTION_LAYER_MOMENTARY  0x5220 // MO(layer)
+#define ACTION_LAYER_DEFAULT    0x5240 // DF(layer)
+#define ACTION_LAYER_TOGGLE     0x5260 // TG(layer)
 
 #define IS_ACTION_MO(k)         (((k) & 0xFFE0) == ACTION_LAYER_MOMENTARY)
 #define IS_ACTION_TG(k)         (((k) & 0xFFE0) == ACTION_LAYER_TOGGLE)
-#define IS_ACTION_TO(k)         (((k) & 0xFFE0) == ACTION_LAYER_TO)
+#define IS_ACTION_TO(k)         (((k) & 0xFFE0) == ACTION_LAYER_TO || ((k) & 0xFFE0) == ACTION_LAYER_DEFAULT)
 #define ACTION_LAYER_NUM(k)     ((k) & 0x1F)
+
+// QMK modifier-wrapped keycodes (e.g. LSFT(KC_A) = 0x0204): bits 8-11 are LCTL/LSFT/LALT/LGUI,
+// bit 12 selects the right-hand modifiers.
+#define IS_MODS_KEYCODE(k)      ((k) > 0x00FF && (k) < 0x2000)
+#define MODS_KEYCODE_MODS(k)    ((uint8_t)((((k) >> 8) & 0x0F) << (((k) & 0x1000) ? 4 : 0)))
 
 // Flash storage offsets for keymap persistence (placed safely 64KB before end of flash)
 #define FLASH_KEYMAP_OFFSET     (PICO_FLASH_SIZE_BYTES - (64 * 1024))
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
+// Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded.
+#define FLASH_KEYMAP_VERSION    2
 
 // After a peripheral has negotiated its own LL connection parameters and left them alone for a
 // while, re-request the same interval with slave latency 0 (see ZERO_LATENCY_DELAY_MS and

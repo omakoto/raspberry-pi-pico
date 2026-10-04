@@ -32,7 +32,7 @@ This project connects wireless BLE keyboards, mice, and integrated trackpads and
   - When all 8 slots are filled and an eligible bonded or newly-paired peripheral connects, the oldest idle connection is cleanly disconnected to make room while preserving its bond in flash.
 - **VIAL Dynamic Keymapping (WebHID):**
   - Exposes standard Vendor RawHID interface (`0xFF60:0x0061`).
-  - Open [https://vial.rocks/](https://vial.rocks/) in Chrome to configure 4 layers, macros, tap-dance, and key remappings in real-time.
+  - Open [https://vial.rocks/](https://vial.rocks/) in Chrome to remap every key (including modifiers, F-keys, arrows, the numpad and international keys) and the mouse buttons and motion across 4 layers in real-time. See [Keymapping with VIAL](#keymapping-with-vial) for what is supported.
   - Keymaps are persisted across reboots in RP2350 flash memory.
 - **Reverse Lock LED Sync:**
   - Forward CapsLock, NumLock, and ScrollLock status from the host PC back over BLE to connected keyboards.
@@ -153,7 +153,19 @@ The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Reques
 ## Keymapping with VIAL
 
 1. On Linux, run `~/cbin/setup/config-hidraw-permission` once (idempotent) so Chrome may open the board's VIAL hidraw node. It installs a udev rule for all Raspberry Pi USB devices (vendor `2e8a`: Pico, Pico W, Pico 2, Pico 2 W); without it vial.rocks hangs on "Connecting to the device...". Re-plug the board afterwards.
-2. Connect the Pico 2 W upstream USB cable to your computer.
+2. Connect the Pico upstream USB cable to your computer.
 3. Open **[https://vial.rocks/](https://vial.rocks/)** in Google Chrome or any Chromium-based browser.
-4. Click **Start** and select **Pico 2 W BLE HID Multiplexer**.
+4. Click **Start** and select **Pico W BLE HID Multiplexer**.
 5. Remap keys across 4 layers (Base, Nav/Media, Function, NumPad). Changes take effect instantly and are stored in flash.
+
+### Layers and what is supported
+
+- **Keys:** the matrix is 16×16, one cell per HID keyboard usage, so every key and modifier on any connected keyboard can be remapped. Keys on upper layers that are left as `Transparent` use the layer below. Only the base layer is non-transparent by default.
+- **Keycodes that work:** basic keys, modifiers (`LCTL`…`RGUI`), modifier-wrapped keys such as `LSFT(KC_A)`, `MO`/`TG`/`TO`/`DF` layer keys, `KC_NO`, `KC_TRNS`, mouse buttons 1–5 and the mouse wheel/cursor keycodes below.
+- **Not supported:** media/consumer and system keys (the USB device has no consumer report), macros, tap dance, mod-tap/layer-tap, combos, and the 6-key rollover limit still applies.
+- **Mouse:** the bottom two rows of the Vial key map are the mouse. The five keys on the left are mouse buttons 1–5. The eight keys on the right are the directions of mouse movement in the order cursor up, down, left, right, then wheel up, down, left, right. By default they are mapped to `KC_MS_U/D/L/R` and `KC_WH_U/D/L/R`, which reproduces the physical behaviour.
+  - **Remap a button:** put any key, modifier or `KC_BTN1`…`KC_BTN5` on it.
+  - **Button + movement = something else:** map one mouse button to `MO(1)` on layer 0, then on layer 1 map "cursor up" to `KC_WH_U` and "cursor down" to `KC_WH_D`. While the button is held, moving the mouse up/down scrolls; `KC_MS_L/R` ↔ `KC_WH_L/R` does the same for horizontal movement. A movement can also be turned into another movement (e.g. swap or invert axes) or disabled with `KC_NO`. `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `src/config.h` sets how many counts of movement are one wheel notch.
+- **Persistence:** keymap edits are written to flash about half a second after the last change.
+- **Changing the key list:** edit `gen-vial-layout.py`, run it, and rebuild. `test/run-host-test.sh` tests the remapping logic on the host.
+

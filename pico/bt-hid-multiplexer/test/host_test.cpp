@@ -1,0 +1,142 @@
+// Host-side test of the virtual matrix and multiplexer (key/modifier/mouse remapping) with USB and
+// flash stubbed out. Build and run with test/run-host-test.sh.
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "tusb.h"
+#include "multiplexer.h"
+#include "virtual_matrix.h"
+#include "storage.h"
+
+std::vector<SentKeyboard> g_sent_keyboard;
+std::vector<SentMouse> g_sent_mouse;
+uint32_t g_now_ms = 0;
+
+static int g_saves = 0;
+static uint16_t g_flash[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS];
+void StorageManager::init() {}
+bool StorageManager::loadKeymap(uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]) { (void)km; return false; }
+void StorageManager::saveKeymap(const uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]) {
+    memcpy(g_flash, km, sizeof(g_flash));
+    g_saves++;
+}
+void StorageManager::clearKeymap() {}
+
+static int g_failures = 0;
+#define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); g_failures++; } } while (0)
+
+static void reset() {
+    g_sent_keyboard.clear();
+    g_sent_mouse.clear();
+    Multiplexer::init();
+    VirtualMatrix::init();
+}
+static void set(int layer, int vkey, uint16_t kc) { VirtualMatrix::setKeycode(layer, vkey / 16, vkey % 16, kc); }
+static SentKeyboard lastKbd() { return g_sent_keyboard.back(); }
+static SentMouse lastMouse() { return g_sent_mouse.back(); }
+
+int main() {
+    // Defaults pass everything through.
+    reset();
+    uint8_t keys[1] = {0x04};
+    Multiplexer::handleKeyboardReport(0, 0x02, keys, 1);
+    CHECK(lastKbd().mods == 0x02 && lastKbd().keys[0] == 0x04);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0);
+    Multiplexer::handleMouseReport(0, 0x01, 5, -3, 1, 0);
+    CHECK(lastMouse().buttons == 1 && lastMouse().dx == 5 && lastMouse().dy == -3 && lastMouse().wheel == 1);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(lastMouse().buttons == 0);
+
+    // A key beyond the old 4x16 matrix (F12 = 0x45) and a keypad key can be remapped; so can a
+    // modifier (Caps Lock -> Left Ctrl, Left Shift -> disabled).
+    reset();
+    set(0, 0x45, 0x04);   // F12 -> A
+    set(0, 0x5F, 0x0204); // Keypad 7 -> LSFT(A)
+    set(0, 0xE1, 0x0000); // LShift -> KC_NO
+    set(0, 0x39, 0x00E0); // Caps -> LCtrl
+    uint8_t f12[1] = {0x45};
+    Multiplexer::handleKeyboardReport(0, 0, f12, 1);
+    CHECK(lastKbd().keys[0] == 0x04 && lastKbd().mods == 0);
+    uint8_t kp7[1] = {0x5F};
+    Multiplexer::handleKeyboardReport(0, 0, kp7, 1);
+    CHECK(lastKbd().keys[0] == 0x04 && lastKbd().mods == 0x02);
+    Multiplexer::handleKeyboardReport(0, 0x02, nullptr, 0);  // press Left Shift
+    CHECK(lastKbd().mods == 0);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    uint8_t caps[1] = {0x39};
+    Multiplexer::handleKeyboardReport(0, 0, caps, 1);
+    CHECK(lastKbd().mods == 0x01 && lastKbd().keys[0] == 0);
+
+    // A mouse button remapped to a key, and a key remapped to a mouse button.
+    reset();
+    set(0, 0xE8 + 3, 0x0028);  // mouse button 4 -> Enter
+    set(0, 0x2C, 0x00D2);      // Space -> KC_BTN2
+    Multiplexer::handleMouseReport(0, 0x08, 0, 0, 0, 0);
+    CHECK(lastKbd().keys[0] == 0x28);
+    CHECK(g_sent_mouse.empty() || lastMouse().buttons == 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(lastKbd().keys[0] == 0);
+    uint8_t space[1] = {0x2C};
+    Multiplexer::handleKeyboardReport(0, 0, space, 1);
+    CHECK(lastMouse().buttons == 0x02);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    CHECK(lastMouse().buttons == 0);
+
+    // Hold a mouse button (MO(1)) and layer 1 turns up/down motion into wheel scrolling.
+    reset();
+    set(0, 0xE8 + 3, 0x5221);        // button 4 -> MO(1)
+    set(1, VKEY_MOTION_UP, KC_WH_U_);
+    set(1, VKEY_MOTION_DOWN, KC_WH_D_);
+    Multiplexer::handleMouseReport(0, 0, 0, -48, 0, 0);  // no layer: plain cursor motion
+    CHECK(lastMouse().dy == -48 && lastMouse().wheel == 0);
+    Multiplexer::handleMouseReport(0, 0x08, 0, 0, 0, 0);  // hold button 4
+    CHECK(VirtualMatrix::getActiveLayer() == 1);
+    g_sent_mouse.clear();
+    Multiplexer::handleMouseReport(0, 0x08, 7, -48, 0, 0);  // up 48 counts = 2 notches up; dx passes
+    CHECK(lastMouse().wheel == 2 && lastMouse().dy == 0 && lastMouse().dx == 7);
+    Multiplexer::handleMouseReport(0, 0x08, 0, 30, 0, 0);   // down 30 = 1 notch down, 6 left over
+    CHECK(lastMouse().wheel == -1 && lastMouse().dy == 0);
+    Multiplexer::handleMouseReport(0, 0x08, 0, 18, 0, 0);   // 6 + 18 = 24 -> one more notch
+    CHECK(lastMouse().wheel == -1);
+    CHECK(lastMouse().buttons == 0);  // MO(1) press itself is not sent to the host
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);       // release
+    CHECK(VirtualMatrix::getActiveLayer() == 0);
+    Multiplexer::handleMouseReport(0, 0, 0, -10, 0, 0);
+    CHECK(lastMouse().dy == -10 && lastMouse().wheel == 0);
+
+    // Real wheel remapped to cursor motion; motion direction disabled.
+    reset();
+    set(0, VKEY_WHEEL_UP, KC_MS_U_);
+    set(0, VKEY_MOTION_LEFT, KC_NO_);
+    Multiplexer::handleMouseReport(0, 0, -9, 0, 1, 0);
+    CHECK(lastMouse().dx == 0 && lastMouse().dy == -MOUSE_COUNTS_PER_WHEEL_NOTCH && lastMouse().wheel == 0);
+
+    // Keymap edits are written to flash once, after they have been quiet for a moment.
+    reset();
+    g_saves = 0;
+    g_now_ms = 1000;
+    set(0, 4, 5);
+    set(0, 5, 6);
+    VirtualMatrix::flushPendingSave();
+    CHECK(g_saves == 0);
+    g_now_ms = 1600;
+    VirtualMatrix::flushPendingSave();
+    CHECK(g_saves == 1 && g_flash[0][0][5] == 6);
+    VirtualMatrix::flushPendingSave();
+    CHECK(g_saves == 1);
+
+    // Transparent keys on upper layers fall through to layer 0.
+    reset();
+    set(0, 0x04, 0x05);
+    set(2, 0x04, KC_TRNS_);
+    set(0, 0xE8, 0x5222);  // MO(2)
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    uint8_t a[1] = {0x04};
+    Multiplexer::handleKeyboardReport(0, 0, a, 1);
+    CHECK(lastKbd().keys[0] == 0x05);
+
+    if (g_failures) { printf("%d FAILURES\n", g_failures); return 1; }
+    printf("All host tests passed\n");
+    return 0;
+}

@@ -88,6 +88,7 @@ int main() {
         // Service TinyUSB Device stack and Dual Console (USB CDC + Hardware UART0)
         tud_task();
         flush_vial_reply();
+        VirtualMatrix::flushPendingSave();
         dual_console_update();
 
         // Flush any pending keyboard reports or accumulated mouse/trackpad movement

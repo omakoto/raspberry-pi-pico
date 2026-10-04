@@ -100,11 +100,11 @@ static char serial_str[PICO_UNIQUE_BOARD_ID_SIZE_BYTES * 2 + 1];
 static char const* string_desc_arr[] = {
     (const char[]) { 0x09, 0x04 },          // 0: Supported language 0x0409 (English US)
     "Raspberry Pi",                          // 1: Manufacturer
-    "Pico 2 W BLE HID Multiplexer",          // 2: Product
+    "Pico W BLE HID Multiplexer",            // 2: Product
     serial_str,                              // 3: Serial
-    "Pico 2 W Serial Console",               // 4: CDC Console
-    "Pico 2 W Keyboard/Mouse",               // 5: HID Composite
-    "Pico 2 W VIAL Configurator"             // 6: VIAL RawHID
+    "Pico W Serial Console",                 // 4: CDC Console
+    "Pico W Keyboard/Mouse",                 // 5: HID Composite
+    "Pico W VIAL Configurator"               // 6: VIAL RawHID
 };
 
 static uint16_t _desc_str[64];

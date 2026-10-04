@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Builds the Pico 2 W BLE HID Multiplexer firmware.
+# Builds the Pico W BLE HID Multiplexer firmware.
 #
 # Usage:
 #   ./00-build.sh [-b <pico2_w|pico_w>] [-c|--clean]
