@@ -643,8 +643,9 @@ class FrameServer:
             client.close()
 
 
-# Checks incoming serial characters for interactive control commands (restart on 'r'/Ctrl+Y/Ctrl+C, quit on 'q')
-def check_serial_commands() -> None:
+# Checks incoming serial characters for interactive control commands (restart on 'r'/Ctrl+Y/Ctrl+C,
+# quit on 'q', send a test Pushover notification on 't')
+def check_serial_commands(pushover: "PushoverNotifier | None" = None) -> None:
     try:
         if supervisor.runtime.serial_bytes_available:
             data: str = sys.stdin.read(supervisor.runtime.serial_bytes_available)
@@ -656,6 +657,13 @@ def check_serial_commands() -> None:
             elif any(ch in data for ch in ("q", "Q")):
                 print("\nQuit command received. Exiting to REPL...")
                 sys.exit(0)
+            elif pushover is not None and any(ch in data for ch in ("t", "T")):
+                print("\nTest notification command received.")
+                pushover.send_notification(
+                    title="Stove Monitor Test",
+                    message="This is a test notification from the stove heat monitor.",
+                    priority=0,
+                )
     except Exception:
         pass
 
@@ -748,13 +756,13 @@ def main() -> None:
 
     print("\nEntering monitoring loop...")
     print(f"Parameters: Threshold={threshold_c:.1f}°C, Alert Delay={alert_delay_min:.1f} min, Interval={monitoring_interval_s:.1f}s")
-    print("Interactive Controls: Press 'r' or Ctrl+Y to restart, 'q' to exit to REPL.\n")
+    print("Interactive Controls: Press 'r' or Ctrl+Y to restart, 't' to send a test notification, 'q' to exit to REPL.\n")
 
     led.set_state(LedState.MONITORING_COOL)
 
     while True:
         led.update()
-        check_serial_commands()
+        check_serial_commands(pushover)
 
         # Capture thermal frame
         try:
@@ -863,7 +871,7 @@ def main() -> None:
         sleep_end: float = time.monotonic() + monitoring_interval_s
         while time.monotonic() < sleep_end:
             led.update()
-            check_serial_commands()
+            check_serial_commands(pushover)
             if frame_server is not None:
                 frame_server.poll()
             time.sleep(0.05)

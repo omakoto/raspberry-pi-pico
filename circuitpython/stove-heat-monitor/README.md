@@ -78,7 +78,7 @@ color_matrix = true
 | `monitoring_interval_s`| `float`| `2.0` | Seconds between thermal reads |
 | `dump_matrix` | `bool` | `true` | Stream 32×24 matrix to UART serial |
 | `color_matrix` | `bool` | `true` | Use ANSI colors in matrix dump |
-| `http_port` | `int` | `80` | Port of the HTTP frame server (`/` and `/frame` color HTML page (auto-refreshing), `/index.txt` plain text) |
+| `http_port` | `int` | `80` | Port of the HTTP frame server (see [Web View](#web-view)) |
 | `mdns_hostname` | `str` | `stove-monitor` | Advertised as `<name>.local` via mDNS; empty disables |
 | `i2c_frequency` | `int` | `400000` | I2C clock frequency (400 kHz) |
 | `i2c_scl` / `sda` | `int` | `None` | Optional explicit SoC GPIO numbers |
@@ -95,3 +95,35 @@ color_matrix = true
    `circuit-run` automatically copies `stove-heat-monitor.py` (as `code.py`), `config.toml`, `config-override.toml`, and the required libraries (`libs/common.py` and `libs/adafruit_mlx90640.py`) to the board, then opens the serial monitor (`tools/monitor.sh`).
 
 3. To view the colorized thermal matrix output directly in your terminal, make sure your terminal supports ANSI color codes (standard in Linux/macOS terminals).
+
+---
+
+## Serial Commands
+
+Type these in the serial monitor while the program is running:
+
+| Key | Action |
+| :--- | :--- |
+| `r` / Ctrl+Y / Ctrl+C | Restart via a full hardware reset (`microcontroller.reset()`); USB serial reconnects after a few seconds |
+| `t` | Send a test Pushover notification ("Stove Monitor Test", normal priority) to verify credentials and connectivity |
+| `q` | Exit to the CircuitPython REPL |
+
+---
+
+## Web View
+
+After Wi-Fi connects, the board runs a small HTTP server (port `http_port`, default 80):
+
+| Path | Content |
+| :--- | :--- |
+| `/` or `/frame` | Color-coded HTML page of the latest frame in a fixed-width font; auto-refreshes every `monitoring_interval_s` seconds |
+| `/index.txt` | The same frame as plain text (no colors), e.g. `curl http://stove-monitor.local/index.txt` |
+
+The board is also advertised over mDNS as `<mdns_hostname>.local` (default `stove-monitor.local`; set `mdns_hostname=""` to disable). The IP address is printed at startup, and mDNS resolution depends on the client (e.g. `nss-mdns` on Linux), so the IP is the fallback.
+
+---
+
+## Troubleshooting
+
+- **Web page doesn't respond after re-flashing**: `circuit-run` only soft-reloads the board, after which the HTTP server's listening socket can stop accepting connections. Press `r` in the serial monitor for a full reset.
+- **Switching between this and `nsbackend-pico` on the same board**: `nsbackend-pico`'s `boot.py` (USB HID identity) only takes effect after a hard reset or replug.
