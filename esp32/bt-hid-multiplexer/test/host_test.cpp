@@ -8,6 +8,7 @@
 #include "virtual_matrix.h"
 #include "storage.h"
 #include "device_bindings.h"
+#include "macros.h"
 
 std::vector<SentKeyboard> g_sent_keyboard;
 std::vector<SentMouse> g_sent_mouse;
@@ -27,6 +28,9 @@ bool StorageManager::loadBindings(DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) { (
 void StorageManager::saveBindings(const DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) {
     memcpy(g_flash_bindings, e, sizeof(g_flash_bindings));
 }
+static int g_macro_saves = 0;
+bool StorageManager::loadMacros(uint8_t *buffer) { (void)buffer; return false; }
+void StorageManager::saveMacros(const uint8_t *buffer) { (void)buffer; g_macro_saves++; }
 
 // Fake Bluetooth addresses: device d is 00:00:00:00:00:d+1, except the ones marked disconnected.
 static bool g_connected[MAX_KEYBOARDS];
@@ -47,8 +51,22 @@ static void reset() {
     g_connected[0] = g_connected[1] = true;
     DeviceBindings::init(fake_address);
     DeviceBindings::clearAll();
+    MacroStore::init();
     Multiplexer::init();
     VirtualMatrix::init();
+}
+
+// Lets the multiplexer send every report it has queued (as USB completions do on the device).
+static void pump() {
+    for (int i = 0; i < 200; i++) Multiplexer::flushKeyboard();
+}
+
+// Writes the macro buffer in 28-byte pieces, as VIAL does.
+static void set_macros(const uint8_t *data, uint16_t len) {
+    for (uint16_t off = 0; off < len; off += 28) {
+        uint8_t n = (uint8_t)((len - off) < 28 ? (len - off) : 28);
+        MacroStore::write(off, n, data + off);
+    }
 }
 static void set(int layer, int vkey, uint16_t kc) { VirtualMatrix::setKeycode(layer, vkey / 16, vkey % 16, kc); }
 static SentKeyboard lastKbd() { return g_sent_keyboard.back(); }
@@ -306,6 +324,129 @@ int main() {
     CHECK(DeviceBindings::bindAddress(addr2, 4) && DeviceBindings::layerFor(2) == 4);
     CHECK(DeviceBindings::unbindAddress(addr2) && DeviceBindings::layerFor(2) == DeviceBindings::NO_LAYER);
     CHECK(!DeviceBindings::unbindAddress(addr2));
+
+    // Macros: M0 types "aB" (text), M1 holds Shift, taps A, releases Shift, waits 10 ms and types
+    // "x", M2 taps LSFT(KC_C) given as a 16-bit keycode.
+    reset();
+    {
+        const uint8_t macros[] = {
+            'a', 'B', 0,
+            1, 2, 0xE1, 1, 1, 0x04, 1, 3, 0xE1, 1, 4, 11, 1, 'x', 0,
+            1, 5, 0x06, 0x02, 0,
+        };
+        set_macros(macros, sizeof(macros));
+    }
+    set(0, 0x3A, KC_MACRO_FIRST_ + 0);  // F1 -> M0
+    set(0, 0x3B, KC_MACRO_FIRST_ + 1);  // F2 -> M1
+    set(0, 0x3C, KC_MACRO_FIRST_ + 2);  // F3 -> M2
+    g_sent_keyboard.clear();
+    uint8_t f1[1] = {0x3A};
+    Multiplexer::handleKeyboardReport(0, 0, f1, 1);
+    pump();
+    CHECK(!Multiplexer::macroRunning());
+    {
+        // a down, up, Shift+b down, up (plus reports for the key itself, which sends nothing).
+        std::vector<SentKeyboard> typed;
+        for (auto &k : g_sent_keyboard) {
+            if (k.keys[0] != 0 && (typed.empty() || typed.back().keys[0] != k.keys[0] || typed.back().mods != k.mods)) typed.push_back(k);
+        }
+        CHECK(typed.size() == 2);
+        if (typed.size() == 2) {
+            CHECK(typed[0].keys[0] == 0x04 && typed[0].mods == 0);
+            CHECK(typed[1].keys[0] == 0x05 && typed[1].mods == 0x02);
+        }
+        CHECK(lastKbd().keys[0] == 0 && lastKbd().mods == 0);
+    }
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    g_now_ms = 5000;
+    g_sent_keyboard.clear();
+    uint8_t f2[1] = {0x3B};
+    Multiplexer::handleKeyboardReport(0, 0, f2, 1);
+    pump();
+    CHECK(Multiplexer::macroRunning());  // waiting out the delay
+    {
+        bool shift_a = false, shift_only = false;
+        for (auto &k : g_sent_keyboard) {
+            if (k.mods == 0x02 && k.keys[0] == 0x04) shift_a = true;
+            if (k.mods == 0x02 && k.keys[0] == 0) shift_only = true;
+        }
+        CHECK(shift_a && shift_only);
+        CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0);  // Shift released before the delay
+    }
+    size_t before = g_sent_keyboard.size();
+    g_now_ms = 5005;
+    Multiplexer::poll();
+    pump();
+    CHECK(Multiplexer::macroRunning());
+    CHECK(g_sent_keyboard.size() == before);  // nothing typed during the delay
+    g_now_ms = 5011;
+    Multiplexer::poll();
+    pump();
+    CHECK(!Multiplexer::macroRunning());
+    {
+        bool x = false;
+        for (size_t i = before; i < g_sent_keyboard.size(); i++) x = x || g_sent_keyboard[i].keys[0] == 0x1B;
+        CHECK(x);
+    }
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    g_sent_keyboard.clear();
+    uint8_t f3[1] = {0x3C};
+    Multiplexer::handleKeyboardReport(0, 0, f3, 1);
+    pump();
+    {
+        bool shift_c = false;
+        for (auto &k : g_sent_keyboard) shift_c = shift_c || (k.mods == 0x02 && k.keys[0] == 0x06);
+        CHECK(shift_c);
+    }
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // A macro key while a macro runs is ignored; an empty macro does nothing; unknown characters are
+    // skipped.
+    g_now_ms = 6000;
+    Multiplexer::handleKeyboardReport(0, 0, f2, 1);  // M1 starts, then waits in its delay
+    pump();
+    CHECK(Multiplexer::macroRunning());
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    Multiplexer::handleKeyboardReport(0, 0, f1, 1);  // ignored
+    g_now_ms = 7000;
+    Multiplexer::poll();
+    pump();
+    CHECK(!Multiplexer::macroRunning());
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    set(0, 0x3D, KC_MACRO_FIRST_ + 5);  // F4 -> M5, which is empty
+    uint8_t f4[1] = {0x3D};
+    Multiplexer::handleKeyboardReport(0, 0, f4, 1);
+    CHECK(!Multiplexer::macroRunning());
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    {
+        const uint8_t macros[] = {0xE2, 0x82, 0xAC, 'z', 0};  // "€z": the euro sign is skipped
+        set_macros(macros, sizeof(macros));
+    }
+    g_sent_keyboard.clear();
+    Multiplexer::handleKeyboardReport(0, 0, f1, 1);
+    pump();
+    CHECK(!Multiplexer::macroRunning());
+    {
+        int typed = 0;
+        for (auto &k : g_sent_keyboard) if (k.keys[0] != 0) typed++;
+        CHECK(typed == 1 && g_sent_keyboard.size() >= 2);
+    }
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // Macro edits are saved once they have been quiet for a moment.
+    g_macro_saves = 0;
+    g_now_ms = 8000;
+    {
+        const uint8_t macros[] = {'q', 0};
+        set_macros(macros, sizeof(macros));
+    }
+    MacroStore::flushPendingSave();
+    CHECK(g_macro_saves == 0);
+    g_now_ms = 8600;
+    MacroStore::flushPendingSave();
+    CHECK(g_macro_saves == 1);
 
     if (g_failures) { printf("%d FAILURES\n", g_failures); return 1; }
     printf("All host tests passed\n");

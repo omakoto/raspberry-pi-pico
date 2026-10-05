@@ -8,6 +8,7 @@ idf_component_register(
         "storage.cpp"
         "log_ring.cpp"
         "multiplexer.cpp"
+        "macros.cpp"
         "virtual_matrix.cpp"
         "device_bindings.cpp"
         "vial_server.cpp"

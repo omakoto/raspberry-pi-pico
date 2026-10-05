@@ -101,6 +101,13 @@
 #define KC_VOLU_                0x00A9
 #define KC_VOLD_                0x00AA
 
+// VIAL macros: keycodes M0..M(MACRO_COUNT-1) (QK_MACRO in the VIAL protocol 3 numbering), stored
+// as VIA's NUL-separated macro buffer of MACRO_BUFFER_SIZE bytes.
+#define MACRO_COUNT             16
+#define MACRO_BUFFER_SIZE       1024
+#define KC_MACRO_FIRST_         0x5F12
+#define IS_MACRO_KEYCODE(k)     ((k) >= KC_MACRO_FIRST_ && (k) < KC_MACRO_FIRST_ + MACRO_COUNT)
+
 // QMK layer actions: the action in bits 8-15, the layer number in bits 0-7.
 #define ACTION_LAYER_TO         0x5000 // TO(layer)
 #define ACTION_LAYER_MOMENTARY  0x5100 // MO(layer)

@@ -2,7 +2,7 @@
 #
 # Builds and runs test/host_test.cpp, which exercises the virtual matrix and multiplexer on the host
 # with USB and flash stubbed out, plus the log ring and the runtime VIAL definition. Run it every time
-# touching main/multiplexer.cpp, main/virtual_matrix.cpp, main/device_bindings.cpp, main/log_ring.cpp,
+# touching main/multiplexer.cpp, main/macros.cpp, main/virtual_matrix.cpp, main/device_bindings.cpp, main/log_ring.cpp,
 # main/vial_definition.cpp, main/config.h or gen-vial-layout.py.
 #
 # Usage: test/run-host-test.sh
@@ -14,7 +14,7 @@ out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 
 g++ -std=c++17 -Wall -Wextra -Istubs -I../main \
-    host_test.cpp ../main/multiplexer.cpp ../main/virtual_matrix.cpp ../main/device_bindings.cpp -o "$out/host_test"
+    host_test.cpp ../main/multiplexer.cpp ../main/virtual_matrix.cpp ../main/device_bindings.cpp ../main/macros.cpp -o "$out/host_test"
 "$out/host_test"
 
 g++ -std=c++17 -Wall -Wextra -Istubs -I../main \

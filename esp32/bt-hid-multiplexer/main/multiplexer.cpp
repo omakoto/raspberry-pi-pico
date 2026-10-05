@@ -2,6 +2,8 @@
 #include "virtual_matrix.h"
 #include "device_bindings.h"
 #include "usb_descriptors.h"
+#include "macros.h"
+#include "platform.h"
 #include "tusb.h"
 #include <string.h>
 
@@ -21,6 +23,11 @@ uint16_t Multiplexer::tap_active_ = 0;
 bool Multiplexer::tap_pressed_sent_ = false;
 int32_t Multiplexer::tap_remainder_[8];
 uint8_t Multiplexer::merged_mouse_buttons_ = 0;
+const uint8_t *Multiplexer::macro_pos_ = nullptr;
+const uint8_t *Multiplexer::macro_end_ = nullptr;
+uint32_t Multiplexer::macro_wait_until_ms_ = 0;
+uint16_t Multiplexer::macro_held_[Multiplexer::MACRO_MAX_HELD];
+uint8_t Multiplexer::macro_held_count_ = 0;
 
 uint8_t Multiplexer::host_leds_ = 0;
 uint8_t Multiplexer::last_synced_leds_ = 0xFF;
@@ -41,6 +48,9 @@ void Multiplexer::init() {
     tap_pressed_sent_ = false;
     memset(tap_remainder_, 0, sizeof(tap_remainder_));
     merged_mouse_buttons_ = 0;
+    macro_pos_ = nullptr;
+    macro_end_ = nullptr;
+    macro_held_count_ = 0;
     host_leds_ = 0;
     last_synced_leds_ = 0xFF;
     kbd_dirty_ = false;
@@ -87,7 +97,7 @@ void Multiplexer::handleKeyboardReport(uint8_t dev_idx, uint8_t modifiers, const
     // 2. Detect newly pressed keys (in new state but not in previous state)
     for (int bit = 0; bit < 8; bit++) {
         if ((modifiers & ~old_mods) & (1 << bit)) {
-            VirtualMatrix::processKeyPress(dev_idx, VKEY_MODIFIER_BASE + bit, out_kc);
+            pressVkey(dev_idx, VKEY_MODIFIER_BASE + bit);
         }
     }
     for (int i = 0; i < 6; i++) {
@@ -101,7 +111,7 @@ void Multiplexer::handleKeyboardReport(uint8_t dev_idx, uint8_t modifiers, const
             }
         }
         if (!was_pressed) {
-            VirtualMatrix::processKeyPress(dev_idx, new_k, out_kc);
+            pressVkey(dev_idx, new_k);
         }
     }
 
@@ -165,6 +175,9 @@ void Multiplexer::collectOutputs(OutputState &out) {
     if (tap_active_ != 0) {
         addAction(out, tap_active_);
     }
+    for (uint8_t i = 0; i < macro_held_count_; i++) {
+        addAction(out, macro_held_[i]);
+    }
     for (uint8_t d = 0; d < MAX_KEYBOARDS; d++) {
         if (!keyboards_[d].connected) continue;
 
@@ -192,10 +205,14 @@ void Multiplexer::collectOutputs(OutputState &out) {
 }
 
 void Multiplexer::flushKeyboard() {
-    if (!kbd_dirty_) {
+    if (!tud_hid_n_ready(0)) {
         return;
     }
-    if (!tud_hid_n_ready(0)) {
+    // A running macro moves on once the previous step's reports have gone out.
+    if (macro_pos_ && tap_active_ == 0 && tap_count_ == 0 && !tap_pressed_sent_) {
+        runMacroStep();
+    }
+    if (!kbd_dirty_) {
         return;
     }
 
@@ -299,7 +316,7 @@ void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx
     }
     for (int b = 0; b < VKEY_MOUSE_BTN_COUNT; b++) {
         if ((changed & (1 << b)) && (buttons & (1 << b))) {
-            VirtualMatrix::processKeyPress(dev_idx, VKEY_MOUSE_BTN_BASE + b, out_kc);
+            pressVkey(dev_idx, VKEY_MOUSE_BTN_BASE + b);
         }
     }
 
@@ -375,4 +392,163 @@ bool Multiplexer::hasLedsChanged() {
 
 void Multiplexer::acknowledgeLeds() {
     last_synced_leds_ = host_leds_;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Macros
+// ---------------------------------------------------------------------------------------------
+
+// VIA macro step encoding (QMK send_string): plain bytes are text to type; SS_QMK_PREFIX starts an
+// action: tap/down/up with an 8-bit keycode, the same with a 16-bit keycode, or a delay.
+static const uint8_t SS_QMK_PREFIX = 1;
+static const uint8_t SS_TAP_CODE = 1;
+static const uint8_t SS_DOWN_CODE = 2;
+static const uint8_t SS_UP_CODE = 3;
+static const uint8_t SS_DELAY_CODE = 4;
+static const uint8_t VIAL_MACRO_EXT_TAP = 5;   // 5..7 = tap/down/up with a 16-bit keycode
+static const uint8_t VIAL_MACRO_EXT_UP = 7;
+
+// Keycode that types an ASCII character on a US layout (LSFT(kc) for shifted ones), or 0.
+static uint16_t ascii_to_keycode(uint8_t c) {
+    static const uint16_t SHIFT = 0x0200;
+    if (c >= 'a' && c <= 'z') return 0x04 + (c - 'a');
+    if (c >= 'A' && c <= 'Z') return SHIFT | (0x04 + (c - 'A'));
+    if (c >= '1' && c <= '9') return 0x1E + (c - '1');
+    switch (c) {
+        case '0': return 0x27;
+        case '\n': return 0x28;  // Enter
+        case '\t': return 0x2B;
+        case '\b': return 0x2A;
+        case ' ': return 0x2C;
+        case '-': return 0x2D;
+        case '=': return 0x2E;
+        case '[': return 0x2F;
+        case ']': return 0x30;
+        case '\\': return 0x31;
+        case ';': return 0x33;
+        case '\'': return 0x34;
+        case '`': return 0x35;
+        case ',': return 0x36;
+        case '.': return 0x37;
+        case '/': return 0x38;
+        case '!': return SHIFT | 0x1E;
+        case '@': return SHIFT | 0x1F;
+        case '#': return SHIFT | 0x20;
+        case '$': return SHIFT | 0x21;
+        case '%': return SHIFT | 0x22;
+        case '^': return SHIFT | 0x23;
+        case '&': return SHIFT | 0x24;
+        case '*': return SHIFT | 0x25;
+        case '(': return SHIFT | 0x26;
+        case ')': return SHIFT | 0x27;
+        case '_': return SHIFT | 0x2D;
+        case '+': return SHIFT | 0x2E;
+        case '{': return SHIFT | 0x2F;
+        case '}': return SHIFT | 0x30;
+        case '|': return SHIFT | 0x31;
+        case ':': return SHIFT | 0x33;
+        case '"': return SHIFT | 0x34;
+        case '~': return SHIFT | 0x35;
+        case '<': return SHIFT | 0x36;
+        case '>': return SHIFT | 0x37;
+        case '?': return SHIFT | 0x38;
+        default: return 0;  // other control characters and UTF-8 bytes are not typed
+    }
+}
+
+void Multiplexer::pressVkey(uint8_t dev_idx, uint8_t vkey) {
+    uint16_t action = 0;
+    VirtualMatrix::processKeyPress(dev_idx, vkey, action);
+    if (IS_MACRO_KEYCODE(action)) {
+        startMacro((uint8_t)(action - KC_MACRO_FIRST_));
+    }
+}
+
+bool Multiplexer::macroRunning() {
+    return macro_pos_ != nullptr;
+}
+
+void Multiplexer::startMacro(uint8_t index) {
+    if (macro_pos_) return;  // one macro at a time; a second macro key is ignored meanwhile
+    const uint8_t *start, *end;
+    if (!MacroStore::find(index, &start, &end) || start == end) return;
+    macro_pos_ = start;
+    macro_end_ = end;
+    macro_wait_until_ms_ = 0;
+    macro_held_count_ = 0;
+    kbd_dirty_ = true;
+}
+
+void Multiplexer::endMacro() {
+    macro_pos_ = nullptr;
+    // Keys the macro left down are released, so that a macro cannot leave a key stuck.
+    if (macro_held_count_ > 0) {
+        macro_held_count_ = 0;
+        kbd_dirty_ = true;
+    }
+}
+
+void Multiplexer::runMacroStep() {
+    if ((int32_t)(macro_wait_until_ms_ - platform_now_ms()) > 0) return;
+    if (macro_pos_ >= macro_end_) {
+        endMacro();
+        return;
+    }
+    const uint8_t *p = macro_pos_;
+    if (p[0] != SS_QMK_PREFIX) {
+        macro_pos_ = p + 1;
+        uint16_t kc = ascii_to_keycode(p[0]);
+        if (kc != 0) enqueueTap(kc);
+        else kbd_dirty_ = true;  // nothing to type; keep going on the next flush
+        return;
+    }
+    if (macro_end_ - p < 2) {
+        endMacro();
+        return;
+    }
+    uint8_t act = p[1];
+    uint16_t kc = 0;
+    if (act >= SS_TAP_CODE && act <= SS_UP_CODE) {
+        if (macro_end_ - p < 3) { endMacro(); return; }
+        kc = p[2];
+        macro_pos_ = p + 3;
+    } else if (act >= VIAL_MACRO_EXT_TAP && act <= VIAL_MACRO_EXT_UP) {
+        if (macro_end_ - p < 4) { endMacro(); return; }
+        kc = (uint16_t)(p[2] | (p[3] << 8));
+        if (kc > 0xFF00) kc = (uint16_t)((kc & 0xFF) << 8);  // a keycode whose low byte is 0
+        act = (uint8_t)(act - (VIAL_MACRO_EXT_TAP - SS_TAP_CODE));
+        macro_pos_ = p + 4;
+    } else if (act == SS_DELAY_CODE) {
+        if (macro_end_ - p < 4) { endMacro(); return; }
+        uint32_t delay_ms = (uint32_t)(p[2] - 1) + (uint32_t)(p[3] - 1) * 255;
+        macro_wait_until_ms_ = platform_now_ms() + delay_ms;
+        macro_pos_ = p + 4;
+        kbd_dirty_ = true;
+        return;
+    } else {
+        macro_pos_ = p + 2;  // malformed; skip it
+        kbd_dirty_ = true;
+        return;
+    }
+
+    if (act == SS_TAP_CODE) {
+        enqueueTap(kc);
+    } else if (act == SS_DOWN_CODE) {
+        if (macro_held_count_ < MACRO_MAX_HELD) macro_held_[macro_held_count_++] = kc;
+        kbd_dirty_ = true;
+    } else {  // SS_UP_CODE
+        for (uint8_t i = 0; i < macro_held_count_; i++) {
+            if (macro_held_[i] == kc) {
+                macro_held_[i] = macro_held_[--macro_held_count_];
+                break;
+            }
+        }
+        kbd_dirty_ = true;
+    }
+}
+
+void Multiplexer::poll() {
+    if (macro_pos_) {
+        flushKeyboard();
+    }
 }

@@ -11,6 +11,7 @@
 //   "km_hdr"      KeymapHeader
 //   "km0".."km7"  one blob per layer (MATRIX_ROWS * MATRIX_COLS uint16_t keycodes)
 //   "bind"        BindingsBlob
+//   "macros"      the VIAL macro buffer (MACRO_BUFFER_SIZE bytes)
 // One blob per layer keeps a typical VIAL edit (one key) to a 512-byte write. NVS checksums every
 // entry itself; the magic and version detect a layout change.
 
@@ -144,5 +145,20 @@ void StorageManager::saveBindings(const DeviceBindingEntry entries[MAX_DEVICE_BI
     LogRing::breadcrumb(CRUMB_FLASH_BINDINGS_END);
     if (err != ESP_OK) {
         printf("[Storage] Saving the device bindings failed: %s\n", esp_err_to_name(err));
+    }
+}
+
+bool StorageManager::loadMacros(uint8_t *buffer) {
+    if (!s_nvs_open) return false;
+    size_t len = MACRO_BUFFER_SIZE;
+    return nvs_get_blob(s_nvs, "macros", buffer, &len) == ESP_OK && len == MACRO_BUFFER_SIZE;
+}
+
+void StorageManager::saveMacros(const uint8_t *buffer) {
+    if (!s_nvs_open) return;
+    esp_err_t err = nvs_set_blob(s_nvs, "macros", buffer, MACRO_BUFFER_SIZE);
+    if (err == ESP_OK) err = nvs_commit(s_nvs);
+    if (err != ESP_OK) {
+        printf("[Storage] Saving the macros failed: %s\n", esp_err_to_name(err));
     }
 }

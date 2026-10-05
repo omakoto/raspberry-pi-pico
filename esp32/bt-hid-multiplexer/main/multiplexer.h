@@ -21,6 +21,10 @@ public:
     static void flushMouse();
     static void flushKeyboard();
 
+    // Continues a macro that is waiting out a delay; call every few ms.
+    static void poll();
+    static bool macroRunning();
+
     // Reverse LED synchronization (Caps Lock / Num Lock from PC)
     static void setHostLeds(uint8_t leds);
     static uint8_t getHostLeds();
@@ -64,6 +68,21 @@ private:
     static int32_t tap_remainder_[8];
     static void enqueueTap(uint16_t action);
     static uint8_t merged_mouse_buttons_;
+
+    // Macro playback (VIAL macros M0..): a macro's steps run one at a time, each followed by a
+    // keyboard report, so the host sees every press and release. Taps go through the tap queue;
+    // keys a macro holds down are in macro_held_ until it releases them or ends.
+    static const uint8_t MACRO_MAX_HELD = 6;
+    static const uint8_t *macro_pos_;   // next step, or nullptr when no macro runs
+    static const uint8_t *macro_end_;
+    static uint32_t macro_wait_until_ms_;
+    static uint16_t macro_held_[MACRO_MAX_HELD];
+    static uint8_t macro_held_count_;
+    static void startMacro(uint8_t index);
+    static void runMacroStep();
+    static void endMacro();
+    // Presses a virtual key and starts the macro it is mapped to, if it is a macro key.
+    static void pressVkey(uint8_t dev_idx, uint8_t vkey);
 
     // Host LED state
     static uint8_t host_leds_;

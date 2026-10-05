@@ -7,6 +7,7 @@
 #include "platform.h"
 #include "ble_hid_host.h"
 #include "multiplexer.h"
+#include "macros.h"
 #include "virtual_matrix.h"
 #include "device_bindings.h"
 #include "driver/uart.h"
@@ -492,6 +493,7 @@ void dual_console_handle_command(const char *cmd) {
         BleHidHost::clearBonds();
         VirtualMatrix::resetKeymap();
         DeviceBindings::clearAll();
+        MacroStore::reset();
         dual_println("Factory reset complete.");
     } else if (strcmp(cmd, "help") == 0) {
         dual_println("Available Commands:");
@@ -523,7 +525,7 @@ void dual_console_handle_command(const char *cmd) {
         dual_println("  hangtest       - Hang the bt_app task on purpose to test the watchdog recovery");
         dual_println("  lastlog        - Show the log and last events of the previous run (kept across a watchdog reset)");
         dual_println("  resetkeymap    - Reset the VIAL keymap to defaults, keeping bonds");
-        dual_println("  reset          - Factory reset (clear bonds and reset keymap)");
+        dual_println("  reset          - Factory reset (clear bonds, keymap, device bindings and macros)");
         dual_println("  help           - Show this help summary");
     } else {
         dual_printf("Unknown command: '%s'. Type 'help' for command list.\r\n", cmd);

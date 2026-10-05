@@ -1,6 +1,7 @@
 #include "vial_server.h"
 #include "virtual_matrix.h"
 #include "vial_definition.h"
+#include "macros.h"
 #include "app_task.h"
 #include "ble_hid_host.h"
 #include "device_bindings.h"
@@ -20,6 +21,9 @@
 #define VIA_CMD_BOOTLOADER_JUMP             0x0B
 #define VIA_CMD_MACRO_GET_COUNT             0x0C
 #define VIA_CMD_MACRO_GET_BUFFER_SIZE       0x0D
+#define VIA_CMD_MACRO_GET_BUFFER            0x0E
+#define VIA_CMD_MACRO_SET_BUFFER            0x0F
+#define VIA_CMD_MACRO_RESET                 0x10
 #define VIA_CMD_DYNAMIC_KEYMAP_GET_LAYER_COUNT 0x11
 #define VIA_CMD_KEYMAP_GET_BUFFER           0x12
 #define VIA_CMD_KEYMAP_SET_BUFFER           0x13
@@ -189,14 +193,32 @@ void VialServer::handleViaCommand(const uint8_t *in_buf, uint8_t *out_buf) {
             break;
 
         case VIA_CMD_MACRO_GET_COUNT: // 0x0C
-            out_buf[0] = 0x0C;
-            out_buf[1] = 0; // 0 macros
+            out_buf[1] = MACRO_COUNT;
             break;
 
         case VIA_CMD_MACRO_GET_BUFFER_SIZE: // 0x0D
-            out_buf[0] = 0x0D;
-            out_buf[1] = 0; // Size MSB = 0
-            out_buf[2] = 0; // Size LSB = 0
+            out_buf[1] = (MACRO_BUFFER_SIZE >> 8) & 0xFF;
+            out_buf[2] = MACRO_BUFFER_SIZE & 0xFF;
+            break;
+
+        case VIA_CMD_MACRO_GET_BUFFER: { // 0x0E: offset (2, BE), size (<= 28), data from byte 4
+            uint16_t offset = ((uint16_t)in_buf[1] << 8) | in_buf[2];
+            uint8_t sz = in_buf[3];
+            if (sz > 28) sz = 28;
+            MacroStore::read(offset, sz, &out_buf[4]);
+            break;
+        }
+
+        case VIA_CMD_MACRO_SET_BUFFER: { // 0x0F: offset (2, BE), size (<= 28), data from byte 4
+            uint16_t offset = ((uint16_t)in_buf[1] << 8) | in_buf[2];
+            uint8_t sz = in_buf[3];
+            if (sz > 28) sz = 28;
+            MacroStore::write(offset, sz, &in_buf[4]);
+            break;
+        }
+
+        case VIA_CMD_MACRO_RESET: // 0x10
+            MacroStore::reset();
             break;
 
         case VIA_CMD_DYNAMIC_KEYMAP_GET_LAYER_COUNT: // 0x11

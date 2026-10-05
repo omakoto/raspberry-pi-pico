@@ -26,6 +26,9 @@ public:
     static void clearKeymap();
     static bool loadBindings(DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]);
     static void saveBindings(const DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]);
+    // The VIAL macro buffer (MACRO_BUFFER_SIZE bytes).
+    static bool loadMacros(uint8_t *buffer);
+    static void saveMacros(const uint8_t *buffer);
 };
 
 #endif // STORAGE_H_

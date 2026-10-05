@@ -18,6 +18,7 @@
 #include "device_bindings.h"
 #include "dual_console.h"
 #include "log_ring.h"
+#include "macros.h"
 #include "multiplexer.h"
 #include "platform.h"
 #include "usb_descriptors.h"
@@ -204,6 +205,7 @@ static void on_keymap_save_check(btstack_timer_source_t *ts) {
     {
         StageScope stage(STAGE_STORAGE);
         VirtualMatrix::flushPendingSave();
+        MacroStore::flushPendingSave();
     }
     btstack_run_loop_set_timer(ts, KEYMAP_SAVE_CHECK_MS);
     btstack_run_loop_add_timer(ts);
@@ -221,6 +223,8 @@ static void on_scan_check(btstack_timer_source_t *ts) {
 }
 
 static void on_button_poll(btstack_timer_source_t *ts) {
+    // Also moves a macro on that is waiting out a delay.
+    Multiplexer::poll();
     ButtonEvent btn_ev = ButtonHandler::update();
     if (btn_ev != BUTTON_EVENT_NONE) {
         StageScope stage(STAGE_BUTTON);
@@ -295,6 +299,7 @@ static void bt_app_setup() {
     // Keymap (loads NVS), device bindings and multiplexer state, before USB can deliver requests.
     VialServer::init();
     DeviceBindings::init(device_address);
+    MacroStore::init();
     Multiplexer::init();
     ButtonHandler::init();
 

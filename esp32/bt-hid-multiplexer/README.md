@@ -118,7 +118,7 @@ Commands:
   (the latter two switch themselves off after 15 s)
 - `disconnect <slot>`, `unbond <idx>`, `clearbonds`
 - `resetkeymap`: reset the VIAL keymap, keeping the bonds
-- `reset`: factory reset (bonds, keymap and per-device bindings)
+- `reset`: factory reset (bonds, keymap, per-device bindings and macros)
 - `lastlog`: the previous run's log; `hangtest`: hang on purpose to test the watchdog
 - `bootloader`: reboot into download mode; `reboot`: restart
 - `help`
@@ -208,8 +208,13 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
   remapped. Keys left `Transparent` on an upper layer use the layer below.
 - **Keycodes that work:** basic keys, modifiers, modifier-wrapped keys such as `LSFT(KC_A)`,
   `MO`/`TG`/`TO`/`DF` layer keys (in the numbering of the VIAL protocol version the firmware reports),
-  `KC_NO`, `KC_TRNS`, mouse buttons 1–5, and the mouse wheel/cursor keycodes.
-- **Not supported:** media/consumer and system keys (no consumer report), macros, tap dance,
+  `KC_NO`, `KC_TRNS`, mouse buttons 1–5, the mouse wheel/cursor keycodes, and macros `M0`–`M15`.
+- **Macros:** edit them in VIAL's **Macros** tab (16 macros, 1024 bytes in total) and put `M0`…`M15`
+  on a key or mouse button. A macro can type text (ASCII, US layout; other characters are skipped),
+  tap, press and release keys (including modifier-wrapped ones) and wait. One macro plays at a time;
+  keys a macro leaves pressed are released when it ends. Macros are saved half a second after the
+  last edit; the `reset` console command clears them.
+- **Not supported:** media/consumer and system keys (no consumer report), tap dance,
   mod-tap/layer-tap, combos; the 6-key rollover limit applies.
 - **Mouse:** the bottom row of the Vial key map is the mouse: buttons 1–8 on the left (6–8 default to
   F13–F15), movement directions on the right (cursor up/down/left/right, wheel up/down/left/right).
