@@ -138,10 +138,8 @@ Classic-only peripherals never advertise over BLE, so the BLE scan cannot see th
 - **Slots:** classic devices use multiplexer device indices `MAX_BLE_DEVICES` and up, so `MAX_KEYBOARDS` / `MAX_MICE` cover both.
 - **Trackpad smoothness:** the Pico requests master role on every classic link and a 5 ms QoS latency bound (`LINK_QOS_LATENCY_US`), which turned reports arriving in 3–4 report bursts every ~40 ms into a steady ~10 ms cadence. Known limitation: while BLE devices are connected as well, classic reports occasionally stall for 60–300 ms because the single CYW43 radio is shared, and roughly 10 % of gaps stay at 30–60 ms.
 
-### Pairing policy: LE legacy pairing by default
-The firmware offers **LE legacy pairing without MITM** in its SMP Pairing Request by default. LE Secure Connections is compiled in but opt-in (`authreq sc`), because the ProtoArc XK01 keyboard pairs and encrypts fine over Secure Connections yet never sends a single HID input notification afterwards, while it works with legacy pairing. A keyboard that insists on MITM still gets passkey entry (the PIN shows on the OLED), and `authreq legacy mitm` forces it. The policy only affects new pairings: `unbond <idx>` a device and re-pair it to apply a new policy.
-
----
+### Pairing policy: LE legacy pairing first, Secure Connections next
+The firmware offers **LE legacy pairing without MITM** first. If a pairing attempt fails (the device rejects it or just drops the link), the next attempt in the same pairing window offers **LE Secure Connections**, and so on alternately, because devices differ: the ProtoArc XK01 keyboard pairs and encrypts fine over Secure Connections yet never sends a single HID input notification afterwards, so it needs legacy pairing, while the Keychron Nape Pro on one of its host slots accepts only Secure Connections and drops the link when offered legacy pairing. The console shows which method each attempt offers. `authreq [legacy|sc] [mitm|nomitm]` sets the method tried first (default `legacy nomitm`); a keyboard that insists on MITM still gets passkey entry (the PIN shows on the OLED), and `authreq legacy mitm` forces it. The policy only affects new pairings: `unbond <idx>` a device and re-pair it to apply a new policy.
 
 ## How to Pair a Device
 

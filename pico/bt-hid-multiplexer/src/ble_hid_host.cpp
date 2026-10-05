@@ -97,9 +97,25 @@ static char s_pending_connect_name[32];
 //
 // Default is LE legacy pairing without MITM. The ProtoArc XK01 keyboard only ever delivered
 // input reports when paired this way: once LE Secure Connections pairing was offered it paired
-// and encrypted fine but never sent a single HID notification, so SC is opt-in per 'authreq'.
-// MITM (passkey entry, shown on the OLED) is also opt-in because it changes the pairing UX.
+// and encrypted fine but never sent a single HID notification. Other devices (e.g. the Keychron
+// Nape Pro on one of its host slots) accept only Secure Connections and drop the link when
+// offered legacy pairing. So each failed pairing attempt during a pairing window flips the
+// Secure Connections bit for the next attempt (s_sc_flipped): every device gets the default
+// first and the other method next. 'authreq' sets the default.
+// MITM (passkey entry, shown on the OLED) is opt-in because it changes the pairing UX.
 static uint8_t s_sm_auth_req = SM_AUTHREQ_BONDING;
+static bool s_sc_flipped = false;
+
+// The authentication requirements offered right now: the configured policy, with the Secure
+// Connections bit flipped after a failed attempt in the current pairing window.
+static uint8_t effective_auth_req() {
+    return s_sm_auth_req ^ (s_sc_flipped ? SM_AUTHREQ_SECURE_CONNECTION : 0);
+}
+
+static void apply_auth_req(bool sc_flipped) {
+    s_sc_flipped = sc_flipped;
+    sm_set_authentication_requirements(effective_auth_req());
+}
 static bool s_stack_logging = false;
 static bool s_log_reports = false;
 
@@ -722,7 +738,7 @@ void BleHidHost::setAuthReq(bool mitm, bool secure_connections) {
     s_sm_auth_req = SM_AUTHREQ_BONDING;
     if (mitm) s_sm_auth_req |= SM_AUTHREQ_MITM_PROTECTION;
     if (secure_connections) s_sm_auth_req |= SM_AUTHREQ_SECURE_CONNECTION;
-    sm_set_authentication_requirements(s_sm_auth_req);
+    apply_auth_req(false);
     dumpAuthReq();
 }
 
@@ -745,7 +761,7 @@ void BleHidHost::init() {
     // Security Manager setup: Display Only for 6-digit keyboard passkey pairing
     sm_init();
     sm_set_io_capabilities(IO_CAPABILITY_DISPLAY_ONLY);
-    sm_set_authentication_requirements(s_sm_auth_req);
+    apply_auth_req(false);
     dumpAuthReq();
 
     gatt_client_init();
@@ -818,6 +834,7 @@ bool BleHidHost::isScanning() {
 
 void BleHidHost::startPairingMode(uint32_t timeout_ms) {
     s_is_pairing_mode = true;
+    apply_auth_req(false);  // every pairing window starts with the configured policy
     s_pairing_mode_start_ms = to_ms_since_boot(get_absolute_time());
     s_pairing_mode_duration_ms = timeout_ms;
     btstack_run_loop_remove_timer(&s_pairing_mode_timer);
@@ -834,6 +851,7 @@ void BleHidHost::startPairingMode(uint32_t timeout_ms) {
 void BleHidHost::stopPairingMode() {
     if (!s_is_pairing_mode) return;
     s_is_pairing_mode = false;
+    apply_auth_req(false);
     btstack_run_loop_remove_timer(&s_pairing_mode_timer);
     LogRing::breadcrumb(CRUMB_PAIRING_STOP);
     printf("[BLE Host] Pairing mode stopped.\n");
@@ -1726,7 +1744,9 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
 
         case SM_EVENT_PAIRING_STARTED: {
             hci_con_handle_t h = sm_event_pairing_started_get_handle(packet);
-            printf("[BLE Host] Pairing started for handle 0x%04X (our authreq 0x%02X).\n", h, s_sm_auth_req);
+            printf("[BLE Host] Pairing started for handle 0x%04X (our authreq 0x%02X, %s).\n", h,
+                   effective_auth_req(),
+                   (effective_auth_req() & SM_AUTHREQ_SECURE_CONNECTION) ? "LE Secure Connections" : "LE legacy pairing");
             break;
         }
 
@@ -1760,6 +1780,13 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
                 connect_hids_handle = h;
             } else {
                 printf("[BLE Host] Pairing complete for handle 0x%04X: FAILED (status 0x%02X, reason 0x%02X)\n", h, status, reason);
+                if (s_is_pairing_mode) {
+                    // Some peripherals accept only one of the two methods and just drop the link
+                    // otherwise; offer the other one on the next attempt.
+                    apply_auth_req(!s_sc_flipped);
+                    printf("[BLE Host] Next pairing attempt offers %s.\n",
+                           (effective_auth_req() & SM_AUTHREQ_SECURE_CONNECTION) ? "LE Secure Connections" : "LE legacy pairing");
+                }
                 if (slot) {
                     gap_disconnect(h);
                 }
