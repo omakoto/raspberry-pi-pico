@@ -13,15 +13,15 @@ cd "$(dirname "$(readlink -f "$0")")"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 
-g++ -std=c++17 -Wall -Wextra -DBOARD_DEVKITC -Istubs -I../main \
+g++ -std=c++17 -Wall -Wextra -Istubs -I../main \
     host_test.cpp ../main/multiplexer.cpp ../main/virtual_matrix.cpp ../main/device_bindings.cpp -o "$out/host_test"
 "$out/host_test"
 
-g++ -std=c++17 -Wall -Wextra -DBOARD_DEVKITC -Istubs -I../main \
+g++ -std=c++17 -Wall -Wextra -Istubs -I../main \
     log_ring_test.cpp ../main/log_ring.cpp -o "$out/log_ring_test"
 "$out/log_ring_test"
 
-g++ -std=c++17 -Wall -Wextra -DBOARD_DEVKITC -Istubs -I../main \
+g++ -std=c++17 -Wall -Wextra -Istubs -I../main \
     vial_definition_test.cpp ../main/vial_definition.cpp -o "$out/vial_definition_test"
 "$out/vial_definition_test" "$out/definition.xz"
 # VIAL reads the definition with Python's lzma and json modules; so does this check.

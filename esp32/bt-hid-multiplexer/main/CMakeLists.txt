@@ -16,7 +16,6 @@ idf_component_register(
         "dual_console.cpp"
         "ssd1306.cpp"
         "button_handler.cpp"
-        "status_led.cpp"
         "ui_task.cpp"
     INCLUDE_DIRS
         "."

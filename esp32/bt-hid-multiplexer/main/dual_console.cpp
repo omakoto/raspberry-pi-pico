@@ -560,7 +560,6 @@ void print_previous_run_report(bool full) {
 void print_welcome_banner() {
     dual_println("\r\n==================================================");
     dual_println("  ESP32-S3 BLE HID Multiplexer");
-    dual_printf ("  Hardware : %s\r\n", BOARD_NAME);
     dual_printf ("  Firmware : v%s (Built %s %s)\r\n", FIRMWARE_VERSION, __DATE__, __TIME__);
     dual_printf ("  USB serial : %s\r\n", g_usb_serial_enabled ? "enabled" : "disabled (ground GPIO7 / XIAO D8 and re-plug to enable)");
     dual_println("  Type 'help' for available console commands, 'status' for the connection state.");

@@ -4,12 +4,14 @@
 #
 # Port selection, in this order:
 #   1. A port given with -p (or $ESPPORT).
-#   2. DevKitC builds only, unless -u is given: the on-board USB-UART bridge (CP210x / CH34x), which esptool resets into
-#      download mode by itself through DTR/RTS.
-#   3. A ROM (or USB-Serial-JTAG console) download port on the native USB port (303a:1001).
-#   4. Otherwise the running firmware is asked to reboot into ROM download mode, through the VIA
+#   2. A ROM download port on the native USB port (USB-Serial-JTAG, 303a:1001).
+#   3. Otherwise the running firmware is asked to reboot into ROM download mode, through the VIA
 #      "jump to bootloader" command on the VIAL raw HID interface (always present) or the "bootloader"
-#      command on its own USB serial port (when enabled), and step 3 is retried.
+#      command on its own USB serial port (when enabled), and step 2 is retried. This works the same on
+#      the XIAO ESP32-S3 and the ESP32-S3-DevKitC-1.
+#   4. If that fails too (e.g. the firmware does not run): a USB-UART bridge (CP210x / CH34x), which
+#      esptool resets into download mode through DTR/RTS. That works with the DevKitC's on-board
+#      bridge; a plain adapter on the XIAO's D6/D7 cannot reset the chip.
 #
 
 set -euo pipefail
@@ -23,38 +25,28 @@ Usage: 01-install.sh [options] [-- extra idf.py arguments]
 Flashes build/ to the board (building first if there is no build yet).
 
 Options:
-  -b, --board BOARD   Refuse to flash unless the build is for this board (devkitc or xiao).
-                      Without it, the build is flashed whatever board it is for.
   -p, --port PORT     Serial port to flash through (default: auto-detected, see below).
-  -u, --usb           Flash through the native USB port even when the DevKitC's UART bridge
-                      is connected (the way a XIAO is always flashed).
   -h, --help          Shows this help.
 
 Port auto-detection:
-  - DevKitC builds: the on-board USB-UART bridge port, if connected.
-  - The native USB port in ROM download mode (/dev/serial/by-id/*Espressif*USB_JTAG*).
-  - Otherwise the running firmware is asked to reboot into download mode over USB.
+  - The native USB port in ROM download mode (/dev/serial/by-id/*Espressif*USB_JTAG*); the
+    running firmware is asked to reboot into download mode over USB first.
+  - Otherwise a USB-UART bridge port (the DevKitC's UART USB-C port), if connected.
   If nothing works: hold BOOT, tap RESET, release BOOT, and run this again.
 
 Examples:
   ./01-install.sh
-  ./01-install.sh -b xiao
   ./01-install.sh -p /dev/ttyUSB0
-  ./01-install.sh -u
 EOF
 }
 
-OPTS=$(getopt -o b:p:uh --long board:,port:,usb,help -n "$(basename "$0")" -- "$@") || { usage >&2; exit 1; }
+OPTS=$(getopt -o p:h --long port:,help -n "$(basename "$0")" -- "$@") || { usage >&2; exit 1; }
 eval set -- "$OPTS"
 
-WANT_BOARD=""
 PORT="${ESPPORT:-}"
-USB_ONLY=0
 while true; do
     case "$1" in
-        -b|--board) WANT_BOARD="$2"; shift 2 ;;
         -p|--port) PORT="$2"; shift 2 ;;
-        -u|--usb) USB_ONLY=1; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         *) echo "Internal error parsing options" >&2; exit 1 ;;
@@ -65,19 +57,8 @@ cd "$SCRIPT_DIR"
 
 if [[ ! -f "build/bt-hid-multiplexer.bin" ]]; then
     echo "Firmware binary not found. Running 00-build.sh first..."
-    if [[ -n "$WANT_BOARD" ]]; then
-        ./00-build.sh -b "$WANT_BOARD"
-    else
-        ./00-build.sh
-    fi
+    ./00-build.sh
 fi
-
-BUILT_BOARD="$(grep -E '^BOARD:' build/CMakeCache.txt | cut -d= -f2 || true)"
-if [[ -n "$WANT_BOARD" && "$WANT_BOARD" != "$BUILT_BOARD" ]]; then
-    echo "Error: build/ is for board '${BUILT_BOARD}', not '${WANT_BOARD}'. Run ./00-build.sh -b ${WANT_BOARD}." >&2
-    exit 1
-fi
-echo "Flashing the build for board '${BUILT_BOARD}'."
 
 find_rom_port() {
     local p
@@ -141,9 +122,6 @@ except Exception:
     done
 }
 
-if [[ -z "$PORT" && "$BUILT_BOARD" == "devkitc" && $USB_ONLY -eq 0 ]]; then
-    PORT="$(find_uart_bridge || true)"
-fi
 if [[ -z "$PORT" ]]; then
     PORT="$(find_rom_port || true)"
 fi
@@ -155,6 +133,10 @@ if [[ -z "$PORT" ]]; then
         [[ -n "$PORT" ]] && break
         sleep 0.5
     done
+fi
+if [[ -z "$PORT" ]]; then
+    PORT="$(find_uart_bridge || true)"
+    [[ -n "$PORT" ]] && echo "No download port on the native USB port; trying the USB-UART bridge."
 fi
 if [[ -z "$PORT" ]]; then
     echo "Error: no flashing port found." >&2

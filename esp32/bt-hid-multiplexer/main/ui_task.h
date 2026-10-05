@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// What the OLED and the pairing LED show. The bt_app task, which owns this state, publishes it; the
+// What the OLED shows. The bt_app task, which owns this state, publishes it; the
 // UI task renders it. The UI task blocks on I2C (a full OLED frame takes ~25 ms at 400 kHz), so it
 // must not be the one holding application state.
 struct UiSnapshot {
@@ -18,7 +18,7 @@ struct UiSnapshot {
     bool usb_mounted;
 };
 
-// Starts the UI task (OLED with its boot splash, pairing LED).
+// Starts the UI task (OLED with its boot splash).
 void ui_task_start();
 
 // Publishes a new snapshot if it differs from the last one; bt_app task only.

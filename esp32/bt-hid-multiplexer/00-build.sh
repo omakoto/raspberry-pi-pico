@@ -17,9 +17,6 @@ Usage: 00-build.sh [options] [-- extra idf.py arguments]
 Builds the firmware into build/.
 
 Options:
-  -b, --board BOARD   Target board: devkitc (ESP32-S3-DevKitC-1) or xiao (Seeed Studio
-                      XIAO ESP32-S3). Remembered for later builds; the default for a fresh
-                      build is devkitc.
   -D NAME=VALUE       Passes a CMake definition, e.g. -D USB_SERIAL_ALWAYS=ON to always
                       include the USB serial port.
   -c, --clean         Deletes build/ (and sdkconfig) before building.
@@ -30,22 +27,19 @@ Environment:
   BTSTACK_ROOT        BTstack tree to compile (default: ~/pico-sdk/lib/btstack).
 
 Examples:
-  ./00-build.sh                       # build for the board used last (devkitc at first)
-  ./00-build.sh -b xiao               # build for the XIAO ESP32-S3
+  ./00-build.sh                       # build (the image runs on the XIAO and the DevKitC)
   ./00-build.sh -D USB_SERIAL_ALWAYS=ON
-  ./00-build.sh -c -b devkitc         # clean build for the DevKitC
+  ./00-build.sh -c                    # clean build
 EOF
 }
 
-OPTS=$(getopt -o b:D:ch --long board:,clean,help -n "$(basename "$0")" -- "$@") || { usage >&2; exit 1; }
+OPTS=$(getopt -o D:ch --long clean,help -n "$(basename "$0")" -- "$@") || { usage >&2; exit 1; }
 eval set -- "$OPTS"
 
-BOARD=""
 DO_CLEAN=0
 CMAKE_DEFS=()
 while true; do
     case "$1" in
-        -b|--board) BOARD="$2"; shift 2 ;;
         -D) CMAKE_DEFS+=("-D$2"); shift 2 ;;
         -c|--clean) DO_CLEAN=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -53,11 +47,6 @@ while true; do
         *) echo "Internal error parsing options" >&2; exit 1 ;;
     esac
 done
-
-if [[ -n "$BOARD" && "$BOARD" != "devkitc" && "$BOARD" != "xiao" ]]; then
-    echo "Error: unknown board '$BOARD' (use devkitc or xiao)" >&2
-    exit 1
-fi
 
 export BTSTACK_ROOT="${BTSTACK_ROOT:-$HOME/pico-sdk/lib/btstack}"
 if [[ ! -f "$BTSTACK_ROOT/src/btstack.h" ]]; then
@@ -84,11 +73,6 @@ if [[ $DO_CLEAN -eq 1 ]]; then
     rm -rf build sdkconfig sdkconfig.old
 fi
 
-if [[ -n "$BOARD" ]]; then
-    CMAKE_DEFS+=("-DBOARD=$BOARD")
-fi
-
 idf.py "${CMAKE_DEFS[@]+"${CMAKE_DEFS[@]}"}" build "$@"
 
-BUILT_BOARD="$(grep -E '^BOARD:' build/CMakeCache.txt | cut -d= -f2 || true)"
-echo "Build successful for board '${BUILT_BOARD}': build/bt-hid-multiplexer.bin"
+echo "Build successful: build/bt-hid-multiplexer.bin"

@@ -41,7 +41,7 @@
 // Button polling (debouncing and long-press timing are in ButtonHandler).
 #define BUTTON_POLL_MS 10
 
-// The OLED / LED state is recomputed at this interval and handed to the UI task when it changed.
+// The OLED state is recomputed at this interval and handed to the UI task when it changed.
 #define UI_PUBLISH_MS 20
 
 // VIAL requests waiting for the bt_app task. The configurator sends one request and waits for its

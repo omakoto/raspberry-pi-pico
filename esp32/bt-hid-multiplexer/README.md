@@ -30,7 +30,7 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
 - **SSD1306 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
   the 6-digit passkey when a keyboard needs one. Optional: the firmware runs without a display.
-- **Pairing button** and **pairing LED** (blinks at 5 Hz during pairing mode).
+- **Pairing button.**
 - **Serial console** on UART0 (and optionally on the USB serial port) with diagnostics.
 - **Hang recovery:** a task watchdog reboots a hung board in 5 s and the previous run's log survives.
 
@@ -42,12 +42,11 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
 
 | | XIAO ESP32-S3 | ESP32-S3-DevKitC-1 |
 | :--- | :--- | :--- |
-| Build option | `./00-build.sh -b xiao` | `./00-build.sh -b devkitc` (default) |
 | USB | One USB-C (native USB) | `USB` port (native) and `UART` port (USB-UART bridge) |
-| Pairing LED | Yellow user LED (GPIO21) | WS2812 RGB LED (GPIO48 on v1.0, GPIO38 on v1.1; both are driven) |
 | Console | USB-UART adapter on `D6`/`D7`, or the USB serial port | The `UART` USB-C port |
 
-The external parts use the same GPIOs on both boards. Plug the **native USB port** (`USB` on the DevKitC)
+The same firmware image runs on both boards: the external parts use the same GPIOs, and the boards'
+own LEDs are not used. Plug the **native USB port** (`USB` on the DevKitC)
 into the computer that should receive the keyboard and mouse input.
 
 ### Wiring
@@ -73,21 +72,21 @@ Requires ESP-IDF v5.3 (`~/esp-idf`, or `IDF_PATH`) and BTstack, which is compile
 `~/pico-sdk/lib/btstack` (or `BTSTACK_ROOT`), the same BTstack the Pico build uses.
 
 ```bash
-./00-build.sh                # build for the board used last (devkitc at first)
-./00-build.sh -b xiao        # build for the XIAO
+./00-build.sh                # build (the same image for both boards)
 ./01-install.sh              # flash
 ./02-monitor.sh [port]       # serial console
 ```
 
 `01-install.sh` picks the way to flash by itself:
-- **DevKitC with the `UART` port connected:** through the USB-UART bridge (esptool resets the board).
-- **Otherwise (always on the XIAO):** it asks the running firmware to reboot into the ROM download mode
-  through the VIAL interface (or the USB serial port), then flashes over the native USB port. `-u`
-  forces this way on the DevKitC.
+- **Normally:** it asks the running firmware to reboot into the ROM download mode through the VIAL
+  interface (or the USB serial port), then flashes over the native USB port. This works the same on
+  both boards.
+- **If that fails and a USB-UART bridge is connected** (the DevKitC's `UART` port): through the bridge,
+  which esptool resets into download mode by itself. `-p <port>` picks a port explicitly.
 - **First flash, or the firmware does not respond:** hold BOOT, tap RESET, release BOOT, then run
   `./01-install.sh` again.
 
-`./01-install.sh -b xiao` refuses to flash a build made for another board. Both scripts take `-h`.
+Both scripts take `-h`.
 
 ### Serial console
 
@@ -144,8 +143,7 @@ Commands:
 
 ## How to Pair a Device
 
-1. **Pairing mode:** press the button (or hold it 2 s, or run `pair`). The OLED shows `BT PAIRING...`
-   and the LED blinks.
+1. **Pairing mode:** press the button (or hold it 2 s, or run `pair`). The OLED shows `BT PAIRING...`.
 2. **Put the keyboard or mouse in its pairing mode.**
 3. **Passkey:** a keyboard that asks for one shows it on the OLED (and the console); type it on that
    keyboard and press Enter.

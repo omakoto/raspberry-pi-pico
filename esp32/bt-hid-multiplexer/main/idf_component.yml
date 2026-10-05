@@ -1,5 +1,3 @@
 dependencies:
   espressif/esp_tinyusb: "^2.0.0"
-  # WS2812 RGB LED of the DevKitC (the XIAO's LED is a plain GPIO)
-  espressif/led_strip: "^3.0.0"
   idf: ">=5.3"

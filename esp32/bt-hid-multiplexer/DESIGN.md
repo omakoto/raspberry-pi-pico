@@ -9,7 +9,7 @@ CYW43439) to the ESP32-S3. Two boards are supported with one pinout:
 
 The firmware connects up to 8 BLE keyboards, mice and trackpads (HID over GATT) and merges them into one
 composite USB HID device (keyboard + mouse, VIAL raw HID, optional CDC console), with VIAL keymapping
-over 8 layers, per-device layers, an SSD1306 OLED, a pairing button and a pairing LED.
+over 8 layers, per-device layers, an SSD1306 OLED and a pairing button.
 
 Status: all phases (§13.3) implemented and verified on a DevKitC-1 (ESP32-S3 N8R8): USB, VIAL (vial.rocks), NVS, console, watchdog recovery, flashing over both ports, OLED, button, LED, and pairing, reconnecting and input with a Keychron Nape Pro. Not yet verified: several devices at once (R1) and the XIAO itself.
 
@@ -23,10 +23,10 @@ Status: all phases (§13.3) implemented and verified on a DevKitC-1 (ESP32-S3 N8
 | D2 | **BTstack** (same version as the Pico build, v1.6.2) on the ESP-IDF BLE controller through VHCI, using BTstack's `port/esp32` glue. | `ble_hid_host.cpp` (~2000 lines) and its hard-won device workarounds (§10) carry over almost unchanged. NimBLE/Bluedroid would mean a rewrite and rediscovering every workaround. |
 | D3 | **Independent copy** of the Pico sources, adapted in place. No shared code with `pico/bt-hid-multiplexer`. | User decision. Fixes made on the Pico side later have to be ported by hand; §13 lists how to keep the copies easy to diff. |
 | D4 | **NVS + console/VIAL** for settings. No `config.toml`, no FATFS, no USB mass storage. | Same model as the Pico: everything is set at runtime and stored in flash. No extra USB drive appears on the host. |
-| D5 | ESP-IDF **v5.3** (installed at `~/esp-idf`), target `esp32s3`, managed components `espressif/esp_tinyusb ^2` and `espressif/led_strip` (DevKitC LED only). | Matches the other `esp32/` projects. |
+| D5 | ESP-IDF **v5.3** (installed at `~/esp-idf`), target `esp32s3`, managed component `espressif/esp_tinyusb ^2`. | Matches the other `esp32/` projects. |
 | D6 | **One owner task for all application state** (the BTstack task). Other tasks only do I/O and talk to it through messages. | BTstack is not thread-safe, and on the Pico the multiplexer, keymap, bindings and BLE host all assumed a single context. Keeping one owner removes every data race listed in §5.3 without adding locks to the ported logic. |
 | D7 | The OLED is driven from its own low-priority task with **blocking** I2C. | The Pico's ~25 ms blocking `SSD1306::show()` delayed HID reports. On the S3 it runs on another task, so it can no longer delay input. |
-| D8 | **One pinout for both boards.** Every external I/O uses a pin that is on the XIAO header (GPIO1-9, 43, 44). The only per-board difference is the on-board LED, selected at build time (`./00-build.sh -b xiao\|devkitc`). | The XIAO is the final target; the DevKitC is used for development and exposes the same GPIOs. |
+| D8 | **One pinout and one image for both boards.** Every external I/O uses a pin that is on the XIAO header (GPIO1-9, 43, 44), and the boards' own LEDs (which differ: a GPIO LED on the XIAO, a WS2812 on the DevKitC) are not used, so the same firmware runs on both. | The XIAO is the final target; the DevKitC is used for development and exposes the same GPIOs. An earlier version drove each board's LED as a pairing indicator, which needed a per-board build (the DevKitC's LED pins are camera lines on the XIAO Sense); it was dropped to keep a single image. |
 
 ---
 
@@ -38,9 +38,9 @@ Status: all phases (§13.3) implemented and verified on a DevKitC-1 (ESP32-S3 N8
 |---|---|---|
 | Module | ESP32-S3R8, 8 MB flash, 8 MB Octal PSRAM | WROOM-1/2, 4-16 MB flash, optional PSRAM |
 | USB | Native USB-C only | Native `USB` port **and** `UART` port (CP2102N/CH343 bridge on GPIO43/44) |
-| On-board LED | Yellow LED on `GPIO21`, active LOW | WS2812 RGB LED on `GPIO48` (v1.0) or `GPIO38` (v1.1) |
+| On-board LED | Not used | Not used |
 | Buttons | `BOOT` (GPIO0), `RESET` | `BOOT` (GPIO0), `RESET` |
-| Build option | `-b xiao` | `-b devkitc` (default) |
+| Firmware image | the same | the same |
 
 Common to both:
 - **Flash.** Build for 4 MB, the smallest common size. It runs on 8 MB and 16 MB parts too.
@@ -62,18 +62,16 @@ pins (GPIO5/6), which are also the `esp32/README.md` "universal pinout".
 | USB serial enable | `GPIO7` | `D8` (pin 9) | Row B, silk `7` | Connect to GND before power-up to add the CDC port. Internal pull-up, read once at boot. Next to `GND` on the XIAO's right-hand header. |
 | Console UART0 TX / RX | `GPIO43` / `GPIO44` | `D6` (pin 7) / `D7` (pin 8) | wired to the `UART` USB-C bridge | 115200 8N1, always on. On the XIAO it needs an external 3.3 V USB-UART adapter, like the Pico's GP16/GP17. On the DevKitC the on-board bridge provides it. |
 | Host USB | `GPIO19` (D-) / `GPIO20` (D+) | USB-C | `USB` USB-C (native OTG) | Composite HID device. |
-| Pairing LED | `GPIO21` (XIAO) / `GPIO48` + `GPIO38` (DevKitC) | on board | on board | Selected by the board option (§7.4). |
 
 Unused and free for later: `GPIO1`, `GPIO2`, `GPIO8`, `GPIO9` (XIAO `D0`, `D1`, `D9`, `D10`), and
 `GPIO3` (`D2`). GPIO3 is a strapping pin (JTAG source select), so it is the last choice for an input
 with a pull-up.
 
-All pins are `#define`s in `main/config.h`, as on the Pico. The board-specific ones sit in
-`#if BOARD_XIAO` / `#elif BOARD_DEVKITC` blocks.
+All pins are `#define`s in `main/config.h`, as on the Pico.
 
 **Differences from the Pico wiring.**
 - The UART console pins move from GP16/GP17 to `D6`/`D7`. On the DevKitC the on-board bridge is the console, so no adapter is needed.
-- The status LED moves from the CYW43 GPIO to the board's own LED.
+- There is no pairing LED (the Pico blinks the CYW43 LED).
 - I2C moves from GP2/GP3 to `D4`/`D5`, the button from GP6 to `D3`, and the serial jumper from GP10 to `D8`.
 
 ---
@@ -101,7 +99,7 @@ esp32/bt-hid-multiplexer/
 │       └── port/             copy of BTstack port/esp32 glue (btstack_port_esp32.c, btstack_tlv_esp32.c, headers)
 ├── main/
 │   ├── CMakeLists.txt
-│   ├── idf_component.yml     espressif/esp_tinyusb ^2, espressif/led_strip (used only when BOARD=devkitc)
+│   ├── idf_component.yml     espressif/esp_tinyusb ^2
 │   ├── main.cpp              app_main: init, task creation (§5)
 │   ├── platform.cpp, platform/platform.h  now_ms(), critical section, reboot helpers (§5.5); the
 │   │                         header has its own directory so the host tests' stub can replace it
@@ -118,8 +116,7 @@ esp32/bt-hid-multiplexer/
 │   ├── storage.*             rewritten on NVS (§8)
 │   ├── log_ring.*            ported (.noinit RAM, spinlock) (§7.5)
 │   ├── dual_console.*        ported: UART0 + CDC I/O task, command table (§7.1)
-│   ├── ui_task.*             OLED + pairing LED task (§7.3, §7.4)
-│   ├── status_led.*          pairing LED: XIAO GPIO LED or DevKitC WS2812 (§7.4)
+│   ├── ui_task.*             OLED task (§7.3)
 │   ├── ssd1306.*, font_*.h   ported to i2c_master
 │   └── button_handler.*      ported
 └── test/
@@ -223,7 +220,7 @@ Everything in §10 must survive the port unchanged.
 | **`bt_app`** (BTstack run loop) | 0 | 19 | 8 KB | **all application state**: BTstack, `BleHidHost`, `Multiplexer`, `VirtualMatrix`, `DeviceBindings`, `VialServer`, `StorageManager` writes, button logic | Runs `btstack_init(); btstack_main(); btstack_run_loop_execute();` and never returns. It is on the same core as the controller, so VHCI hand-offs stay core-local. |
 | TinyUSB (`esp_tinyusb`) | 1 | 20 | 4 KB | `tud_task()` | Set through `tinyusb_config_t.task`. Its priority is above the UI and console tasks so that endpoint completions are handled at once. |
 | `console` | 1 | 3 | 4 KB | UART0 driver, CDC FIFO, log ring drain, line editing | Wakes every 5 ms or on UART RX. |
-| `ui` | 1 | 2 | 4 KB | I2C bus, SSD1306 frame buffer, pairing LED | Renders from the snapshot. A blocking 1 KB I2C transfer here stalls nothing else. |
+| `ui` | 1 | 2 | 4 KB | I2C bus, SSD1306 frame buffer | Renders from the snapshot. A blocking 1 KB I2C transfer here stalls nothing else. |
 | `app_main` | 0 | 1 | | | Initialises, creates the tasks and returns. |
 
 ### 5.2 The rule
@@ -262,7 +259,6 @@ The message list must also hold periodic work that was previously polled from th
 | `Multiplexer::flush*()` every pass | Event driven: on report arrival (as before), on `on_usb_ready`, and when USB is mounted. Output is only ever left pending after a send attempt found the endpoint busy, and the transfer occupying it always ends with a completion or failure callback (both post `on_usb_ready`), so no polling timer is needed. |
 | `ButtonHandler::update()` | 10 ms timer, reading `GPIO4` with `gpio_get_level`. |
 | Scan check (1 s) | 1 s timer |
-| Pairing LED blink | Done by the `ui` task from `snapshot.pairing` (§7.4). |
 | OLED state-change detection | `bt_app` publishes the snapshot on every change. The `ui` task compares and redraws. |
 | Watchdog feed | 1 s heartbeat timer (§7.5) |
 
@@ -295,7 +291,6 @@ A small header used by the ported sources in place of the Pico SDK.
 - `platform_critical_enter/exit()`: a `portMUX_TYPE` spinlock (`portENTER_CRITICAL`) for the log ring.
 - `platform_reboot()`: `esp_restart()`.
 - `platform_reboot_to_download_mode()`: see §6.5.
-- Board name for the banner and splash: `"XIAO ESP32-S3"` or `"ESP32-S3-DevKitC-1"`, from the board option.
 
 The host-test stubs implement the same header (§13.2).
 
@@ -389,7 +384,7 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 6. `REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT); esp_restart();`
    - This is what IDF itself does in `esp_system/port/usb_console.c`.
    - The ROM then enters **download mode**. It is reachable on UART0 (the DevKitC bridge, or an adapter on the XIAO) and, on the S3, as the ROM USB-Serial-JTAG device `303a:1001` on the native port.
-   - Verified on the DevKitC: `01-install.sh -u` reboots the board this way and flashes it over the native port. It would not work on a chip with the `DIS_USB_SERIAL_JTAG` or `DIS_FORCE_DOWNLOAD` eFuse burned.
+   - Verified on the DevKitC: `01-install.sh` reboots the board this way and flashes it over the native port. It would not work on a chip with the `DIS_USB_SERIAL_JTAG` or `DIS_FORCE_DOWNLOAD` eFuse burned.
 
 ---
 
@@ -428,22 +423,16 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 - **Bus.** The new `driver/i2c_master.h`: `i2c_new_master_bus` on I2C0 (SDA 5, SCL 6, internal pull-ups, glitch filter 7), then `i2c_master_bus_add_device` at 0x3C and 400 kHz. 1 MHz is selectable in `config.h`; most SSD1306 modules handle it.
 - **Transfers.** Blocking `i2c_master_transmit` from the `ui` task. Async I2C is marked experimental in IDF 5.3 and is not needed, because nothing else waits on this task.
 - **Code.** The drawing code, fonts and screen layouts are unchanged: boot splash, status, passkey, pairing, toast.
-  - The splash shows `Board: XIAO ESP32-S3` (or `ESP32-S3-DevKitC-1`) and `Firmware: v1.0.0`.
+  - The splash shows `Firmware: v1.0.0`.
   - The status screen adds a small USB state marker when the device is not mounted. The README already promises "USB connection health".
 - **Redraw policy.** Redraw on snapshot change or every 10 s, as on the Pico. Toast expiry is checked by the `ui` task itself.
 - **Missing display.** If the OLED does not ACK at init, log it once and keep running without a display. This is the same as the Pico, which tolerated a missing display.
 
-### 7.4 Pairing LED
+### 7.4 Pairing LED (dropped)
 
-The board option selects the driver behind a two-function interface (`led_init()`, `led_set(bool on)`):
-
-- **XIAO (`BOARD=xiao`).** The yellow user LED on `GPIO21`, active LOW, as a plain GPIO output. No extra component.
-- **DevKitC (`BOARD=devkitc`).** The WS2812 through `espressif/led_strip` with the RMT backend (one pixel, `LED_MODEL_WS2812`, GRB). "On" is dim blue.
-  - Board v1.0 has the WS2812 on `GPIO48` and v1.1 on `GPIO38`. Two strip objects are created and both are written, so either revision works. The pin without a WS2812 just carries an unused data signal; neither pin is on the XIAO pinout, so nothing else uses them.
-
-- **Behaviour.** Same as the Pico: a 5 Hz blink (100 ms on, 100 ms off) during pairing mode, and off otherwise.
-  - The LED is switched off once when pairing ends and is not refreshed while idle.
-- The `ui` task drives it, so `bt_app` never waits for RMT.
+There is none: the boards' own LEDs differ (a GPIO LED on the XIAO, a WS2812 on GPIO48/GPIO38 on the
+DevKitC, whose pins are camera lines on the XIAO Sense), and driving them would need a per-board build.
+The OLED shows pairing mode instead.
 
 ### 7.5 Log ring, breadcrumbs, watchdog, previous-run log
 
@@ -656,21 +645,24 @@ Exact Kconfig names are checked against `~/esp-idf` (v5.3) when the file is writ
   - Supports `-h`/`--help` (getopt).
   - Checks `BTSTACK_ROOT`, defaulting to `~/pico-sdk/lib/btstack`.
   - `-D NAME=VALUE` passes CMake definitions, e.g. `-D USB_SERIAL_ALWAYS=ON|OFF`.
-  - `-b xiao|devkitc` selects the board (`-DBOARD=...`, which defines `BOARD_XIAO` or `BOARD_DEVKITC`). It works like the Pico's `-b`: the choice is remembered in the CMake cache, and the default on a fresh build is `devkitc`, the development board. It only changes the LED driver and the board name, so one `sdkconfig` serves both.
+
 - **First build only:** runs `idf.py set-target esp32s3` if `sdkconfig` is missing.
 
 ### 12.2 `01-install.sh`
 
-Supports `-h`/`--help`. The port can be given with `-p` or through `ESPPORT`; `-u` skips the DevKitC's UART bridge and flashes over the native USB port, the way a XIAO is always flashed.
+Supports `-h`/`--help`. The port can be given with `-p` or through `ESPPORT`. Otherwise, the same on
+both boards:
 
-1. **UART bridge (DevKitC).** If a CP210x or CH34x port is present (`/dev/serial/by-id/*CP210*|*CH34*|*1a86*`, or `/dev/ttyUSB*`), run `idf.py -p <port> flash`. The esptool DTR/RTS auto-reset does the rest. This is the primary path, and it needs no firmware cooperation.
-2. **Native port only (always the case on the XIAO).** Ask the running firmware to enter download mode, in this order:
+1. **Native USB port.** Use the ROM USB-Serial-JTAG download port (`303a:1001`,
+   `/dev/serial/by-id/*Espressif*USB_JTAG*`) if it is already there; otherwise ask the running firmware
+   to enter download mode, then wait up to 6 s for it:
    1. **VIA `0x0B` over hidraw.** Find the node by `303A:<PID>` plus the `06 60 FF` descriptor prefix. Works without CDC.
-   2. **CDC console.** If the CDC console is present: `bootloader\r\n`, or a 1200-baud touch.
-3. **Wait** up to 6 s for the ROM USB-Serial-JTAG device (`303a:1001`, `/dev/serial/by-id/*Espressif*USB_JTAG*`).
-4. **Flash** with `idf.py -p <that port> flash`. esptool's default `--after hard_reset` restarts into the new firmware.
-5. **Recovery.** If nothing responds, print instructions: hold BOOT, tap RESET, release BOOT, then rerun. This is how the very first flash of a XIAO (or a board running other firmware) is done.
-6. **Board check.** Refuse to flash if the build's board does not match a `-b` given to the install script, so that a DevKitC build is not flashed to the XIAO by accident. Without `-b`, flash whatever was built last and say which board it was.
+   2. **CDC console.** If the CDC console is present: `bootloader\r\n`.
+2. **UART bridge (fallback).** If that does not work and a CP210x or CH34x port is present (the
+   DevKitC's `UART` port), flash through it: the esptool DTR/RTS auto-reset needs no firmware
+   cooperation. A plain adapter on the XIAO's `D6`/`D7` cannot reset the chip.
+3. **Flash** with `idf.py -p <port> flash`. esptool's default `--after hard_reset` restarts into the new firmware.
+4. **Recovery.** If nothing responds, print instructions: hold BOOT, tap RESET, release BOOT, then rerun. This is how the very first flash of a XIAO (or a board running other firmware) is done.
 
 The Pico's UF2 and `picotool` logic is not carried over.
 
@@ -719,7 +711,7 @@ Update `esp32/README.md` §5 (the project list) to add the new project.
 2. **USB and keymap without BT.** USB descriptors, multiplexer, virtual matrix, VIAL, NVS storage, host tests. Goal: vial.rocks connects and edits persist.
 3. **BLE host.** Port `ble_hid_host.cpp` and the `bt_app` messaging. Goal: one keyboard, then 8 devices.
 4. **Console, log ring, watchdog, `lastlog`.**
-5. **OLED, button, LED.**
+5. **OLED, button.**
 6. **Installer, README, udev follow-up, `esp32/README.md`.**
 
 Each phase is built and checked on hardware before the next starts.

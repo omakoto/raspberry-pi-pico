@@ -1,13 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Target board, selected with ./00-build.sh -b <devkitc|xiao>. Only the on-board LED driver and the
-# board name differ; every external I/O uses the same GPIOs on both boards (see DESIGN.md §2).
-set(BOARD "devkitc" CACHE STRING "Target board: devkitc (ESP32-S3-DevKitC-1) or xiao (Seeed Studio XIAO ESP32-S3)")
-set_property(CACHE BOARD PROPERTY STRINGS devkitc xiao)
-if(NOT BOARD STREQUAL "devkitc" AND NOT BOARD STREQUAL "xiao")
-    message(FATAL_ERROR "Unknown BOARD '${BOARD}'; use devkitc or xiao")
-endif()
-
 # For development: -DUSB_SERIAL_ALWAYS=ON always includes the USB serial port, without grounding
 # PIN_USB_SERIAL_ENABLE.
 option(USB_SERIAL_ALWAYS "Always enable the USB serial port" OFF)
@@ -23,11 +15,9 @@ idf_build_set_property(COMPILE_DEFINITIONS "CFG_TUD_HID_EP_BUFSIZE=32" APPEND)
 
 project(bt-hid-multiplexer)
 
-# The board and the USB serial option only matter to this firmware's own code; defining them for
-# main alone keeps a board switch from rebuilding all of ESP-IDF.
+# The USB serial option only matters to this firmware's own code; defining it for main alone keeps
+# switching it from rebuilding all of ESP-IDF.
 idf_component_get_property(main_lib main COMPONENT_LIB)
-string(TOUPPER "${BOARD}" BOARD_UPPER)
-target_compile_definitions(${main_lib} PRIVATE "BOARD_${BOARD_UPPER}=1")
 if(USB_SERIAL_ALWAYS)
     target_compile_definitions(${main_lib} PRIVATE USB_SERIAL_ALWAYS=1)
 endif()

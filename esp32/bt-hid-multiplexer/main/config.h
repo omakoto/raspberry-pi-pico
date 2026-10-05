@@ -3,15 +3,8 @@
 
 #include <stdint.h>
 
-// Board selection (./00-build.sh -b <devkitc|xiao>). Every external I/O uses a GPIO that is on the
-// XIAO ESP32-S3 header, and the DevKitC exposes the same GPIOs, so only the on-board LED differs.
-#if defined(BOARD_XIAO)
-#define BOARD_NAME              "XIAO ESP32-S3"
-#elif defined(BOARD_DEVKITC)
-#define BOARD_NAME              "ESP32-S3-DevKitC-1"
-#else
-#error "Define BOARD_XIAO or BOARD_DEVKITC (see CMakeLists.txt)"
-#endif
+// Every I/O uses a GPIO that is on the XIAO ESP32-S3 header, and the ESP32-S3-DevKitC-1 exposes the
+// same GPIOs, so one firmware image runs on both boards.
 
 #define FIRMWARE_VERSION        "1.0.0"
 
@@ -148,17 +141,7 @@
 
 // UI and Timer Intervals
 #define STATUS_UPDATE_INTERVAL_MS   100
-#define PAIRING_LED_BLINK_INTERVAL_MS 100 // 5 Hz blink rate (100ms on, 100ms off) in pairing mode
 #define PAIRING_SCAN_TIMEOUT_MS     60000
-
-// On-board pairing LED
-#if defined(BOARD_XIAO)
-#define PIN_LED                 21   // yellow user LED, active LOW
-#else
-// WS2812 RGB LED: GPIO48 on DevKitC v1.0, GPIO38 on v1.1. Both are driven so that either works.
-#define PIN_RGB_LED_V1_0        48
-#define PIN_RGB_LED_V1_1        38
-#endif
 
 // FreeRTOS task of the BTstack run loop, which owns all application state (DESIGN.md §5). It runs
 // on the core of the BT controller task, below the controller's (23) and esp_timer's (22) priority.
