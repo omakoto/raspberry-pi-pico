@@ -16,6 +16,8 @@
 #include "classic_hid_host.h"
 #include "usb_descriptors.h"
 #include "dual_console.h"
+#include "log_ring.h"
+#include "hardware/watchdog.h"
 
 // Track pairing indicator LED state
 static bool s_led_state = false;
@@ -95,29 +97,44 @@ int main() {
     // 7. Initialize BLE HID Central Host (powers on radio)
     BleHidHost::init();
     print_welcome_banner();
+    if (LogRing::previousRunValid() && LogRing::previousRunWasWatchdog()) {
+        print_previous_run_report(false);
+    }
 
     // Hold boot splash screen on display for 2.0 seconds from startup
     const uint32_t splash_end_ms = to_ms_since_boot(get_absolute_time()) + 2000;
     s_last_led_toggle_ms = to_ms_since_boot(get_absolute_time());
     s_last_display_update_ms = splash_end_ms;
 
+    // Reboot automatically if the main loop or the Bluetooth stack stops making progress for 5 s.
+    // The loop feeds the watchdog only while the Bluetooth heartbeat is also ticking.
+    watchdog_enable(5000, true);
+
     while (true) {
         uint32_t now = to_ms_since_boot(get_absolute_time());
+        LogRing::heartbeat(now);
+        if (BleHidHost::isAlive(now)) {
+            watchdog_update();
+        }
 
         // Service TinyUSB Device stack and Dual Console (USB CDC + Hardware UART0)
+        LogRing::stage(1);
         tud_task();
         flush_vial_reply();
         VirtualMatrix::flushPendingSave();
         if (VialServer::bootloaderRequested() && !s_vial_reply_pending && tud_hid_n_ready(1)) {
             reboot_to_bootsel();  // after the reply to the jump command has gone out
         }
+        LogRing::stage(2);
         dual_console_update();
 
         // Flush any pending keyboard reports or accumulated mouse/trackpad movement
+        LogRing::stage(3);
         Multiplexer::flushKeyboard();
         Multiplexer::flushMouse();
 
         // Check Push Button Events
+        LogRing::stage(4);
         ButtonEvent btn_ev = ButtonHandler::update();
         if (btn_ev == BUTTON_EVENT_SHORT_PRESS) {
             if (BleHidHost::isPairingMode()) {
@@ -160,6 +177,7 @@ int main() {
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
         }
 
+        LogRing::stage(5);
         // Ensure background scanning is active whenever there are unconnected bonded devices or pairing mode is active
         static uint32_t s_last_scan_check_ms = 0;
         if (now - s_last_scan_check_ms >= 1000) {
@@ -169,6 +187,7 @@ int main() {
             }
         }
 
+        LogRing::stage(6);
         // SSD1306 UI Display Refresh: update on status changes or at 1 Hz periodic interval
         // to avoid blocking I2C bus transfers (which stall USB and BLE polling)
         static uint8_t s_last_ble_count = 0xFF;

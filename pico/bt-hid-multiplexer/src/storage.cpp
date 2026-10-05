@@ -1,4 +1,5 @@
 #include "storage.h"
+#include "log_ring.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include <string.h>
@@ -85,10 +86,12 @@ void StorageManager::saveKeymap(const uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][M
     memcpy(page_buf, &data, sizeof(data));
 
     // Erase the sectors and program flash with interrupts disabled
+    LogRing::breadcrumb(CRUMB_FLASH_KEYMAP_BEGIN);
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(FLASH_KEYMAP_OFFSET, KEYMAP_FLASH_BYTES);
     flash_range_program(FLASH_KEYMAP_OFFSET, page_buf, sizeof(page_buf));
     restore_interrupts(ints);
+    LogRing::breadcrumb(CRUMB_FLASH_KEYMAP_END);
 }
 
 void StorageManager::clearKeymap() {
@@ -127,8 +130,10 @@ void StorageManager::saveBindings(const DeviceBindingEntry entries[MAX_DEVICE_BI
     memset(page_buf, 0xFF, sizeof(page_buf));
     memcpy(page_buf, &data, sizeof(data));
 
+    LogRing::breadcrumb(CRUMB_FLASH_BINDINGS_BEGIN);
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(FLASH_BINDINGS_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_program(FLASH_BINDINGS_OFFSET, page_buf, sizeof(page_buf));
     restore_interrupts(ints);
+    LogRing::breadcrumb(CRUMB_FLASH_BINDINGS_END);
 }

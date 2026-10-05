@@ -1,4 +1,6 @@
 #include "ble_hid_host.h"
+#include "log_ring.h"
+#include "pico/time.h"
 #include "classic_hid_host.h"
 #include "multiplexer.h"
 #include "config.h"
@@ -582,12 +584,80 @@ static void stack_log_packet(uint8_t packet_type, uint8_t in, uint8_t *packet, u
     printf("%s\n", len > 40 ? " ..." : "");
 }
 
+// ---------------------------------------------------------------------------------------------
+// Heartbeat and self-limiting diagnostics
+// ---------------------------------------------------------------------------------------------
+
+// A BTstack timer that ticks once a second proves the Bluetooth run loop is alive; the main loop
+// only feeds the watchdog while it does (see isAlive()).
+static btstack_timer_source_t s_heartbeat_timer;
+static volatile uint32_t s_heartbeat_ms = 0;
+static bool s_heartbeat_started = false;
+
+// The verbose console dumps (reports, hcilog, log) are switched off again after this long, so that
+// a forgotten one cannot flood the console and the log ring.
+static const uint32_t VERBOSE_AUTO_OFF_MS = 15000;
+static uint32_t s_verbose_off_at_ms = 0;
+static bool s_logging_ready = false;  // false while init() applies the defaults
+static bool s_hci_logging = false;
+
+static void arm_verbose_auto_off() {
+    if (!s_logging_ready) return;
+    s_verbose_off_at_ms = to_ms_since_boot(get_absolute_time()) + VERBOSE_AUTO_OFF_MS;
+    if (s_verbose_off_at_ms == 0) s_verbose_off_at_ms = 1;
+}
+
+static void onHeartbeat(btstack_timer_source_t *ts) {
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    s_heartbeat_ms = now;
+    if (s_verbose_off_at_ms != 0 && now >= s_verbose_off_at_ms) {
+        s_verbose_off_at_ms = 0;
+        printf("[BLE Host] Verbose dumps switched off automatically after %lu s.\n",
+               (unsigned long)(VERBOSE_AUTO_OFF_MS / 1000));
+        if (s_log_reports) BleHidHost::setReportLogging(false);
+        if (s_hci_logging) BleHidHost::setHciPacketLogging(false);
+        if (s_stack_logging) BleHidHost::setStackLogging(false);
+    }
+    btstack_run_loop_set_timer(ts, 1000);
+    btstack_run_loop_add_timer(ts);
+}
+
+bool BleHidHost::isAlive(uint32_t now_ms) {
+    return !s_heartbeat_started || (now_ms - s_heartbeat_ms) < 3000;
+}
+
+// Limits the raw report dump to a handful of lines per second. Every line costs time in the
+// Bluetooth context, and a busy mouse sends ~130 reports/s.
+static bool report_log_allowed() {
+    static uint32_t window_start_ms = 0;
+    static uint32_t lines = 0, suppressed = 0;
+    const uint32_t MAX_LINES_PER_SECOND = 40;
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (now - window_start_ms >= 1000) {
+        if (suppressed > 0) {
+            printf("[BLE Host] (%lu report lines suppressed in the last second)\n", (unsigned long)suppressed);
+        }
+        window_start_ms = now;
+        lines = 0;
+        suppressed = 0;
+    }
+    if (lines >= MAX_LINES_PER_SECOND) {
+        suppressed++;
+        return false;
+    }
+    lines++;
+    return true;
+}
+
 void BleHidHost::setReportLogging(bool enable) {
     s_log_reports = enable;
+    if (enable) arm_verbose_auto_off();
     printf("[BLE Host] Raw HID report dump %s.\n", enable ? "enabled" : "disabled");
 }
 
 void BleHidHost::setHciPacketLogging(bool enable) {
+    s_hci_logging = enable;
+    if (enable) arm_verbose_auto_off();
     hci_dump_enable_packet_log(enable);
     printf("[BLE Host] HCI ACL packet dump %s.\n", enable ? "enabled" : "disabled");
 }
@@ -638,6 +708,7 @@ static void print_link_security(hci_con_handle_t h, const char *context) {
 
 void BleHidHost::setStackLogging(bool enable) {
     s_stack_logging = enable;
+    if (enable) arm_verbose_auto_off();
     hci_dump_enable_log_level(HCI_DUMP_LOG_LEVEL_INFO, enable ? 1 : 0);
     hci_dump_enable_log_level(HCI_DUMP_LOG_LEVEL_ERROR, 1);
     printf("[BLE Host] BTstack log_info output %s.\n", enable ? "enabled" : "disabled");
@@ -697,6 +768,14 @@ void BleHidHost::init() {
     // Initial connection parameters: 30ms scan window/interval, 15-30ms conn interval, 4s supervision timeout
     gap_set_connection_parameters(48, 48, 12, 24, 0, 400, 0, 0);
 
+    // Heartbeat for the watchdog, and from here on console-enabled dumps switch themselves off.
+    s_heartbeat_ms = to_ms_since_boot(get_absolute_time());
+    s_heartbeat_started = true;
+    btstack_run_loop_set_timer_handler(&s_heartbeat_timer, &onHeartbeat);
+    btstack_run_loop_set_timer(&s_heartbeat_timer, 1000);
+    btstack_run_loop_add_timer(&s_heartbeat_timer);
+    s_logging_ready = true;
+
     for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
         reset_slot(&s_slots[i]);
     }
@@ -745,6 +824,7 @@ void BleHidHost::startPairingMode(uint32_t timeout_ms) {
     btstack_run_loop_set_timer(&s_pairing_mode_timer, timeout_ms);
     btstack_run_loop_set_timer_handler(&s_pairing_mode_timer, &onPairingModeTimeout);
     btstack_run_loop_add_timer(&s_pairing_mode_timer);
+    LogRing::breadcrumb(CRUMB_PAIRING_START);
     printf("[BLE Host] Pairing mode started (%lu s timeout). Unbonded HID peripherals accepted.\n",
            (unsigned long)(timeout_ms / 1000));
     ClassicHidHost::startPairingMode();
@@ -755,6 +835,7 @@ void BleHidHost::stopPairingMode() {
     if (!s_is_pairing_mode) return;
     s_is_pairing_mode = false;
     btstack_run_loop_remove_timer(&s_pairing_mode_timer);
+    LogRing::breadcrumb(CRUMB_PAIRING_STOP);
     printf("[BLE Host] Pairing mode stopped.\n");
     ClassicHidHost::stopPairingMode();
     if (!BleHidHost::hasUnconnectedBonds()) {
@@ -1341,6 +1422,9 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
     if (hci_event_packet_get_type(packet) != HCI_EVENT_GATTSERVICE_META) return;
 
     uint8_t subevent = hci_event_gattservice_meta_get_subevent_code(packet);
+    if (subevent != GATTSERVICE_SUBEVENT_HID_REPORT) {  // reports are far too frequent to trace
+        LogRing::breadcrumb(CRUMB_GATT(subevent));
+    }
     switch (subevent) {
         case GATTSERVICE_SUBEVENT_HID_SERVICE_CONNECTED: {
             uint16_t cid = gattservice_subevent_hid_service_connected_get_hids_cid(packet);
@@ -1493,7 +1577,8 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
 
             // Raw report dump is opt-in ('reports on'): a trackpad emits ~100 reports/s and each
             // console line blocks the BTstack context for several ms on the UART.
-            if (s_log_reports) {
+            bool log_this_report = s_log_reports && report_log_allowed();
+            if (log_this_report) {
                 printf("[BLE Host] REPORT slot %u ('%s'): id=%u len=%u [", dev_idx, slot->name, report_id, data_len);
                 for (uint16_t i = 0; i < data_len && i < 8; i++) {
                     printf(" %02X", data[i]);
@@ -1518,7 +1603,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 }
                 // Per-keystroke print is diagnostic only ('reports on'): it blocks the BTstack
                 // context on the UART for several ms and adds that directly to key latency.
-                if (s_log_reports && (data[0] != 0 || (data_len >= 3 && data[2] != 0))) {
+                if (log_this_report && (data[0] != 0 || (data_len >= 3 && data[2] != 0))) {
                     printf("[BLE Host] Key press on slot %u ('%s'): mod=0x%02X key=0x%02X\n",
                            dev_idx, slot->name, data[0], (data_len == 8 ? data[2] : data[1]));
                 }
@@ -1609,6 +1694,7 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
     if (packet_type != HCI_EVENT_PACKET) return;
 
     uint8_t sm_event = hci_event_packet_get_type(packet);
+    LogRing::breadcrumb(CRUMB_SM(sm_event));
 
     hci_con_handle_t connect_hids_handle = HCI_CON_HANDLE_INVALID;
 
@@ -1736,6 +1822,16 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
     if (packet_type != HCI_EVENT_PACKET) return;
 
     uint8_t event = hci_event_packet_get_type(packet);
+    if (event == HCI_EVENT_LE_META) {
+        // LE meta events carry the advertising reports of the background scan (several per second);
+        // everything else (connection complete, parameter updates...) is worth a breadcrumb.
+        uint8_t sub = hci_event_le_meta_get_subevent_code(packet);
+        if (sub != HCI_SUBEVENT_LE_ADVERTISING_REPORT && sub != HCI_SUBEVENT_LE_EXTENDED_ADVERTISING_REPORT) {
+            LogRing::breadcrumb(CRUMB_HCI(0x100 | sub));
+        }
+    } else if (event != GAP_EVENT_ADVERTISING_REPORT && event != HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS) {
+        LogRing::breadcrumb(CRUMB_HCI(event));  // advertising reports and ACL credits are too frequent
+    }
     switch (event) {
         case BTSTACK_EVENT_STATE:
             if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING) {

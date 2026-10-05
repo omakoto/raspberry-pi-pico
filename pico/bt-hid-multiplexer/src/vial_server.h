@@ -19,6 +19,7 @@ public:
 private:
     static bool bootloader_requested_;
     static void handleViaCommand(const uint8_t *in_buf, uint8_t *out_buf);
+    static void handleDebugCommand(const uint8_t *in_buf, uint8_t *out_buf);
     static void handleVialCommand(const uint8_t *in_buf, uint8_t *out_buf);
 };
 

@@ -5,6 +5,7 @@
 #include "pico/time.h"
 #include <stdio.h>
 #include <string.h>
+#include "log_ring.h"
 
 // VIA Commands
 #define VIA_CMD_GET_PROTOCOL_VERSION        0x01
@@ -22,6 +23,12 @@
 
 // VIAL Sub-commands (Prefix 0xFE)
 #define VIAL_PREFIX                         0xFE
+
+// Own commands to read the previous run's log without a serial port (see lastlog.py).
+//   0xFD 0x00:                 info reply: [0xFD, 0x00, valid, watchdog, len(4, LE), uptime_ms(4, LE),
+//                              stage(2, LE), crumb count, crumbs(2 each, LE, oldest first)]
+//   0xFD 0x01 <offset(2, LE)>: log chunk reply: [0xFD, 0x01, count, 0, offset(2, LE), data...]
+#define DEBUG_PREFIX                        0xFD
 #define VIAL_CMD_GET_KEYBOARD_ID            0x00
 #define VIAL_CMD_GET_SIZE                   0x01
 #define VIAL_CMD_GET_DEF_CHUNK              0x02
@@ -49,7 +56,9 @@ void VialServer::init() {
 void VialServer::handleRawReport(const uint8_t *in_buf, uint8_t *out_buf) {
     if (!in_buf || !out_buf) return;
 
-    if (in_buf[0] == VIAL_PREFIX) {
+    if (in_buf[0] == DEBUG_PREFIX) {
+        handleDebugCommand(in_buf, out_buf);
+    } else if (in_buf[0] == VIAL_PREFIX) {
         handleVialCommand(in_buf, out_buf);
     } else {
         handleViaCommand(in_buf, out_buf);
@@ -178,6 +187,44 @@ void VialServer::handleViaCommand(const uint8_t *in_buf, uint8_t *out_buf) {
             printf("[Vial] Unhandled VIA command 0x%02X\n", cmd);
             out_buf[0] = 0xFF; // Unhandled
             break;
+    }
+}
+
+void VialServer::handleDebugCommand(const uint8_t *in_buf, uint8_t *out_buf) {
+    memset(out_buf, 0, 32);
+    out_buf[0] = DEBUG_PREFIX;
+    out_buf[1] = in_buf[1];
+    uint32_t len = 0;
+    const uint8_t *log = LogRing::previousLog(&len);
+
+    if (in_buf[1] == 0x00) {
+        out_buf[2] = LogRing::previousRunValid();
+        out_buf[3] = LogRing::previousRunWasWatchdog();
+        for (int i = 0; i < 4; i++) out_buf[4 + i] = (uint8_t)(len >> (8 * i));
+        uint32_t up = LogRing::previousUptimeMs();
+        for (int i = 0; i < 4; i++) out_buf[8 + i] = (uint8_t)(up >> (8 * i));
+        uint16_t stage = LogRing::previousStage();
+        out_buf[12] = (uint8_t)stage;
+        out_buf[13] = (uint8_t)(stage >> 8);
+        uint16_t crumbs[LOG_CRUMB_COUNT];
+        uint8_t n = LogRing::previousBreadcrumbs(crumbs);
+        if (n > 8) n = 8;  // only the last 8 fit in one packet
+        uint16_t all[LOG_CRUMB_COUNT];
+        uint8_t total = LogRing::previousBreadcrumbs(all);
+        out_buf[14] = n;
+        for (uint8_t i = 0; i < n; i++) {
+            uint16_t c = all[total - n + i];
+            out_buf[15 + 2 * i] = (uint8_t)c;
+            out_buf[16 + 2 * i] = (uint8_t)(c >> 8);
+        }
+    } else if (in_buf[1] == 0x01) {
+        uint32_t offset = in_buf[2] | ((uint32_t)in_buf[3] << 8);
+        uint32_t count = (offset < len) ? len - offset : 0;
+        if (count > 24) count = 24;
+        out_buf[2] = (uint8_t)count;
+        out_buf[4] = in_buf[2];
+        out_buf[5] = in_buf[3];
+        if (count > 0) memcpy(&out_buf[8], log + offset, count);
     }
 }
 

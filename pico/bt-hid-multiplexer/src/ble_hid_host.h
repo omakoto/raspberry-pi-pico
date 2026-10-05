@@ -15,6 +15,8 @@ public:
     static bool isPairingMode();
     static uint32_t getPairingModeRemainingSec();
     static bool isConnected();
+    // True while the Bluetooth stack's run loop is still ticking; the watchdog is only fed then.
+    static bool isAlive(uint32_t now_ms);
     static uint8_t getConnectedCount();
     static uint8_t getBondedCount();
     static bool hasUnconnectedBonds();

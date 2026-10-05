@@ -1,5 +1,8 @@
 #include "dual_console.h"
 #include "usb_descriptors.h"
+#include "log_ring.h"
+#include "hardware/watchdog.h"
+#include "hardware/uart.h"
 #include "config.h"
 #include "ble_hid_host.h"
 #include "classic_hid_host.h"
@@ -24,9 +27,11 @@ static size_t s_uart_idx = 0;
 
 void reboot_to_bootsel() {
     dual_println("\r\n[System] Rebooting into USB BOOTSEL mode...");
+    LogRing::flush(300);
     sleep_ms(50);
     tud_disconnect();
     sleep_ms(150);
+    watchdog_disable();  // the watchdog must not fire while the board sits in the bootloader
     reset_usb_boot(0, 0);
 }
 
@@ -53,57 +58,52 @@ extern "C" void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
     }
 }
 
-// Writes text with CRLF line ending conversion to hardware UART0
-static void uart_write_crlf(const char *buf, size_t len) {
-    if (len == 0 || !buf) return;
-    size_t last = 0;
-    for (size_t i = 0; i < len; ++i) {
-        if (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r')) {
-            if (i > last) {
-                uart_write_blocking(UART_PORT, (const uint8_t *)(buf + last), i - last);
-            }
-            uart_write_blocking(UART_PORT, (const uint8_t *)"\r\n", 2);
-            last = i + 1;
-        }
-    }
-    if (last < len) {
-        uart_write_blocking(UART_PORT, (const uint8_t *)(buf + last), len - last);
+// Output sinks for LogRing. They never block: the ring is drained from the main loop and only
+// as much as the UART FIFO or the USB serial FIFO can take right now.
+static uint32_t sink_uart_space() {
+    // The TX FIFO is 32 bytes deep and only reports "empty" or "full", so write when it is empty.
+    return (uart_get_hw(UART_PORT)->fr & UART_UARTFR_TXFE_BITS) ? 32 : 0;
+}
+
+static void sink_uart_write(const uint8_t *data, uint32_t len) {
+    for (uint32_t i = 0; i < len; i++) {
+        uart_putc_raw(UART_PORT, (char)data[i]);
     }
 }
 
-// Writes text with CRLF line ending conversion to USB CDC ACM serial console
-static void cdc_write_crlf(const char *buf, size_t len) {
-    if (!tud_mounted() || !tud_cdc_n_connected(0) || len == 0 || !buf) {
-        return;
-    }
-    size_t last = 0;
-    for (size_t i = 0; i < len; ++i) {
-        if (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r')) {
-            if (i > last) {
-                tud_cdc_n_write(0, buf + last, (uint32_t)(i - last));
-            }
-            tud_cdc_n_write(0, "\r\n", 2);
-            last = i + 1;
-        }
-    }
-    if (last < len) {
-        tud_cdc_n_write(0, buf + last, (uint32_t)(len - last));
-    }
+static bool sink_cdc_ready() {
+    return g_usb_serial_enabled && tud_mounted() && tud_cdc_n_connected(0);
+}
+
+static uint32_t sink_cdc_space() {
+    return tud_cdc_n_write_available(0);
+}
+
+static void sink_cdc_write(const uint8_t *data, uint32_t len) {
+    tud_cdc_n_write(0, data, len);
     tud_cdc_n_write_flush(0);
 }
+
+static void sink_pump() {
+    tud_task();
+}
+
+static uint32_t sink_now_ms() {
+    return to_ms_since_boot(get_absolute_time());
+}
+
+static const LogRing::Sinks s_log_sinks = {
+    sink_uart_space, sink_uart_write, sink_cdc_ready, sink_cdc_space, sink_cdc_write, sink_pump, sink_now_ms,
+};
 
 // Pico SDK stdio driver callbacks to route standard printf/puts to both consoles
 static void stdio_dual_out_chars(const char *buf, int len) {
     if (len > 0 && buf) {
-        uart_write_crlf(buf, (size_t)len);
-        cdc_write_crlf(buf, (size_t)len);
+        LogRing::write(buf, (size_t)len);
     }
 }
 
 static void stdio_dual_out_flush(void) {
-    if (tud_mounted() && tud_cdc_n_connected(0)) {
-        tud_cdc_n_write_flush(0);
-    }
 }
 
 static stdio_driver_t s_dual_stdio_driver = {
@@ -119,6 +119,7 @@ static stdio_driver_t s_dual_stdio_driver = {
 };
 
 void dual_console_init() {
+    LogRing::init(&s_log_sinks, watchdog_caused_reboot());
     uart_init(UART_PORT, UART_BAUDRATE);
     gpio_set_function(PIN_UART_TX, GPIO_FUNC_UART);
     gpio_set_function(PIN_UART_RX, GPIO_FUNC_UART);
@@ -140,8 +141,7 @@ void dual_printf(const char *fmt, ...) {
     va_end(args);
 
     if (len > 0) {
-        uart_write_crlf(buf, len);
-        cdc_write_crlf(buf, len);
+        LogRing::write(buf, (size_t)((size_t)len < sizeof(buf) ? len : sizeof(buf) - 1));
     }
 }
 
@@ -464,6 +464,17 @@ static void handle_command(const char *cmd) {
         dual_println("Clearing BLE bonds...");
         BleHidHost::clearBonds();
         dual_println("Bonds cleared.");
+    } else if (strcmp(cmd, "hangtest") == 0) {
+        // Development aid: stops the main loop on purpose to see the watchdog reboot the board and
+        // 'lastlog' report it.
+        dual_println("Hanging the main loop on purpose; the watchdog should reboot the board in ~5 s...");
+        LogRing::flush(500);
+        LogRing::stage(99);
+        while (true) {
+            tight_loop_contents();
+        }
+    } else if (strcmp(cmd, "lastlog") == 0) {
+        print_previous_run_report(true);
     } else if (strncmp(cmd, "devlayer", 8) == 0) {
         handle_devlayer(cmd + 8);
     } else if (strncmp(cmd, "dl", 2) == 0 && (cmd[2] == '\0' || cmd[2] == ' ')) {
@@ -506,11 +517,39 @@ static void handle_command(const char *cmd) {
         dual_println("  clearbonds     - Clear all BLE bonds without resetting keymap");
         dual_println("  devlayer [..]  - (alias: dl) Bind a device to a keymap layer: 'devlayer <layer>' (device used last),");
         dual_println("                   'devlayer <dev> <layer>', 'devlayer clear [<dev>]', 'devlayer list'");
+        dual_println("  hangtest       - Hang the main loop on purpose to test the watchdog recovery");
+        dual_println("  lastlog        - Show the log and last events of the previous run (kept across a watchdog reset)");
         dual_println("  resetkeymap    - Reset the VIAL keymap to defaults, keeping bonds");
         dual_println("  reset          - Factory reset (clear bonds and reset keymap)");
         dual_println("  help           - Show this help summary");
     } else {
         dual_printf("Unknown command: '%s'. Type 'help' for command list.\r\n", cmd);
+    }
+}
+
+void print_previous_run_report(bool full) {
+    if (!LogRing::previousRunValid()) {
+        dual_println("No previous log: the board was powered on, not reset, so nothing survived.");
+        return;
+    }
+    dual_printf("\r\n[System] *** Previous run%s after %lu ms; main loop was at stage %u. ***\r\n",
+                LogRing::previousRunWasWatchdog() ? " ended in a WATCHDOG RESET" : " ended",
+                (unsigned long)LogRing::previousUptimeMs(), LogRing::previousStage());
+    uint16_t crumbs[LOG_CRUMB_COUNT];
+    uint8_t n = LogRing::previousBreadcrumbs(crumbs);
+    dual_printf("[System] Last events, oldest first (0x1xxx HCI [0x11xx LE meta], 0x2xxx SM, 0x3xxx GATT, 0x4xxx classic, 0x5xxx flash, 0x6xxx pairing):\r\n   ");
+    for (uint8_t i = 0; i < n; i++) {
+        dual_printf(" %04X", crumbs[i]);
+    }
+    dual_println("");
+    if (full) {
+        uint32_t len = 0;
+        const uint8_t *log = LogRing::previousLog(&len);
+        dual_printf("[System] ---- previous run's log (last %lu bytes) ----\r\n", (unsigned long)len);
+        LogRing::writeLong((const char *)log, len);
+        dual_println("\r\n[System] ---- end of previous log ----");
+    } else {
+        dual_println("[System] Type 'lastlog' to see the previous run's log, or run lastlog.py.");
     }
 }
 
@@ -532,6 +571,8 @@ void print_welcome_banner() {
 }
 
 void dual_console_update() {
+    LogRing::drain();
+
     // Deliver welcome banner when a terminal opens the USB serial connection
     if (s_pending_welcome) {
         s_pending_welcome = false;

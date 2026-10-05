@@ -9,6 +9,7 @@
 
 #include "classic_hid_host.h"
 #include "ble_hid_host.h"
+#include "log_ring.h"
 #include "multiplexer.h"
 #include "config.h"
 #include "btstack.h"
@@ -555,6 +556,9 @@ static void handle_hci_event(uint8_t packet_type, uint16_t channel, uint8_t *pac
 static void handle_hid_event(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     if (packet_type != HCI_EVENT_PACKET || hci_event_packet_get_type(packet) != HCI_EVENT_HID_META) return;
     bd_addr_t addr;
+    if (hci_event_hid_meta_get_subevent_code(packet) != HID_SUBEVENT_REPORT) {  // too frequent to trace
+        LogRing::breadcrumb(CRUMB_CLASSIC(hci_event_hid_meta_get_subevent_code(packet)));
+    }
 
     switch (hci_event_hid_meta_get_subevent_code(packet)) {
         case HID_SUBEVENT_INCOMING_CONNECTION: {

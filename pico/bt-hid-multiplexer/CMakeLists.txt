@@ -29,6 +29,7 @@ set(APP_SOURCES
     src/vial_server.cpp
     src/storage.cpp
     src/device_bindings.cpp
+    src/log_ring.cpp
     src/multiplexer.cpp
     src/ble_hid_host.cpp
     src/classic_hid_host.cpp
