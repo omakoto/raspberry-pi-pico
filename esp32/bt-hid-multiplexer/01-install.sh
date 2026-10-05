@@ -4,7 +4,7 @@
 #
 # Port selection, in this order:
 #   1. A port given with -p (or $ESPPORT).
-#   2. DevKitC builds only: the on-board USB-UART bridge (CP210x / CH34x), which esptool resets into
+#   2. DevKitC builds only, unless -u is given: the on-board USB-UART bridge (CP210x / CH34x), which esptool resets into
 #      download mode by itself through DTR/RTS.
 #   3. A ROM (or USB-Serial-JTAG console) download port on the native USB port (303a:1001).
 #   4. Otherwise the running firmware is asked to reboot into ROM download mode, through the VIA
@@ -26,6 +26,8 @@ Options:
   -b, --board BOARD   Refuse to flash unless the build is for this board (devkitc or xiao).
                       Without it, the build is flashed whatever board it is for.
   -p, --port PORT     Serial port to flash through (default: auto-detected, see below).
+  -u, --usb           Flash through the native USB port even when the DevKitC's UART bridge
+                      is connected (the way a XIAO is always flashed).
   -h, --help          Shows this help.
 
 Port auto-detection:
@@ -38,18 +40,21 @@ Examples:
   ./01-install.sh
   ./01-install.sh -b xiao
   ./01-install.sh -p /dev/ttyUSB0
+  ./01-install.sh -u
 EOF
 }
 
-OPTS=$(getopt -o b:p:h --long board:,port:,help -n "$(basename "$0")" -- "$@") || { usage >&2; exit 1; }
+OPTS=$(getopt -o b:p:uh --long board:,port:,usb,help -n "$(basename "$0")" -- "$@") || { usage >&2; exit 1; }
 eval set -- "$OPTS"
 
 WANT_BOARD=""
 PORT="${ESPPORT:-}"
+USB_ONLY=0
 while true; do
     case "$1" in
         -b|--board) WANT_BOARD="$2"; shift 2 ;;
         -p|--port) PORT="$2"; shift 2 ;;
+        -u|--usb) USB_ONLY=1; shift ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         *) echo "Internal error parsing options" >&2; exit 1 ;;
@@ -136,7 +141,7 @@ except Exception:
     done
 }
 
-if [[ -z "$PORT" && "$BUILT_BOARD" == "devkitc" ]]; then
+if [[ -z "$PORT" && "$BUILT_BOARD" == "devkitc" && $USB_ONLY -eq 0 ]]; then
     PORT="$(find_uart_bridge || true)"
 fi
 if [[ -z "$PORT" ]]; then

@@ -11,7 +11,7 @@ The firmware connects up to 8 BLE keyboards, mice and trackpads (HID over GATT) 
 composite USB HID device (keyboard + mouse, VIAL raw HID, optional CDC console), with VIAL keymapping
 over 8 layers, per-device layers, an SSD1306 OLED, a pairing button and a pairing LED.
 
-Status: phase 1 (skeleton) implemented and verified on a DevKitC-1 (ESP32-S3 N8R8): BTstack reaches `HCI_STATE_WORKING` and the console prints over UART0. Phases 2-6 (§13.3) are not implemented yet.
+Status: phases 1 (skeleton) and 2 (USB, keymap, VIAL, NVS) implemented and verified on a DevKitC-1 (ESP32-S3 N8R8). Phases 3-6 (§13.3) are not implemented yet.
 
 ---
 
@@ -103,7 +103,8 @@ esp32/bt-hid-multiplexer/
 │   ├── CMakeLists.txt
 │   ├── idf_component.yml     espressif/esp_tinyusb ^2, espressif/led_strip (used only when BOARD=devkitc)
 │   ├── main.cpp              app_main: init, task creation (§5)
-│   ├── platform.h/.cpp       now_ms(), critical section, reboot helpers (§5.5)
+│   ├── platform.cpp, platform/platform.h  now_ms(), critical section, reboot helpers (§5.5); the
+│   │                         header has its own directory so the host tests' stub can replace it
 │   ├── app_task.h/.cpp       BTstack task body, event mailbox, periodic timers (ex main loop)
 │   ├── config.h              ported (classic removed, pins changed, flash constants replaced)
 │   ├── ble_hid_host.*        ported (§4)
@@ -112,7 +113,8 @@ esp32/bt-hid-multiplexer/
 │   ├── device_bindings.*     ported, unchanged
 │   ├── vial_server.*         ported (UID, bootloader jump)
 │   ├── vial_layout.h         regenerated
-│   ├── usb_hid.*             TinyUSB glue: descriptors, callbacks, report send (ex usb_descriptors.c + main.cpp callbacks)
+│   ├── usb_descriptors.*     ported: descriptors handed to esp_tinyusb, HID report descriptors
+│   ├── usb_hid.*             TinyUSB glue: install, callbacks, VIAL reply (ex main.cpp callbacks)
 │   ├── storage.*             rewritten on NVS (§8)
 │   ├── log_ring.*            ported (.noinit RAM, spinlock) (§7.5)
 │   ├── console.*             ex dual_console.cpp: UART0 + CDC I/O task, command table (§7.1)
@@ -256,7 +258,7 @@ The message list must also hold periodic work that was previously polled from th
 | Pico main loop stage | ESP32 timer on `bt_app` |
 |---|---|
 | `VirtualMatrix::flushPendingSave()` every pass | 100 ms timer (the 500 ms debounce is unchanged) |
-| `Multiplexer::flush*()` every pass | Event driven: on report arrival (as before), on `on_usb_ready`, plus a 1 ms "pending data" timer that runs only while `kbd_dirty_` or accumulated motion is waiting for the endpoint. It is a safety net in case a completion is missed. |
+| `Multiplexer::flush*()` every pass | Event driven: on report arrival (as before), on `on_usb_ready`, and when USB is mounted. Output is only ever left pending after a send attempt found the endpoint busy, and the transfer occupying it always ends with a completion or failure callback (both post `on_usb_ready`), so no polling timer is needed. |
 | `ButtonHandler::update()` | 10 ms timer, reading `GPIO4` with `gpio_get_level`. |
 | Scan check (1 s) | 1 s timer |
 | Pairing LED blink | Done by the `ui` task from `snapshot.pairing` (§7.4). |
@@ -382,10 +384,11 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 2. Wait until the VIAL reply has gone out. This keeps the Pico ordering: reply first, then reboot.
 3. `tud_disconnect()`, then wait 150 ms.
 4. Take `bt_app` off the task watchdog with `esp_task_wdt_delete`, so the watchdog cannot fire during the reset sequence.
-5. `REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT); esp_restart();`
+5. Hand the internal USB PHY back to the USB-Serial-JTAG controller (clear `RTC_CNTL_SW_HW_USB_PHY_SEL` and `RTC_CNTL_SW_USB_PHY_SEL` in `RTC_CNTL_USB_CONF_REG`). TinyUSB routed it to the OTG controller, and that routing is in the RTC domain, which survives the restart. Without this step the ROM's download port never appears on the native USB port (verified).
+6. `REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT); esp_restart();`
    - This is what IDF itself does in `esp_system/port/usb_console.c`.
    - The ROM then enters **download mode**. It is reachable on UART0 (the DevKitC bridge, or an adapter on the XIAO) and, on the S3, as the ROM USB-Serial-JTAG device `303a:1001` on the native port.
-   - The USB-Serial-JTAG enumeration must be verified on the real board. It is not available if the `DIS_USB_SERIAL_JTAG` or `DIS_FORCE_DOWNLOAD` eFuses are burned.
+   - Verified on the DevKitC: `01-install.sh -u` reboots the board this way and flashes it over the native port. It would not work on a chip with the `DIS_USB_SERIAL_JTAG` or `DIS_FORCE_DOWNLOAD` eFuse burned.
 
 ---
 
@@ -657,7 +660,7 @@ Exact Kconfig names are checked against `~/esp-idf` (v5.3) when the file is writ
 
 ### 12.2 `01-install.sh`
 
-Supports `-h`/`--help`. The port can be given as an argument or through `ESPPORT`.
+Supports `-h`/`--help`. The port can be given with `-p` or through `ESPPORT`; `-u` skips the DevKitC's UART bridge and flashes over the native USB port, the way a XIAO is always flashed.
 
 1. **UART bridge (DevKitC).** If a CP210x or CH34x port is present (`/dev/serial/by-id/*CP210*|*CH34*|*1a86*`, or `/dev/ttyUSB*`), run `idf.py -p <port> flash`. The esptool DTR/RTS auto-reset does the rest. This is the primary path, and it needs no firmware cooperation.
 2. **Native port only (always the case on the XIAO).** Ask the running firmware to enter download mode, in this order:
@@ -733,8 +736,8 @@ Each phase is built and checked on hardware before the next starts.
 | R1 | **8 central links plus scanning** on the S3 controller is within spec (9 connections, 10 activities) but untested here. Peripherals asking for 7.5 ms intervals on 8 links may strain scheduling. | Bring-up phase 3 tests 1→8 devices. Without zero latency, if needed. |
 | R2 | **`tud_hid_n_report` from `bt_app`** (another task than `tud_task`) on the DWC2 port. | Fallback `usbd_defer_func` (§6.4). |
 | R3 | **`.noinit` survival** across panic and watchdog resets on the S3. | Fallback `RTC_NOINIT_ATTR`, 4 KB (§7.5). |
-| R4 | **ROM USB-Serial-JTAG after the forced download boot** (§6.5). It depends on the board's eFuses. On the XIAO it is the only firmware-driven flashing path, because there is no UART bridge. | Verify early on the DevKitC's native port. Fallback: BOOT+RESET by hand, or a USB-UART adapter on XIAO `D6`/`D7`. |
+| R4 | **ROM USB-Serial-JTAG after the forced download boot** (§6.5). | **Resolved** in phase 2: works once the USB PHY is handed back before the restart. Fallback stays BOOT+RESET by hand. |
 | R5 | **NVS writes stall the USB interrupt** (not IRAM-safe) for a few ms. | Debounced and per-layer writes. Measure in bring-up. |
 | R6 | **HCI receive ring overflow** in the port (drops packets) during scan bursts with 8 links. | Ring sized by `HCI_HOST_ACL_PACKET_NUM`. Drops logged as breadcrumbs. Tune scan duplicate filter. |
 | F1 | **udev.** VID `303a` added to `~/cbin/setup/config-hidraw-permission` and its test. | Done. Run the script again to install the rule. |
-| F2 | **Pico fixes.** Pico inconsistencies found during analysis, reported only (no change without approval): `STATUS_UPDATE_INTERVAL_MS` and `PAIRING_SCAN_TIMEOUT_MS` are unused; the `Pico_2_W` by-id glob in `01-install.sh` can never match; the `00-build.sh` header says the default is pico2_w but it falls back to pico_w; the `crumb_index` sanity check expires after 65520 crumbs. | Report only. |
+| F2 | **Pico fixes.** Pico inconsistencies found during analysis, reported only (no change without approval): keyboard LED reports that arrive on the interrupt OUT endpoint (what Linux uses) still carry the report ID in `buffer[0]`, which the Pico's `tud_hid_set_report_cb` takes as the LED byte; `STATUS_UPDATE_INTERVAL_MS` and `PAIRING_SCAN_TIMEOUT_MS` are unused; the `Pico_2_W` by-id glob in `01-install.sh` can never match; the `00-build.sh` header says the default is pico2_w but it falls back to pico_w; the `crumb_index` sanity check expires after 65520 crumbs. | Report only. |

@@ -22,12 +22,19 @@ CONFIG_BT_CTRL_PINNED_TO_CORE_0=y
 CONFIG_BT_CTRL_MODEM_SLEEP=n
 CONFIG_PM_ENABLE=n
 
+# TinyUSB (esp_tinyusb): keyboard/mouse HID + VIAL raw HID, plus a CDC serial port that is only part
+# of the USB device when enabled at boot (PIN_USB_SERIAL_ENABLE).
+CONFIG_TINYUSB_HID_COUNT=2
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+CONFIG_TINYUSB_MSC_ENABLED=n
+
 # Console on UART0 (GPIO43/44: the DevKitC's USB-UART bridge, or an adapter on the XIAO's D6/D7).
-# Boot and panic messages always go there. Until TinyUSB takes over the native USB port, the console
-# is mirrored to the USB-Serial-JTAG device there as well.
+# Boot and panic messages always go there. The native USB port belongs to TinyUSB, so there is no
+# USB-Serial-JTAG console.
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
-CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # Reboot when a watched task (the BTstack task and its run loop) makes no progress for 5 s.
 CONFIG_ESP_TASK_WDT_EN=y

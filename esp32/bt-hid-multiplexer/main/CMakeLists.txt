@@ -3,13 +3,24 @@ idf_component_register(
         "main.cpp"
         "app_task.cpp"
         "platform.cpp"
+        "usb_hid.cpp"
+        "usb_descriptors.c"
+        "storage.cpp"
+        "log_ring.cpp"
+        "multiplexer.cpp"
+        "virtual_matrix.cpp"
+        "device_bindings.cpp"
+        "vial_server.cpp"
     INCLUDE_DIRS
         "."
+        "platform"
     REQUIRES
         btstack
         bt
         nvs_flash
         esp_timer
+        esp_driver_gpio
+        esp_hw_support
         esp_system
         freertos
         log
