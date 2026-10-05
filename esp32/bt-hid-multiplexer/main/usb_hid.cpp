@@ -58,7 +58,7 @@ static void usb_event_cb(tinyusb_event_t *event, void *arg) {
     }
 }
 
-void usb_hid_init() {
+void usb_hid_read_serial_enable() {
     // The USB serial port is only part of the device when PIN_USB_SERIAL_ENABLE is grounded at boot
     // (or when forced at build time).
     gpio_config_t io = {};
@@ -72,7 +72,9 @@ void usb_hid_init() {
 #else
     g_usb_serial_enabled = gpio_get_level((gpio_num_t) PIN_USB_SERIAL_ENABLE) == 0;
 #endif
+}
 
+void usb_hid_init() {
     tinyusb_config_t cfg = TINYUSB_DEFAULT_CONFIG(usb_event_cb);
     cfg.task.size = USB_TASK_STACK;
     cfg.task.priority = USB_TASK_PRIORITY;

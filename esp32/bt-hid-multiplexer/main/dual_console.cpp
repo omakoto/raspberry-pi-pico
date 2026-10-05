@@ -378,7 +378,7 @@ void dual_console_handle_command(const char *cmd) {
         } else if (strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0) {
             BleHidHost::setHciPacketLogging(false);
         } else {
-            dual_println("Usage: hcilog on|off  (raw ACL/ATT packet dump; run 'stop' first)");
+            dual_println("Usage: hcilog on|off  (raw HCI command/event/ACL dump, without advertising reports)");
         }
     } else if (strncmp(cmd, "log", 3) == 0 && (cmd[3] == '\0' || cmd[3] == ' ')) {
         const char *arg = cmd + 3;
@@ -513,7 +513,7 @@ void dual_console_handle_command(const char *cmd) {
         dual_println("  suspend <s>    - Send HID Exit Suspend command to slot <s>");
         dual_println("  authreq [..]   - Show/set pairing policy: [legacy|sc] [mitm|nomitm]");
         dual_println("  log on|off     - Toggle BTstack internal log_info output");
-        dual_println("  hcilog on|off  - Toggle raw HCI ACL/ATT packet dump (stop scan first)");
+        dual_println("  hcilog on|off  - Toggle raw HCI command/event/ACL dump");
         dual_println("  reports on|off - Toggle dump of every incoming HID report");
         dual_println("  disconnect <s> - Disconnect link on slot <s>");
         dual_println("  unbond <idx>   - Remove bonded device index from table");

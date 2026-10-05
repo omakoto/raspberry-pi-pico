@@ -9,8 +9,12 @@
 // includes btstack.h cannot include tusb.h (both define hid_report_type_t), so the bt_app side
 // reaches TinyUSB through these functions.
 
-// Samples PIN_USB_SERIAL_ENABLE and starts the USB device. Call once, from the bt_app task after
-// the BTstack run loop has been initialized (the callbacks post to it).
+// Samples PIN_USB_SERIAL_ENABLE into g_usb_serial_enabled. Call once at startup, before
+// usb_hid_init() and before anything reports whether the serial port is on.
+void usb_hid_read_serial_enable();
+
+// Starts the USB device. Call once, from the bt_app task after the BTstack run loop has been
+// initialized (the callbacks post to it).
 void usb_hid_init();
 
 bool usb_hid_mounted();
