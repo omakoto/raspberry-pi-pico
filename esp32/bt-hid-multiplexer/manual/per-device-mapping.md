@@ -17,7 +17,7 @@ Example used throughout this manual: a Logitech device with a vertical wheel, a 
 - The multiplexer flashed and running (see the main [README](../README.md)).
 - The device paired with the multiplexer (see [How to Pair a Device](../README.md#how-to-pair-a-device)) and working.
 - VIAL access from Chrome (on Linux, run `~/cbin/setup/config-hidraw-permission` once, see [Keymapping with VIAL](../README.md#keymapping-with-vial)).
-- The serial console, which is where the binding is made. The USB serial port is only present when pin `GP10` (pin 14) is connected to GND before the board is plugged in (see the README); alternatively use the hardware UART. Run `./02-monitor.sh` from the project directory. Anything you type there is a *console command*.
+- The serial console, which is where the binding is made. On the DevKitC it is the `UART` USB-C port; on the XIAO it needs a USB-UART adapter on `D6`/`D7`. The board's own USB serial port is only present when `GPIO7` (XIAO `D8`) is connected to GND before the board is plugged in (see the README). Run `./02-monitor.sh` from the project directory. Anything you type there is a *console command*.
 
 ---
 
@@ -104,7 +104,7 @@ Scroll the bound device's vertical wheel: each notch taps Volume Up or Down. Scr
 ## What can go on a key
 
 - **Another mouse action**, for example wheel → cursor movement, or swapping axes.
-- **A keyboard key**, a modifier or a modified key such as `LSFT(KC_A)`. A key on a *wheel or movement* position is **tapped once per wheel notch** (for movement, once per 24 counts of motion, see `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `src/config.h`).
+- **A keyboard key**, a modifier or a modified key such as `LSFT(KC_A)`. A key on a *wheel or movement* position is **tapped once per wheel notch** (for movement, once per 24 counts of motion, see `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `main/config.h`).
 - **Volume keys:** `KC_MUTE`, `KC_VOLU`, `KC_VOLD`.
 - **A layer key** (`MO(1)` and so on) on one of the device's buttons. While held, that layer is looked up first, then the device's layer, then layer 0. This makes "hold a button and the wheel does something else" possible for just this device.
 - `KC_NO` to disable an input.
@@ -129,5 +129,5 @@ Up to 8 devices can be bound at the same time.
 - **`No device has sent input yet`:** the multiplexer only remembers the device that sent input since it booted or since that device reconnected. Move or click the device, then run the command again.
 - **It bound the wrong device:** another device sent input between your last touch and the command. `devlayer clear`, then repeat Step 2 without touching anything else.
 - **A key in VIAL does nothing:** make sure you edited the layer the device is bound to (`devlayer list`), and that the key is not Transparent on that layer if you expect it to differ from layer 0.
-- **The wheel scrolls in the wrong direction or too slowly:** wheel direction follows the key (wheel up → Volume Up). The distance for one tap is `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `src/config.h` (it only matters when *cursor movement* is mapped to a key or the wheel).
+- **The wheel scrolls in the wrong direction or too slowly:** wheel direction follows the key (wheel up → Volume Up). The distance for one tap is `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `main/config.h` (it only matters when *cursor movement* is mapped to a key or the wheel).
 - **The binding disappeared after re-pairing:** bindings are stored by Bluetooth address. A device that uses a different random address after being re-paired counts as a new device, so bind it again.

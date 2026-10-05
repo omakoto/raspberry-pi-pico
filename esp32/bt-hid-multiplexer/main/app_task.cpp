@@ -12,14 +12,18 @@
 #include "btstack_port_esp32.h"
 #include "btstack_run_loop.h"
 
+#include "ble_hid_host.h"
+#include "button_handler.h"
 #include "config.h"
 #include "device_bindings.h"
+#include "dual_console.h"
 #include "log_ring.h"
 #include "multiplexer.h"
 #include "platform.h"
 #include "usb_descriptors.h"
 #include "usb_hid.h"
 #include "vial_server.h"
+#include "ui_task.h"
 #include "virtual_matrix.h"
 
 // The task watchdog is fed only from this BTstack timer, so a wedged run loop (in BTstack or in any
@@ -30,15 +34,44 @@
 // at this interval.
 #define KEYMAP_SAVE_CHECK_MS 100
 
+// Background scanning is (re)started at this interval whenever a bonded device is not connected or
+// pairing mode is on.
+#define SCAN_CHECK_INTERVAL_MS 1000
+
+// Button polling (debouncing and long-press timing are in ButtonHandler).
+#define BUTTON_POLL_MS 10
+
+// The OLED / LED state is recomputed at this interval and handed to the UI task when it changed.
+#define UI_PUBLISH_MS 20
+
 // VIAL requests waiting for the bt_app task. The configurator sends one request and waits for its
 // reply, so a few entries are plenty.
 #define VIAL_QUEUE_LENGTH 4
 
+// Console lines waiting for the bt_app task.
+#define CONSOLE_QUEUE_LENGTH 4
+
 static btstack_timer_source_t s_heartbeat_timer;
 static btstack_timer_source_t s_keymap_save_timer;
-static btstack_packet_callback_registration_t s_hci_event_registration;
+static btstack_timer_source_t s_scan_check_timer;
+static btstack_timer_source_t s_button_timer;
+static btstack_timer_source_t s_ui_timer;
+
+// Short message shown on the OLED.
+static char s_toast_msg[32];
+static uint32_t s_toast_expiry_ms = 0;
+
+static void show_toast(const char *msg, uint32_t duration_ms = 3000) {
+    snprintf(s_toast_msg, sizeof(s_toast_msg), "%s", msg);
+    s_toast_expiry_ms = platform_now_ms() + duration_ms;
+}
 
 static QueueHandle_t s_vial_queue;
+static QueueHandle_t s_console_queue;
+
+// Set once the BTstack run loop exists; before that, posted work cannot be scheduled. Only console
+// input can arrive that early (USB starts later, from the bt_app task) and is dropped.
+static volatile bool s_run_loop_ready = false;
 static volatile uint8_t s_host_leds;
 
 // Marks the bt_app handler that is running, for the previous-run report after a watchdog reset.
@@ -55,10 +88,7 @@ public:
 static void maybe_reboot_to_bootloader() {
     // After the reply to the VIA "jump to bootloader" command has gone out.
     if (!VialServer::bootloaderRequested() || !usb_hid_flush_vial_reply()) return;
-    printf("[System] Rebooting into download mode...\n");
-    usb_hid_disconnect();
-    vTaskDelay(pdMS_TO_TICKS(150));
-    platform_reboot_to_download_mode();
+    reboot_to_download_mode();
 }
 
 // Handles queued VIAL requests, one at a time: the next one only once the previous reply is out.
@@ -89,9 +119,10 @@ static void on_usb_ready(void *context) {
 static void on_host_leds(void *context) {
     (void) context;
     StageScope stage(STAGE_USB_EVENT);
+    // Reverse Lock LED sync: host Caps/Num/Scroll Lock state to the connected keyboards.
     Multiplexer::setHostLeds(s_host_leds);
     if (Multiplexer::hasLedsChanged()) {
-        printf("[USB] Host LEDs 0x%02X\n", Multiplexer::getHostLeds());
+        BleHidHost::sendHostLeds(Multiplexer::getHostLeds());
         Multiplexer::acknowledgeLeds();
     }
 }
@@ -108,10 +139,20 @@ static void on_usb_state_changed(void *context) {
     }
 }
 
+static void on_console_line(void *context) {
+    (void) context;
+    char line[CONSOLE_LINE_MAX];
+    while (xQueueReceive(s_console_queue, line, 0) == pdTRUE) {
+        StageScope stage(STAGE_CONSOLE);
+        dual_console_handle_command(line);
+    }
+}
+
 static btstack_context_callback_registration_t s_vial_request_cb = {nullptr, &on_vial_request, nullptr};
 static btstack_context_callback_registration_t s_usb_ready_cb = {nullptr, &on_usb_ready, nullptr};
 static btstack_context_callback_registration_t s_host_leds_cb = {nullptr, &on_host_leds, nullptr};
 static btstack_context_callback_registration_t s_usb_state_cb = {nullptr, &on_usb_state_changed, nullptr};
+static btstack_context_callback_registration_t s_console_line_cb = {nullptr, &on_console_line, nullptr};
 
 // --------------------------------------------------------------------+
 // Posting (any task)
@@ -127,6 +168,17 @@ void app_post_vial_request(const uint8_t *req) {
         printf("[Vial] Request dropped (queue full)\n");
     }
     btstack_run_loop_execute_on_main_thread(&s_vial_request_cb);
+}
+
+void app_post_console_line(const char *line) {
+    if (!s_run_loop_ready) return;
+    char buf[CONSOLE_LINE_MAX];
+    strncpy(buf, line, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    if (xQueueSend(s_console_queue, buf, 0) != pdTRUE) {
+        printf("[Console] Busy, command dropped: %s\n", buf);
+    }
+    btstack_run_loop_execute_on_main_thread(&s_console_line_cb);
 }
 
 void app_post_usb_ready() {
@@ -157,32 +209,76 @@ static void on_keymap_save_check(btstack_timer_source_t *ts) {
     btstack_run_loop_add_timer(ts);
 }
 
+static void on_scan_check(btstack_timer_source_t *ts) {
+    {
+        StageScope stage(STAGE_TIMER);
+        if ((BleHidHost::hasUnconnectedBonds() || BleHidHost::isPairingMode()) && !BleHidHost::isScanning()) {
+            BleHidHost::startScan();
+        }
+    }
+    btstack_run_loop_set_timer(ts, SCAN_CHECK_INTERVAL_MS);
+    btstack_run_loop_add_timer(ts);
+}
+
+static void on_button_poll(btstack_timer_source_t *ts) {
+    ButtonEvent btn_ev = ButtonHandler::update();
+    if (btn_ev != BUTTON_EVENT_NONE) {
+        StageScope stage(STAGE_BUTTON);
+        if (btn_ev == BUTTON_EVENT_SHORT_PRESS) {
+            if (BleHidHost::isPairingMode()) {
+                printf("[Button] Short press: Stopping pairing mode.\n");
+                BleHidHost::stopPairingMode();
+                show_toast("Pairing Stopped", 1500);
+            } else {
+                printf("[Button] Short press: Starting pairing mode (60s).\n");
+                BleHidHost::startPairingMode();
+                show_toast("Pairing Mode (60s)", 1500);
+            }
+        } else if (btn_ev == BUTTON_EVENT_LONG_PRESS_PAIR) {
+            printf("[Button] Long press: Starting pairing mode (60s).\n");
+            BleHidHost::startPairingMode();
+            show_toast("Pairing Mode (60s)", 3000);
+        } else if (btn_ev == BUTTON_EVENT_EXTRA_LONG_PRESS_RESET) {
+            printf("[Button] Extra long press: Resetting bonds and keymap!\n");
+            BleHidHost::clearBonds();
+            VirtualMatrix::resetKeymap();
+            show_toast("Factory Reset Done", 4000);
+        }
+    }
+    btstack_run_loop_set_timer(ts, BUTTON_POLL_MS);
+    btstack_run_loop_add_timer(ts);
+}
+
+static void on_ui_publish(btstack_timer_source_t *ts) {
+    {
+        StageScope stage(STAGE_UI_PUBLISH);
+        UiSnapshot snap = {};
+        snap.connected_count = BleHidHost::getConnectedCount();
+        snprintf(snap.device_name, sizeof(snap.device_name), "%s", BleHidHost::getConnectedDeviceName());
+        // The layer of the device that was used last (its bound layer, or a layer a layer key selected).
+        snap.active_layer = VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice());
+        snap.pairing = BleHidHost::isPairingMode();
+        snap.passkey = BleHidHost::getActivePasskey();
+        if ((int32_t)(s_toast_expiry_ms - platform_now_ms()) > 0) {
+            snprintf(snap.toast, sizeof(snap.toast), "%s", s_toast_msg);
+            snap.toast_expiry_ms = s_toast_expiry_ms;
+        }
+        snap.usb_mounted = usb_hid_mounted();
+        ui_publish(snap);
+    }
+    btstack_run_loop_set_timer(ts, UI_PUBLISH_MS);
+    btstack_run_loop_add_timer(ts);
+}
+
 static void start_timer(btstack_timer_source_t *ts, void (*handler)(btstack_timer_source_t *), uint32_t ms) {
     btstack_run_loop_set_timer_handler(ts, handler);
     btstack_run_loop_set_timer(ts, ms);
     btstack_run_loop_add_timer(ts);
 }
 
-static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
-    (void) channel;
-    (void) size;
-    if (packet_type != HCI_EVENT_PACKET) return;
-    if (hci_event_packet_get_type(packet) == BTSTACK_EVENT_STATE) {
-        uint8_t state = btstack_event_state_get_state(packet);
-        if (state == HCI_STATE_WORKING) {
-            bd_addr_t addr;
-            gap_local_bd_addr(addr);
-            printf("[BT] Controller ready, address %s\n", bd_addr_to_str(addr));
-        }
-    }
-}
-
 // Resolves a multiplexer device index to the Bluetooth address of the connected device.
 static bool device_address(uint8_t dev_idx, uint8_t addr[6]) {
-    // No Bluetooth HID host yet: no device is ever connected.
-    (void) dev_idx;
-    (void) addr;
-    return false;
+    return BleHidHost::getSlotAddress(dev_idx, addr);
 }
 
 // Runs on the bt_app task before the run loop starts.
@@ -191,16 +287,18 @@ static void bt_app_setup() {
     VialServer::init();
     DeviceBindings::init(device_address);
     Multiplexer::init();
+    ButtonHandler::init();
 
     usb_hid_init();
 
-    s_hci_event_registration.callback = &hci_packet_handler;
-    hci_add_event_handler(&s_hci_event_registration);
-
     start_timer(&s_heartbeat_timer, &on_heartbeat, HEARTBEAT_INTERVAL_MS);
     start_timer(&s_keymap_save_timer, &on_keymap_save_check, KEYMAP_SAVE_CHECK_MS);
+    start_timer(&s_scan_check_timer, &on_scan_check, SCAN_CHECK_INTERVAL_MS);
+    start_timer(&s_button_timer, &on_button_poll, BUTTON_POLL_MS);
+    start_timer(&s_ui_timer, &on_ui_publish, UI_PUBLISH_MS);
 
-    hci_power_control(HCI_POWER_ON);
+    // Sets up L2CAP, SM, GATT client and HIDS client, loads the bonds and powers the controller on.
+    BleHidHost::init();
 }
 
 static void bt_app_task(void *arg) {
@@ -209,12 +307,14 @@ static void bt_app_task(void *arg) {
 
     // Sets up the VHCI transport, the run loop (bound to this task), and the TLV / LE device DB in NVS.
     btstack_init();
+    s_run_loop_ready = true;
     bt_app_setup();
     btstack_run_loop_execute();  // never returns
 }
 
 void app_task_start() {
     s_vial_queue = xQueueCreate(VIAL_QUEUE_LENGTH, RAWHID_REPORT_SIZE);
+    s_console_queue = xQueueCreate(CONSOLE_QUEUE_LENGTH, CONSOLE_LINE_MAX);
     xTaskCreatePinnedToCore(bt_app_task, "bt_app", BT_APP_TASK_STACK_SIZE, nullptr,
                             BT_APP_TASK_PRIORITY, nullptr, BT_APP_TASK_CORE);
 }

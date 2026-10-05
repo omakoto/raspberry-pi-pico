@@ -14,6 +14,7 @@ void app_post_host_leds(uint8_t leds);           // keyboard LED output report f
 void app_post_vial_request(const uint8_t *req);  // 32-byte VIAL RawHID request
 void app_post_usb_ready();                       // a HID IN transfer completed
 void app_post_usb_state_changed();               // USB mounted / unmounted
+void app_post_console_line(const char *line);    // console command line (NUL-terminated)
 
 // Stage codes for LogRing::stage(): which handler the bt_app task is running (0 = idle).
 enum AppStage : uint16_t {

@@ -108,8 +108,26 @@ static uint32_t resync(uint32_t *pos) {
     return 0;
 }
 
+// The console task drains the ring, but another task can drain it as well while it waits for its
+// output to go out (flush() before a reboot, writeLong()). Only one of them may move the consumer
+// positions at a time; the other one simply skips its turn.
+static bool s_draining = false;
+
+static bool begin_drain() {
+    platform_critical_enter();
+    bool ok = !s_draining;
+    if (ok) s_draining = true;
+    platform_critical_exit();
+    return ok;
+}
+
+static void end_drain() {
+    s_draining = false;
+}
+
 void LogRing::drain() {
     if (!s_sinks) return;
+    if (!begin_drain()) return;
     uint8_t chunk[96];
 
     uint32_t lost = resync(&s_uart_pos);
@@ -133,6 +151,8 @@ void LogRing::drain() {
     } else {
         resync(&s_cdc_pos);
     }
+
+    end_drain();
 
     if (lost > 0) {
         char msg[48];

@@ -7,10 +7,12 @@
 #include "esp_rom_sys.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
+#include "tinyusb_cdc_acm.h"
 #include "tusb.h"
 
 #include "app_task.h"
 #include "config.h"
+#include "dual_console.h"
 #include "usb_descriptors.h"
 
 // TinyUSB task: on the core without the BT controller, above the console and UI tasks, so that
@@ -34,6 +36,16 @@ static volatile bool s_mounted = false;
 // endpoint becomes free.
 static uint8_t s_vial_reply[RAWHID_REPORT_SIZE];
 static bool s_vial_reply_pending = false;
+
+static void cdc_line_state_changed(int itf, cdcacm_event_t *event) {
+    (void) itf;
+    dual_console_cdc_line_state(event->line_state_changed_data.dtr);
+}
+
+static void cdc_line_coding_changed(int itf, cdcacm_event_t *event) {
+    (void) itf;
+    dual_console_cdc_line_coding(event->line_coding_changed_data.p_line_coding->bit_rate);
+}
 
 static void usb_event_cb(tinyusb_event_t *event, void *arg) {
     (void) arg;
@@ -72,6 +84,18 @@ void usb_hid_init() {
     if (err != ESP_OK) {
         printf("[USB] tinyusb_driver_install failed: %s\n", esp_err_to_name(err));
         return;
+    }
+    if (g_usb_serial_enabled) {
+        // Input is read straight from TinyUSB's FIFO by the console task; only the line events are
+        // needed from esp_tinyusb's CDC layer.
+        tinyusb_config_cdcacm_t acm = {};
+        acm.cdc_port = TINYUSB_CDC_ACM_0;
+        acm.callback_line_state_changed = &cdc_line_state_changed;
+        acm.callback_line_coding_changed = &cdc_line_coding_changed;
+        err = tinyusb_cdcacm_init(&acm);
+        if (err != ESP_OK) {
+            printf("[USB] tinyusb_cdcacm_init failed: %s\n", esp_err_to_name(err));
+        }
     }
     printf("[USB] Device started (serial port %s)\n", g_usb_serial_enabled ? "on" : "off");
 }

@@ -11,7 +11,7 @@ The firmware connects up to 8 BLE keyboards, mice and trackpads (HID over GATT) 
 composite USB HID device (keyboard + mouse, VIAL raw HID, optional CDC console), with VIAL keymapping
 over 8 layers, per-device layers, an SSD1306 OLED, a pairing button and a pairing LED.
 
-Status: phases 1 (skeleton) and 2 (USB, keymap, VIAL, NVS) implemented and verified on a DevKitC-1 (ESP32-S3 N8R8). Phases 3-6 (§13.3) are not implemented yet.
+Status: all phases (§13.3) implemented. Verified on a DevKitC-1 (ESP32-S3 N8R8) without peripherals: USB, VIAL, NVS, console, watchdog recovery, BLE scanning, flashing over both ports. Not yet verified: pairing and input from real BLE devices, the OLED, the button and the LED, and the XIAO itself.
 
 ---
 
@@ -117,10 +117,11 @@ esp32/bt-hid-multiplexer/
 │   ├── usb_hid.*             TinyUSB glue: install, callbacks, VIAL reply (ex main.cpp callbacks)
 │   ├── storage.*             rewritten on NVS (§8)
 │   ├── log_ring.*            ported (.noinit RAM, spinlock) (§7.5)
-│   ├── console.*             ex dual_console.cpp: UART0 + CDC I/O task, command table (§7.1)
+│   ├── dual_console.*        ported: UART0 + CDC I/O task, command table (§7.1)
 │   ├── ui_task.*             OLED + pairing LED task (§7.3, §7.4)
+│   ├── status_led.*          pairing LED: XIAO GPIO LED or DevKitC WS2812 (§7.4)
 │   ├── ssd1306.*, font_*.h   ported to i2c_master
-│   └── button_handler.*      ported (two pins)
+│   └── button_handler.*      ported
 └── test/
     ├── run-host-test.sh      same tests as the Pico (multiplexer, keymap, bindings, log ring)
     ├── host_test.cpp, log_ring_test.cpp
@@ -394,7 +395,7 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 
 ## 7. Peripherals and services
 
-### 7.1 Console (`console.cpp`, ex `dual_console.cpp`)
+### 7.1 Console (`dual_console.cpp`)
 
 - **UART0.** `uart_driver_install(UART_NUM_0, 1024 RX, 4096 TX)`.
   - Output: the `console` task checks `uart_get_tx_buffer_free_size()` before every `uart_write_bytes`, so it **never blocks**. This keeps the Pico's "console output never blocks" property.
@@ -531,7 +532,7 @@ factory,  app,  factory, 0x20000, 0x200000
   - Bindings: written at once on `bind`, `unbind` and `clearAll`.
   - All writes happen on `bt_app`, as on the Pico, where writes ran in the main loop with interrupts off.
 - **Cost of a write.** A flash erase or write stalls both cores' cache. BT controller ISRs are in IRAM and keep running. The DWC2 USB interrupt is not IRAM-safe and is delayed by the length of the write. This is the same trade-off the Pico made ("tens of ms" with interrupts off), and debouncing keeps writes rare.
-- **BTstack bonds.** BTstack's `btstack_tlv_esp32` stores bonds in NVS namespace `BTstack`, committing on every store. `ble_hid_host.cpp`'s own `HOGT` bonded-table tag goes through the same TLV, unchanged. The legacy `HOGD` migration code is removed.
+- **BTstack bonds.** BTstack's `btstack_tlv_esp32` stores bonds in NVS namespace `BTstack`, committing on every store. `ble_hid_host.cpp`'s own `HOGT` bonded-table tag goes through the same TLV, unchanged. The legacy `HOGD` migration code is kept unchanged (harmless, and it keeps the file close to the Pico's).
 - **Not persisted, as on the Pico:** mouse speed, `authreq`, log toggles (decided, Q3).
 - **Factory reset**, as on the Pico:
   - `reset` (console) clears the BTstack bonds through the existing `clearBonds` (TLV deletes), resets the keymap, and clears the bindings.

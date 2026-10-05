@@ -35,6 +35,7 @@ set(srcs
     src/hci_cmd.c
     src/hci_dump.c
     src/hci_event.c
+    src/hci_event_builder.c
     src/l2cap.c
     src/l2cap_signaling.c
     src/ble/att_db.c

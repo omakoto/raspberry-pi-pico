@@ -11,6 +11,12 @@ idf_component_register(
         "virtual_matrix.cpp"
         "device_bindings.cpp"
         "vial_server.cpp"
+        "ble_hid_host.cpp"
+        "dual_console.cpp"
+        "ssd1306.cpp"
+        "button_handler.cpp"
+        "status_led.cpp"
+        "ui_task.cpp"
     INCLUDE_DIRS
         "."
         "platform"
@@ -20,6 +26,8 @@ idf_component_register(
         nvs_flash
         esp_timer
         esp_driver_gpio
+        esp_driver_uart
+        esp_driver_i2c
         esp_hw_support
         esp_system
         freertos

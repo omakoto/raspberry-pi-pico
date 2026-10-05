@@ -14,12 +14,6 @@ option(USB_SERIAL_ALWAYS "Always enable the USB serial port" OFF)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-string(TOUPPER "${BOARD}" BOARD_UPPER)
-idf_build_set_property(COMPILE_DEFINITIONS "BOARD_${BOARD_UPPER}=1" APPEND)
-if(USB_SERIAL_ALWAYS)
-    idf_build_set_property(COMPILE_DEFINITIONS "USB_SERIAL_ALWAYS=1" APPEND)
-endif()
-
 # TinyUSB arms the HID OUT endpoint for CFG_TUD_HID_EP_BUFSIZE bytes and a transfer only completes at
 # a short packet or when the buffer is full. The VIAL raw HID endpoint is 32 bytes, so with a larger
 # buffer every 32-byte VIAL request would stay pending until the next one arrives. esp_tinyusb does
@@ -28,3 +22,12 @@ endif()
 idf_build_set_property(COMPILE_DEFINITIONS "CFG_TUD_HID_EP_BUFSIZE=32" APPEND)
 
 project(bt-hid-multiplexer)
+
+# The board and the USB serial option only matter to this firmware's own code; defining them for
+# main alone keeps a board switch from rebuilding all of ESP-IDF.
+idf_component_get_property(main_lib main COMPONENT_LIB)
+string(TOUPPER "${BOARD}" BOARD_UPPER)
+target_compile_definitions(${main_lib} PRIVATE "BOARD_${BOARD_UPPER}=1")
+if(USB_SERIAL_ALWAYS)
+    target_compile_definitions(${main_lib} PRIVATE USB_SERIAL_ALWAYS=1)
+endif()
