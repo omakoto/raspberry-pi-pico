@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 class BleHidHost {
 public:
@@ -17,6 +18,8 @@ public:
     static bool isConnected();
     static uint8_t getConnectedCount();
     static uint8_t getBondedCount();
+    // Address and name of bonded device idx (0 .. getBondedCount() - 1).
+    static bool getBondedDevice(uint8_t idx, uint8_t addr[6], char *name, size_t name_size);
     static bool hasUnconnectedBonds();
     static const char* getConnectedDeviceName();
     static const char* getConnectedDeviceName(uint8_t slot_idx);

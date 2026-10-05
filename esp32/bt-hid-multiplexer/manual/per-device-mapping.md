@@ -17,7 +17,7 @@ Example used throughout this manual: a Logitech device with a vertical wheel, a 
 - The multiplexer flashed and running (see the main [README](../README.md)).
 - The device paired with the multiplexer (see [How to Pair a Device](../README.md#how-to-pair-a-device)) and working.
 - VIAL access from Chrome (on Linux, run `~/cbin/setup/config-hidraw-permission` once, see [Keymapping with VIAL](../README.md#keymapping-with-vial)).
-- The serial console, which is where the binding is made. On the DevKitC it is the `UART` USB-C port; on the XIAO it needs a USB-UART adapter on `D6`/`D7`. The board's own USB serial port is only present when `GPIO7` (XIAO `D8`) is connected to GND before the board is plugged in (see the README). Run `./02-monitor.sh` from the project directory. Anything you type there is a *console command*.
+- Optionally the serial console, for the `devlayer` command (Step 2, option B). On the DevKitC it is the `UART` USB-C port; on the XIAO it needs a USB-UART adapter on `D6`/`D7`. The board's own USB serial port is only present when `GPIO7` (XIAO `D8`) is connected to GND before the board is plugged in (see the README). Run `./02-monitor.sh` from the project directory. Anything you type there is a *console command*.
 
 ---
 
@@ -28,6 +28,16 @@ The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices
 This manual uses **layer 3**.
 
 ## Step 2. Bind the device to the layer
+
+### Option A: in VIAL (no console needed)
+
+1. Open (or reload) [vial.rocks](https://vial.rocks/) and connect to the multiplexer. VIAL reads the device list when it connects, so reload it after pairing a new device.
+2. Open the **Layout** tab. It has one dropdown per paired (bonded) Bluetooth device, labelled with the device's name. Two devices with the same name get the end of their Bluetooth address added, e.g. `MX Dialpad (7B:44)`.
+3. Set the device's dropdown to **Layer 3**. The OLED confirms it (`<name>: layer 3`); the binding applies at once and is saved. `No binding` removes it.
+
+The list also contains devices that are switched off, so a device can be bound before it connects. Note that loading a saved layout file in VIAL restores these dropdowns too, which rebinds devices (by their position in the list, so a file saved with different pairings can bind the wrong devices).
+
+### Option B: with the `devlayer` console command
 
 The multiplexer does not make you pick the device by name or ID. It binds the device that sent input most recently:
 

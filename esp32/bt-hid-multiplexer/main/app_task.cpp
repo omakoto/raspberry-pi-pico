@@ -61,7 +61,7 @@ static btstack_timer_source_t s_ui_timer;
 static char s_toast_msg[32];
 static uint32_t s_toast_expiry_ms = 0;
 
-static void show_toast(const char *msg, uint32_t duration_ms = 3000) {
+void app_show_toast(const char *msg, uint32_t duration_ms) {
     snprintf(s_toast_msg, sizeof(s_toast_msg), "%s", msg);
     s_toast_expiry_ms = platform_now_ms() + duration_ms;
 }
@@ -228,21 +228,21 @@ static void on_button_poll(btstack_timer_source_t *ts) {
             if (BleHidHost::isPairingMode()) {
                 printf("[Button] Short press: Stopping pairing mode.\n");
                 BleHidHost::stopPairingMode();
-                show_toast("Pairing Stopped", 1500);
+                app_show_toast("Pairing Stopped", 1500);
             } else {
                 printf("[Button] Short press: Starting pairing mode (60s).\n");
                 BleHidHost::startPairingMode();
-                show_toast("Pairing Mode (60s)", 1500);
+                app_show_toast("Pairing Mode (60s)", 1500);
             }
         } else if (btn_ev == BUTTON_EVENT_LONG_PRESS_PAIR) {
             printf("[Button] Long press: Starting pairing mode (60s).\n");
             BleHidHost::startPairingMode();
-            show_toast("Pairing Mode (60s)", 3000);
+            app_show_toast("Pairing Mode (60s)", 3000);
         } else if (btn_ev == BUTTON_EVENT_EXTRA_LONG_PRESS_RESET) {
             printf("[Button] Extra long press: Resetting bonds and keymap!\n");
             BleHidHost::clearBonds();
             VirtualMatrix::resetKeymap();
-            show_toast("Factory Reset Done", 4000);
+            app_show_toast("Factory Reset Done", 4000);
         }
     }
     btstack_run_loop_set_timer(ts, BUTTON_POLL_MS);

@@ -60,10 +60,24 @@ uint8_t DeviceBindings::lastActiveDevice() {
 }
 
 bool DeviceBindings::bind(uint8_t dev_idx, uint8_t layer) {
-    if (layer < 1 || layer >= NUM_LAYERS) return false;
     uint8_t addr[6];
     if (!addressOf(dev_idx, addr)) return false;
+    return bindAddress(addr, layer);
+}
 
+bool DeviceBindings::unbind(uint8_t dev_idx) {
+    uint8_t addr[6];
+    if (!addressOf(dev_idx, addr)) return false;
+    return unbindAddress(addr);
+}
+
+uint8_t DeviceBindings::layerForAddress(const uint8_t addr[6]) {
+    int e = find_entry(addr);
+    return (e >= 0) ? s_entries[e].layer : NO_LAYER;
+}
+
+bool DeviceBindings::bindAddress(const uint8_t addr[6], uint8_t layer) {
+    if (layer < 1 || layer >= NUM_LAYERS) return false;
     int e = find_entry(addr);
     if (e < 0) {
         for (int i = 0; i < MAX_DEVICE_BINDINGS; i++) {
@@ -79,9 +93,7 @@ bool DeviceBindings::bind(uint8_t dev_idx, uint8_t layer) {
     return true;
 }
 
-bool DeviceBindings::unbind(uint8_t dev_idx) {
-    uint8_t addr[6];
-    if (!addressOf(dev_idx, addr)) return false;
+bool DeviceBindings::unbindAddress(const uint8_t addr[6]) {
     int e = find_entry(addr);
     if (e < 0) return false;
     memset(&s_entries[e], 0, sizeof(s_entries[e]));

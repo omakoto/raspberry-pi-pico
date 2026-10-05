@@ -1,6 +1,9 @@
 #include "vial_server.h"
 #include "virtual_matrix.h"
-#include "vial_layout.h"
+#include "vial_definition.h"
+#include "app_task.h"
+#include "ble_hid_host.h"
+#include "device_bindings.h"
 #include "config.h"
 #include "platform.h"
 #include <stdio.h>
@@ -45,6 +48,59 @@
 
 bool VialServer::bootloader_requested_ = false;
 
+// The definition served to VIAL, rebuilt whenever VIAL asks for its size (which it does once per
+// connection, before fetching it) from the bonded devices of that moment. The layout options that
+// VIAL then reads and writes refer to s_devices, the devices listed in that definition, so a bond
+// added or removed in the meantime does not shift the dropdowns.
+static VialDeviceEntry s_devices[VIAL_MAX_DEVICE_OPTIONS];
+static uint8_t s_device_count = 0;
+static uint8_t s_definition[4608];
+static size_t s_definition_size = 0;
+
+static void rebuild_definition() {
+    s_device_count = 0;
+    uint8_t bonded = BleHidHost::getBondedCount();
+    for (uint8_t i = 0; i < bonded && s_device_count < VIAL_MAX_DEVICE_OPTIONS; i++) {
+        VialDeviceEntry &e = s_devices[s_device_count];
+        if (BleHidHost::getBondedDevice(i, e.addr, e.name, sizeof(e.name))) s_device_count++;
+    }
+    s_definition_size = vial_build_definition(s_devices, s_device_count, s_definition, sizeof(s_definition));
+    if (s_definition_size == 0) {
+        printf("[Vial] Keyboard definition does not fit its buffer\n");
+    }
+}
+
+// Dropdown choice of each listed device: 0 = no binding, N = bound to layer N.
+static uint32_t get_layout_options() {
+    uint8_t choices[VIAL_MAX_DEVICE_OPTIONS];
+    for (uint8_t i = 0; i < s_device_count; i++) {
+        uint8_t layer = DeviceBindings::layerForAddress(s_devices[i].addr);
+        choices[i] = (layer == DeviceBindings::NO_LAYER) ? 0 : layer;
+    }
+    return vial_pack_layout_options(choices, s_device_count);
+}
+
+static void set_layout_options(uint32_t value) {
+    uint8_t choices[VIAL_MAX_DEVICE_OPTIONS];
+    vial_unpack_layout_options(value, s_device_count, choices);
+    for (uint8_t i = 0; i < s_device_count; i++) {
+        uint8_t current = DeviceBindings::layerForAddress(s_devices[i].addr);
+        uint8_t wanted = (choices[i] == 0) ? DeviceBindings::NO_LAYER : choices[i];
+        if (wanted == current) continue;
+        char toast[48];  // app_show_toast() keeps what fits on the OLED
+        if (wanted == DeviceBindings::NO_LAYER) {
+            DeviceBindings::unbindAddress(s_devices[i].addr);
+            snprintf(toast, sizeof(toast), "%.20s: no binding", s_devices[i].name);
+        } else if (DeviceBindings::bindAddress(s_devices[i].addr, wanted)) {
+            snprintf(toast, sizeof(toast), "%.20s: layer %u", s_devices[i].name, wanted);
+        } else {
+            snprintf(toast, sizeof(toast), "Binding table full");
+        }
+        printf("[Vial] %s\n", toast);
+        app_show_toast(toast);
+    }
+}
+
 bool VialServer::bootloaderRequested() {
     return bootloader_requested_;
 }
@@ -84,11 +140,12 @@ void VialServer::handleViaCommand(const uint8_t *in_buf, uint8_t *out_buf) {
                 out_buf[3] = (ms >> 16) & 0xFF;
                 out_buf[4] = (ms >> 8) & 0xFF;
                 out_buf[5] = ms & 0xFF;
-            } else if (val_id == 0x02) { // Layout options
-                out_buf[2] = 0;
-                out_buf[3] = 0;
-                out_buf[4] = 0;
-                out_buf[5] = 0;
+            } else if (val_id == 0x02) { // Layout options: the device -> layer dropdowns
+                uint32_t options = get_layout_options();
+                out_buf[2] = (options >> 24) & 0xFF;
+                out_buf[3] = (options >> 16) & 0xFF;
+                out_buf[4] = (options >> 8) & 0xFF;
+                out_buf[5] = options & 0xFF;
             } else {
                 out_buf[0] = 0xFF; // Unhandled
             }
@@ -96,7 +153,11 @@ void VialServer::handleViaCommand(const uint8_t *in_buf, uint8_t *out_buf) {
         }
 
         case VIA_CMD_SET_KEYBOARD_VALUE: // 0x03
-            // Echo
+            if (in_buf[1] == 0x02) { // Layout options: the device -> layer dropdowns
+                set_layout_options(((uint32_t)in_buf[2] << 24) | ((uint32_t)in_buf[3] << 16) |
+                                   ((uint32_t)in_buf[4] << 8) | in_buf[5]);
+            }
+            // The reply is an echo.
             break;
 
         case VIA_CMD_DYNAMIC_KEYMAP_GET_KEYCODE: { // 0x04
@@ -245,7 +306,8 @@ void VialServer::handleVialCommand(const uint8_t *in_buf, uint8_t *out_buf) {
             break;
 
         case VIAL_CMD_GET_SIZE: { // 0x01
-            uint32_t def_size = VIAL_KEYBOARD_DEF_SIZE;
+            rebuild_definition();
+            uint32_t def_size = (uint32_t)s_definition_size;
             out_buf[0] = def_size & 0xFF;
             out_buf[1] = (def_size >> 8) & 0xFF;
             out_buf[2] = (def_size >> 16) & 0xFF;
@@ -256,10 +318,10 @@ void VialServer::handleVialCommand(const uint8_t *in_buf, uint8_t *out_buf) {
         case VIAL_CMD_GET_DEF_CHUNK: { // 0x02
             uint32_t page = in_buf[2] | ((uint32_t)in_buf[3] << 8);
             uint32_t offset = page * 32;
-            if (offset < VIAL_KEYBOARD_DEF_SIZE) {
-                uint32_t rem = VIAL_KEYBOARD_DEF_SIZE - offset;
+            if (offset < s_definition_size) {
+                uint32_t rem = (uint32_t)s_definition_size - offset;
                 uint32_t chunk_len = (rem > 32) ? 32 : rem;
-                memcpy(out_buf, VIAL_KEYBOARD_DEF + offset, chunk_len);
+                memcpy(out_buf, s_definition + offset, chunk_len);
             }
             break;
         }

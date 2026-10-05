@@ -478,18 +478,14 @@ static void scheduleZeroLatency(BleSlot *slot) {
 }
 #endif
 
-// Peripherals often leave their name out of the advertisement the connection was made from (in
-// pairing mode the Keychron Nape Pro has it only in its scan response), so the slot and its bond are
-// named after the address. The name is then read from the GAP Device Name characteristic once the
-// HID service is set up. The delay keeps the read out of the way of the HIDS client's own GATT
+// The advertisement a connection is made from often lacks the device's name (in pairing mode the
+// Keychron Nape Pro has it only in its scan response), or carries a shortened one (the MX Dialpad
+// advertises "MX Dialpa"). So once the HID service is set up, the name is read from the GAP Device
+// Name characteristic, and the slot and its bond are updated if it differs. The delay keeps the read out of the way of the HIDS client's own GATT
 // requests right after connecting (the GATT client runs one request per connection at a time); a
 // read that is refused because the client is busy is retried.
 #define NAME_READ_DELAY_MS      1500
 #define MAX_NAME_READ_ATTEMPTS  3
-
-static bool slot_name_is_address(const BleSlot *slot) {
-    return strcmp(slot->name, bd_addr_to_str(slot->addr)) == 0;
-}
 
 static void handle_name_read_event(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
@@ -500,8 +496,11 @@ static void handle_name_read_event(uint8_t packet_type, uint16_t channel, uint8_
     uint16_t len = gatt_event_characteristic_value_query_result_get_value_length(packet);
     if (!slot || len == 0) return;
     if (len > sizeof(slot->name) - 1) len = sizeof(slot->name) - 1;
-    memcpy(slot->name, gatt_event_characteristic_value_query_result_get_value(packet), len);
-    slot->name[len] = '\0';
+    char name[sizeof(slot->name)];
+    memcpy(name, gatt_event_characteristic_value_query_result_get_value(packet), len);
+    name[len] = '\0';
+    if (strcmp(name, slot->name) == 0) return;  // nothing new; spare the flash write
+    memcpy(slot->name, name, sizeof(name));
     printf("[BLE Host] Slot %u: device name '%s' (from GAP Device Name)\n", slot->dev_idx, slot->name);
     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
 }
@@ -510,7 +509,7 @@ static void schedule_name_read(BleSlot *slot);
 
 static void onNameReadTimeout(btstack_timer_source_t *ts) {
     BleSlot *slot = (BleSlot *)btstack_run_loop_get_timer_context(ts);
-    if (!slot->connected || slot->con_handle == HCI_CON_HANDLE_INVALID || !slot_name_is_address(slot)) return;
+    if (!slot->connected || slot->con_handle == HCI_CON_HANDLE_INVALID) return;
     uint8_t status = gatt_client_read_value_of_characteristics_by_uuid16(
         &handle_name_read_event, slot->con_handle, 0x0001, 0xFFFF, ORG_BLUETOOTH_CHARACTERISTIC_GAP_DEVICE_NAME);
     if (status != ERROR_CODE_SUCCESS && ++slot->name_read_attempts < MAX_NAME_READ_ATTEMPTS) {
@@ -930,6 +929,13 @@ uint8_t BleHidHost::getConnectedCount() {
 
 uint8_t BleHidHost::getBondedCount() {
     return s_bonded_table.count;
+}
+
+bool BleHidHost::getBondedDevice(uint8_t idx, uint8_t addr[6], char *name, size_t name_size) {
+    if (idx >= s_bonded_table.count) return false;
+    memcpy(addr, s_bonded_table.records[idx].addr, 6);
+    snprintf(name, name_size, "%s", s_bonded_table.records[idx].name);
+    return true;
 }
 
 bool BleHidHost::hasUnconnectedBonds() {
@@ -1501,10 +1507,8 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     s_active_passkey = 0;
 
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
-                    if (slot_name_is_address(slot)) {
-                        slot->name_read_attempts = 0;
-                        schedule_name_read(slot);
-                    }
+                    slot->name_read_attempts = 0;
+                    schedule_name_read(slot);
 
                     resolve_led_report(slot);
                     resolve_mouse_format(slot);

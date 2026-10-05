@@ -34,6 +34,12 @@ public:
     // invalid or the table is full.
     static bool bind(uint8_t dev_idx, uint8_t layer);
     static bool unbind(uint8_t dev_idx);
+
+    // The same by Bluetooth address, for devices that need not be connected (VIAL lists the bonded
+    // devices). layerForAddress returns NO_LAYER for an unbound address.
+    static uint8_t layerForAddress(const uint8_t addr[6]);
+    static bool bindAddress(const uint8_t addr[6], uint8_t layer);
+    static bool unbindAddress(const uint8_t addr[6]);
     static void clearAll();
 
     // Enumeration for the console: stored entries, and the address of a connected device.

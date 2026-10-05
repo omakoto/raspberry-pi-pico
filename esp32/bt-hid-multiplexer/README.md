@@ -24,7 +24,8 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
 - **Bonds survive reboots** (BTstack's bond database in NVS). Background scanning only reconnects bonded
   devices; new devices are only accepted during pairing mode.
 - **VIAL keymapping (WebHID):** remap every key, modifier, mouse button and mouse movement across 8
-  layers at [vial.rocks](https://vial.rocks/); per-device layers
+  layers at [vial.rocks](https://vial.rocks/); per-device layers, set in VIAL's Layout tab (one
+  dropdown per paired device, by name) or with `devlayer`
   ([manual/per-device-mapping.md](manual/per-device-mapping.md)). Saved in NVS.
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
 - **SSD1306 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
@@ -195,6 +196,10 @@ connects but some of its reports stay silent, check `log on` output for `GATT cl
    **Start** and select **ESP32-S3 BLE HID Multiplexer**.
 3. Remap keys across 8 layers. Changes take effect at once and are saved half a second after the last
    edit.
+4. **Per-device layers:** the **Layout** tab has one dropdown per paired device, labelled with its
+   name: pick a layer to remap that device on its own, see
+   [manual/per-device-mapping.md](manual/per-device-mapping.md). The firmware builds the VIAL keyboard
+   definition at runtime for this (`main/vial_definition.cpp`), so reload vial.rocks after pairing.
 
 The device uses Espressif's vendor ID with esp_tinyusb's generic HID product ID (`303a:4004`), which
 other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage page `0xFF60`).

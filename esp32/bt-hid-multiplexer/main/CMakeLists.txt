@@ -11,6 +11,7 @@ idf_component_register(
         "virtual_matrix.cpp"
         "device_bindings.cpp"
         "vial_server.cpp"
+        "vial_definition.cpp"
         "ble_hid_host.cpp"
         "dual_console.cpp"
         "ssd1306.cpp"

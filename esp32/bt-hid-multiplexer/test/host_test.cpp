@@ -292,6 +292,21 @@ int main() {
     Multiplexer::handleMouseReport(1, 0, 2, 0, 0, 0);
     CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 6);
 
+    // Binding by address (from VIAL) works for devices that are not connected, and a connected device
+    // with that address picks it up.
+    reset();
+    uint8_t addr2[6] = {0, 0, 0, 0, 0, 3};  // device 2's fake address
+    g_connected[2] = false;
+    CHECK(DeviceBindings::layerForAddress(addr2) == DeviceBindings::NO_LAYER);
+    CHECK(DeviceBindings::bindAddress(addr2, 5));
+    CHECK(!DeviceBindings::bindAddress(addr2, 0) && !DeviceBindings::bindAddress(addr2, NUM_LAYERS));
+    CHECK(DeviceBindings::layerForAddress(addr2) == 5);
+    g_connected[2] = true;
+    CHECK(DeviceBindings::layerFor(2) == 5);
+    CHECK(DeviceBindings::bindAddress(addr2, 4) && DeviceBindings::layerFor(2) == 4);
+    CHECK(DeviceBindings::unbindAddress(addr2) && DeviceBindings::layerFor(2) == DeviceBindings::NO_LAYER);
+    CHECK(!DeviceBindings::unbindAddress(addr2));
+
     if (g_failures) { printf("%d FAILURES\n", g_failures); return 1; }
     printf("All host tests passed\n");
     return 0;

@@ -16,6 +16,9 @@ void app_post_usb_ready();                       // a HID IN transfer completed
 void app_post_usb_state_changed();               // USB mounted / unmounted
 void app_post_console_line(const char *line);    // console command line (NUL-terminated)
 
+// Shows a short message on the OLED; bt_app task only.
+void app_show_toast(const char *msg, uint32_t duration_ms = 3000);
+
 // Stage codes for LogRing::stage(): which handler the bt_app task is running (0 = idle).
 enum AppStage : uint16_t {
     STAGE_IDLE = 0,
