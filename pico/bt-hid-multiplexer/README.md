@@ -19,7 +19,7 @@ This project connects wireless BLE keyboards, mice, and integrated trackpads and
   - Rate-decoupled mouse and trackpad vector aggregation (X, Y, scroll wheel, pan, and 5 buttons) up to 1000 Hz.
   - Automatically reconnects to bonded devices across power cycles via non-volatile flash storage.
 - **SSD1306 OLED Display (128×64 I2C):**
-  - Displays connection status, connected peripheral names, active keymap layer, and USB connection health.
+  - Displays connection status, connected peripheral names, the keymap layer of the device used last (its bound layer, or the layer a layer key selected), and USB connection health.
   - **Pairing Passkey Display:** When pairing a keyboard requiring Secure Simple Pairing / Passkey Entry, the 6-digit PIN is displayed prominently on the OLED (`Type 123456 + Enter on keyboard`).
 - **Push Button Pairing Controller:**
   - Short press: Toggle pairing mode on/off (60-second discovery window).
@@ -92,7 +92,7 @@ Commands supported on either console:
 - `bootloader` / `bootsel`: Drops board directly into USB BOOTSEL ROM for updates
 - `pair` / `scan`: Initiates 60-second BLE discovery pairing window
 - `stop`: Halts BLE scanning
-- `status`: Displays uptime, connection state, device name, and active layer
+- `status`: Displays uptime, connection state, device name, and the layer of the device used last
 - `bonds`: Dumps bonded peripheral database and cache (BLE bonds, then classic bonds as `[c0]`, `[c1]`, ...)
 - `devices`: Lists connected BLE slots with connection handles and HIDS CIDs, then connected classic slots. For each classic slot it also prints the mouse-report statistics collected since the previous `devices` call (reports/s, longest gap, histogram of gaps between reports) and whether the Pico is master or slave on the link, which is how trackpad stutter is diagnosed. The counters are reset by every call
 - `desc` / `descriptor`: Dumps stored BLE HID report descriptors

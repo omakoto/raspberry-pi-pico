@@ -257,7 +257,13 @@ static void handle_command(const char *cmd) {
         dual_printf("  Uptime:       %lu ms (%lu s)\r\n", ms, ms / 1000);
         dual_printf("  BLE Devices:  %u / %u connected\r\n", BleHidHost::getConnectedCount(), MAX_BLE_DEVICES);
         dual_printf("  Summary:      %s\r\n", BleHidHost::getConnectedDeviceName());
-        dual_printf("  Active Layer: %u\r\n", VirtualMatrix::getActiveLayer());
+        uint8_t last = DeviceBindings::lastActiveDevice();
+        if (last == DeviceBindings::NO_DEVICE) {
+            dual_printf("  Active Layer: %u\r\n", VirtualMatrix::getActiveLayer());
+        } else {
+            dual_printf("  Active Layer: %u (device used last: %u; layer selected by layer keys: %u)\r\n",
+                        VirtualMatrix::getEffectiveLayer(last), last, VirtualMatrix::getActiveLayer());
+        }
         dual_printf("  Scanning:     %s\r\n", BleHidHost::isScanning() ? "Active" : "Idle");
         if (BleHidHost::isPairingMode()) {
             dual_printf("  Pairing Mode: Active (%lu s remaining)\r\n", (unsigned long)BleHidHost::getPairingModeRemainingSec());

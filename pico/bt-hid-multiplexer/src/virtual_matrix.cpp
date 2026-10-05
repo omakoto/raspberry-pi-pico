@@ -82,6 +82,14 @@ uint16_t VirtualMatrix::resolveAction(uint8_t dev_idx, uint8_t raw_keycode) {
     return KC_NO_;
 }
 
+uint8_t VirtualMatrix::getEffectiveLayer(uint8_t dev_idx) {
+    // The same precedence as resolveAction().
+    uint8_t active = computeActiveLayer();
+    if (active != 0) return active;
+    uint8_t device_layer = DeviceBindings::layerFor(dev_idx);
+    return (device_layer == DeviceBindings::NO_LAYER) ? 0 : device_layer;
+}
+
 bool VirtualMatrix::processKeyPress(uint8_t dev_idx, uint8_t raw_keycode, uint16_t &out_keycode) {
     if (dev_idx >= MAX_KEYBOARDS) return false;
 

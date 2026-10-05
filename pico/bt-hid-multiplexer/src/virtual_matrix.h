@@ -34,6 +34,10 @@ public:
     // loop: VIAL writes one key at a time, and each flash save blocks everything for tens of ms.
     static void flushPendingSave();
     static uint8_t getActiveLayer();
+    // The layer that takes effect for a device right now: the layer selected by a held or toggled
+    // layer key if there is one, else the device's bound layer, else the base layer. With no device
+    // (DeviceBindings::NO_DEVICE) it is the global layer.
+    static uint8_t getEffectiveLayer(uint8_t dev_idx);
 
 private:
     static uint16_t keymap_[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS];

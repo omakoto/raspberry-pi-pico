@@ -270,6 +270,28 @@ int main() {
     CHECK(DeviceBindings::unbind(1) && DeviceBindings::layerFor(1) == DeviceBindings::NO_LAYER);
     CHECK(DeviceBindings::entryCount() == 0);
 
+    // The effective layer shown on the OLED is the one of the device used last: its bound layer,
+    // unless a layer key selects another one.
+    reset();
+    CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::NO_DEVICE) == 0);
+    CHECK(DeviceBindings::bind(1, 6));
+    CHECK(VirtualMatrix::getEffectiveLayer(1) == 6);
+    CHECK(VirtualMatrix::getEffectiveLayer(0) == 0);
+    Multiplexer::handleMouseReport(1, 0, 2, 0, 0, 0);          // touch the bound device
+    CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 6);
+    Multiplexer::handleMouseReport(0, 0, 2, 0, 0, 0);          // touch the other device
+    CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 0);
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5300 + 2);                   // button 1 -> TG(2)
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);       // toggle layer 2 on the other device
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 2);
+    Multiplexer::handleMouseReport(1, 0, 2, 0, 0, 0);          // the toggled layer outranks the binding
+    CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 2);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);       // toggle it off again
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(1, 0, 2, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 6);
+
     if (g_failures) { printf("%d FAILURES\n", g_failures); return 1; }
     printf("All host tests passed\n");
     return 0;

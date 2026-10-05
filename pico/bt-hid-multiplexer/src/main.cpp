@@ -203,7 +203,8 @@ int main() {
         if (BleHidHost::getConnectedCount() == 0) {
             cur_dev_name = ClassicHidHost::getConnectedDeviceName();
         }
-        int cur_active_layer = VirtualMatrix::getActiveLayer();
+        // The layer of the device that was used last (its bound layer, or a layer a layer key selected).
+        int cur_active_layer = VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice());
         bool cur_is_pairing = BleHidHost::isPairingMode();
         uint32_t cur_passkey = BleHidHost::getActivePasskey();
         if (cur_passkey == 0) cur_passkey = ClassicHidHost::getActivePasskey();
