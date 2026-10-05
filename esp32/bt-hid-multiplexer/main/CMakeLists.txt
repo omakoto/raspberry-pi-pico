@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "app_task.cpp"
+        "platform.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        btstack
+        bt
+        nvs_flash
+        esp_timer
+        esp_system
+        freertos
+        log
+)

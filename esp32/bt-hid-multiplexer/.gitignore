@@ -1,0 +1,15 @@
+# ESP-IDF build output directory
+build/
+
+# Generated SDK configuration files (keep sdkconfig.defaults)
+sdkconfig
+sdkconfig.old
+
+# Managed components downloaded automatically by IDF Component Manager
+managed_components/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*~

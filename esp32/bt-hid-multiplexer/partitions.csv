@@ -1,0 +1,7 @@
+# Name,   Type, SubType, Offset,  Size
+# nvs holds BTstack's bonds (namespace "BTstack") and the keymap / device bindings (namespace
+# "bthidmux"). It is larger than the default 24 KB so that NVS always has free pages for garbage
+# collection when a keymap layer is rewritten.
+nvs,      data, nvs,     0x9000,  0x10000
+phy_init, data, phy,     0x19000, 0x1000
+factory,  app,  factory, 0x20000, 0x200000
