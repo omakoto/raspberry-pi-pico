@@ -82,7 +82,7 @@ static void ui_task(void *arg) {
             shown_valid = true;
             shown_toast = has_toast;
             last_draw_ms = now;
-            SSD1306::renderStatus(cur.connected_count > 0, cur.device_name, cur.active_layer, cur.pairing,
+            SSD1306::renderStatus(cur.connected_count, cur.device_name, cur.active_layer, cur.pairing,
                                   cur.passkey, has_toast ? cur.toast : "", cur.usb_mounted);
         }
     }

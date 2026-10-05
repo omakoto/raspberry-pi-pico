@@ -23,7 +23,9 @@ public:
     static void show();
 
     // High-level UI status screen
-    static void renderStatus(bool ble_connected, const char *dev_name, int active_layer,
+    // dev_name: the device used last (or connected last); connected_count == 0 shows the
+    // DISCONNECTED screen.
+    static void renderStatus(uint8_t connected_count, const char *dev_name, int active_layer,
                              bool pairing_active, uint32_t passkey, const char *toast_msg, bool usb_mounted);
     static void renderBootSplash(const char *board_desc, const char *version_desc);
 

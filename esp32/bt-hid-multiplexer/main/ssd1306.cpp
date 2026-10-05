@@ -233,8 +233,9 @@ void SSD1306::show() {
     }
 }
 
-void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_layer,
+void SSD1306::renderStatus(uint8_t connected_count, const char *dev_name, int active_layer,
                            bool pairing_active, uint32_t passkey, const char *toast_msg, bool usb_mounted) {
+    bool ble_connected = connected_count > 0;
     clear(false);
 
     // 1. Header Banner (0..11px)
@@ -254,8 +255,10 @@ void SSD1306::renderStatus(bool ble_connected, const char *dev_name, int active_
         drawString(pin_str, 20, 24, true, true);
         drawString("Type PIN + Enter on KB", 2, 42, true, false);
     } else if (ble_connected) {
-        drawString("BT:", 2, 16, true, false);
-        drawString(dev_name ? dev_name : "Connected", 22, 16, true, false);
+        // "<number of connected devices> devs: <name of the device used last>"
+        char dev_line[48];
+        snprintf(dev_line, sizeof(dev_line), "%u devs: %s", connected_count, dev_name ? dev_name : "");
+        drawString(dev_line, 2, 16, true, false);
 
         char layer_str[32];
         const char *l_name = "BASE";

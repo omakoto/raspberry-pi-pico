@@ -52,6 +52,7 @@ struct BleSlot {
     bool led_report_resolved;   // report descriptor has been inspected for LED output report
     uint8_t led_report_id;      // report ID for LED output report (0 if no report ID)
     uint32_t last_used_ms;      // timestamp (ms since boot) of last input report or connection
+    uint32_t connected_ms;      // when the HID service came up (ms since boot), 0 = not yet
     BleMouseFormat mouse_format;     // detected mouse report format
     bool mouse_format_resolved;      // report descriptor has been inspected for mouse format
     uint8_t mouse_report_id;         // report ID for mouse input reports
@@ -965,6 +966,15 @@ const char* BleHidHost::getConnectedDeviceName() {
     return s_dev_name_summary;
 }
 
+uint8_t BleHidHost::getMostRecentlyConnectedSlot() {
+    uint8_t best = 0xFF;
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (!s_slots[i].connected) continue;
+        if (best == 0xFF || s_slots[i].connected_ms > s_slots[best].connected_ms) best = i;
+    }
+    return best;
+}
+
 const char* BleHidHost::getConnectedDeviceName(uint8_t slot_idx) {
     if (slot_idx < MAX_BLE_DEVICES && s_slots[slot_idx].connected) {
         return s_slots[slot_idx].name;
@@ -1504,6 +1514,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
 
                 if (slot) {
                     slot->connected = true;
+                    slot->connected_ms = platform_now_ms();
                     s_active_passkey = 0;
 
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);

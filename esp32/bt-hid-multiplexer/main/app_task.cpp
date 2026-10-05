@@ -254,7 +254,16 @@ static void on_ui_publish(btstack_timer_source_t *ts) {
         StageScope stage(STAGE_UI_PUBLISH);
         UiSnapshot snap = {};
         snap.connected_count = BleHidHost::getConnectedCount();
-        snprintf(snap.device_name, sizeof(snap.device_name), "%s", BleHidHost::getConnectedDeviceName());
+        // The device used last; if it is not connected (or none has sent input yet), the device that
+        // connected last.
+        uint8_t name_dev = DeviceBindings::lastActiveDevice();
+        uint8_t addr[6];
+        if (name_dev == DeviceBindings::NO_DEVICE || !BleHidHost::getSlotAddress(name_dev, addr)) {
+            name_dev = BleHidHost::getMostRecentlyConnectedSlot();
+        }
+        if (name_dev != 0xFF) {
+            snprintf(snap.device_name, sizeof(snap.device_name), "%s", BleHidHost::getConnectedDeviceName(name_dev));
+        }
         // The layer of the device that was used last (its bound layer, or a layer a layer key selected).
         snap.active_layer = VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice());
         snap.pairing = BleHidHost::isPairingMode();

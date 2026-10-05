@@ -23,6 +23,8 @@ public:
     static bool hasUnconnectedBonds();
     static const char* getConnectedDeviceName();
     static const char* getConnectedDeviceName(uint8_t slot_idx);
+    // The connected slot whose HID service came up last, or 0xFF if none is connected.
+    static uint8_t getMostRecentlyConnectedSlot();
     // Bluetooth address of the connected device with this multiplexer device index.
     static bool getSlotAddress(uint8_t dev_idx, uint8_t addr[6]);
     static uint32_t getActivePasskey();
