@@ -46,6 +46,8 @@ struct BleSlot {
     uint16_t conn_latency;      // last reported slave latency
     uint8_t latency_forced;     // how often parameter optimization was requested on this connection
     btstack_timer_source_t latency_timer; // delays parameter optimization past the peer's settling window
+    btstack_timer_source_t name_timer;    // delays the GAP Device Name read (see schedule_name_read)
+    uint8_t name_read_attempts;
     bool has_led_report;        // peripheral provides an LED output report
     bool led_report_resolved;   // report descriptor has been inspected for LED output report
     uint8_t led_report_id;      // report ID for LED output report (0 if no report ID)
@@ -97,15 +99,16 @@ static char s_pending_connect_name[32];
 // input reports when paired this way: once LE Secure Connections pairing was offered it paired
 // and encrypted fine but never sent a single HID notification. Other devices (e.g. the Keychron
 // Nape Pro on one of its host slots) accept only Secure Connections and drop the link when
-// offered legacy pairing. So each failed pairing attempt during a pairing window flips the
-// Secure Connections bit for the next attempt (s_sc_flipped): every device gets the default
-// first and the other method next. 'authreq' sets the default.
+// offered legacy pairing. So each failed pairing attempt flips the Secure Connections bit for the
+// next attempt (s_sc_flipped), until a pairing succeeds: every device gets the default first and
+// the other method next, also when it leaves pairing mode after one failure and pairing has to be
+// started again. 'authreq' sets the default.
 // MITM (passkey entry, shown on the OLED) is opt-in because it changes the pairing UX.
 static uint8_t s_sm_auth_req = SM_AUTHREQ_BONDING;
 static bool s_sc_flipped = false;
 
 // The authentication requirements offered right now: the configured policy, with the Secure
-// Connections bit flipped after a failed attempt in the current pairing window.
+// Connections bit flipped after a failed attempt.
 static uint8_t effective_auth_req() {
     return s_sm_auth_req ^ (s_sc_flipped ? SM_AUTHREQ_SECURE_CONNECTION : 0);
 }
@@ -475,10 +478,59 @@ static void scheduleZeroLatency(BleSlot *slot) {
 }
 #endif
 
-// Forget everything about a slot. The latency timer must leave the run loop before the struct
-// is zeroed, or the run loop keeps a dangling list entry.
+// Peripherals often leave their name out of the advertisement the connection was made from (in
+// pairing mode the Keychron Nape Pro has it only in its scan response), so the slot and its bond are
+// named after the address. The name is then read from the GAP Device Name characteristic once the
+// HID service is set up. The delay keeps the read out of the way of the HIDS client's own GATT
+// requests right after connecting (the GATT client runs one request per connection at a time); a
+// read that is refused because the client is busy is retried.
+#define NAME_READ_DELAY_MS      1500
+#define MAX_NAME_READ_ATTEMPTS  3
+
+static bool slot_name_is_address(const BleSlot *slot) {
+    return strcmp(slot->name, bd_addr_to_str(slot->addr)) == 0;
+}
+
+static void handle_name_read_event(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
+    (void)channel;
+    (void)size;
+    if (packet_type != HCI_EVENT_PACKET) return;
+    if (hci_event_packet_get_type(packet) != GATT_EVENT_CHARACTERISTIC_VALUE_QUERY_RESULT) return;
+    BleSlot *slot = find_slot_by_handle(gatt_event_characteristic_value_query_result_get_handle(packet));
+    uint16_t len = gatt_event_characteristic_value_query_result_get_value_length(packet);
+    if (!slot || len == 0) return;
+    if (len > sizeof(slot->name) - 1) len = sizeof(slot->name) - 1;
+    memcpy(slot->name, gatt_event_characteristic_value_query_result_get_value(packet), len);
+    slot->name[len] = '\0';
+    printf("[BLE Host] Slot %u: device name '%s' (from GAP Device Name)\n", slot->dev_idx, slot->name);
+    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
+}
+
+static void schedule_name_read(BleSlot *slot);
+
+static void onNameReadTimeout(btstack_timer_source_t *ts) {
+    BleSlot *slot = (BleSlot *)btstack_run_loop_get_timer_context(ts);
+    if (!slot->connected || slot->con_handle == HCI_CON_HANDLE_INVALID || !slot_name_is_address(slot)) return;
+    uint8_t status = gatt_client_read_value_of_characteristics_by_uuid16(
+        &handle_name_read_event, slot->con_handle, 0x0001, 0xFFFF, ORG_BLUETOOTH_CHARACTERISTIC_GAP_DEVICE_NAME);
+    if (status != ERROR_CODE_SUCCESS && ++slot->name_read_attempts < MAX_NAME_READ_ATTEMPTS) {
+        schedule_name_read(slot);
+    }
+}
+
+static void schedule_name_read(BleSlot *slot) {
+    btstack_run_loop_remove_timer(&slot->name_timer);
+    btstack_run_loop_set_timer_context(&slot->name_timer, slot);
+    btstack_run_loop_set_timer_handler(&slot->name_timer, &onNameReadTimeout);
+    btstack_run_loop_set_timer(&slot->name_timer, NAME_READ_DELAY_MS);
+    btstack_run_loop_add_timer(&slot->name_timer);
+}
+
+// Forget everything about a slot. The timers must leave the run loop before the struct is zeroed,
+// or the run loop keeps a dangling list entry.
 static void reset_slot(BleSlot *slot) {
     btstack_run_loop_remove_timer(&slot->latency_timer);
+    btstack_run_loop_remove_timer(&slot->name_timer);
     uint8_t idx = (uint8_t)(slot - s_slots);
     memset(slot, 0, sizeof(BleSlot));
     slot->dev_idx = idx;
@@ -828,7 +880,6 @@ bool BleHidHost::isScanning() {
 
 void BleHidHost::startPairingMode(uint32_t timeout_ms) {
     s_is_pairing_mode = true;
-    apply_auth_req(false);  // every pairing window starts with the configured policy
     s_pairing_mode_start_ms = platform_now_ms();
     s_pairing_mode_duration_ms = timeout_ms;
     btstack_run_loop_remove_timer(&s_pairing_mode_timer);
@@ -844,7 +895,6 @@ void BleHidHost::startPairingMode(uint32_t timeout_ms) {
 void BleHidHost::stopPairingMode() {
     if (!s_is_pairing_mode) return;
     s_is_pairing_mode = false;
-    apply_auth_req(false);
     btstack_run_loop_remove_timer(&s_pairing_mode_timer);
     LogRing::breadcrumb(CRUMB_PAIRING_STOP);
     printf("[BLE Host] Pairing mode stopped.\n");
@@ -1451,6 +1501,10 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     s_active_passkey = 0;
 
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
+                    if (slot_name_is_address(slot)) {
+                        slot->name_read_attempts = 0;
+                        schedule_name_read(slot);
+                    }
 
                     resolve_led_report(slot);
                     resolve_mouse_format(slot);
@@ -1764,6 +1818,7 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
             BleSlot *slot = find_slot_by_handle(h);
             if (status == ERROR_CODE_SUCCESS) {
                 printf("[BLE Host] Pairing complete for handle 0x%04X: SUCCESS\n", h);
+                apply_auth_req(false);  // the next device gets the configured policy first again
                 print_link_security(h, "after pairing");
                 if (slot) {
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
@@ -1773,7 +1828,8 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
                 printf("[BLE Host] Pairing complete for handle 0x%04X: FAILED (status 0x%02X, reason 0x%02X)\n", h, status, reason);
                 if (s_is_pairing_mode) {
                     // Some peripherals accept only one of the two methods and just drop the link
-                    // otherwise; offer the other one on the next attempt.
+                    // otherwise; offer the other one on the next attempt (also in a later pairing
+                    // window).
                     apply_auth_req(!s_sc_flipped);
                     printf("[BLE Host] Next pairing attempt offers %s.\n",
                            (effective_auth_req() & SM_AUTHREQ_SECURE_CONNECTION) ? "LE Secure Connections" : "LE legacy pairing");

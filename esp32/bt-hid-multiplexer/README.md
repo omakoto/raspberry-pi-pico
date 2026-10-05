@@ -155,15 +155,16 @@ Holding the button for 8 s clears all bonds and resets the keymap (the per-devic
 
 ### Pairing policy: LE legacy pairing first, Secure Connections next
 The firmware offers **LE legacy pairing without MITM** first. If a pairing attempt fails (the device
-rejects it or just drops the link), the next attempt in the same pairing window offers **LE Secure
-Connections**, and so on alternately, because devices differ: the ProtoArc XK01 keyboard pairs and
-encrypts fine over Secure Connections yet never sends a single HID input notification afterwards, so it
-needs legacy pairing, while the Keychron Nape Pro on one of its host slots accepts only Secure
-Connections and drops the link when offered legacy pairing. The console shows which method each attempt
-offers. `authreq [legacy|sc] [mitm|nomitm]` sets the method tried first (default `legacy nomitm`); a
-keyboard that insists on MITM still gets passkey entry (the PIN shows on the OLED), and `authreq legacy
-mitm` forces it. The policy only affects new pairings: `unbond <idx>` a device and re-pair it to apply a
-new policy.
+rejects it or just drops the link), the next attempt offers **LE Secure Connections**, and so on
+alternately until a pairing succeeds (also across pairing windows, for devices that leave pairing mode
+after one failure: just put the device in pairing mode again), because devices differ: the ProtoArc XK01
+keyboard pairs and encrypts fine over Secure Connections yet never sends a single HID input notification
+afterwards, so it needs legacy pairing, while the Keychron Nape Pro on one of its host slots accepts only
+Secure Connections and drops the link when offered legacy pairing. The console shows which method each
+attempt offers. `authreq [legacy|sc] [mitm|nomitm]` sets the method tried first (default `legacy
+nomitm`); a keyboard that insists on MITM still gets passkey entry (the PIN shows on the OLED), and
+`authreq legacy mitm` forces it. The policy only affects new pairings: `unbond <idx>` a device and
+re-pair it to apply a new policy.
 
 ### CCCD discovery: Read By Type (`ENABLE_GATT_LEGACY_CCC_DISCOVERY`)
 

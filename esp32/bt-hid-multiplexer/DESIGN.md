@@ -11,7 +11,7 @@ The firmware connects up to 8 BLE keyboards, mice and trackpads (HID over GATT) 
 composite USB HID device (keyboard + mouse, VIAL raw HID, optional CDC console), with VIAL keymapping
 over 8 layers, per-device layers, an SSD1306 OLED, a pairing button and a pairing LED.
 
-Status: all phases (§13.3) implemented. Verified on a DevKitC-1 (ESP32-S3 N8R8) without peripherals: USB, VIAL, NVS, console, watchdog recovery, BLE scanning, flashing over both ports. Not yet verified: pairing and input from real BLE devices, the OLED, the button and the LED, and the XIAO itself.
+Status: all phases (§13.3) implemented and verified on a DevKitC-1 (ESP32-S3 N8R8): USB, VIAL (vial.rocks), NVS, console, watchdog recovery, flashing over both ports, OLED, button, LED, and pairing, reconnecting and input with a Keychron Nape Pro. Not yet verified: several devices at once (R1) and the XIAO itself.
 
 ---
 
@@ -735,10 +735,12 @@ Each phase is built and checked on hardware before the next starts.
 | Q3 | **Extra persistence.** | **Decided:** same as the Pico. Mouse speed and `authreq` stay in RAM. |
 | Q4 | **Button reset.** | **Decided:** same as the Pico. The 8 s reset keeps the bindings. |
 | R1 | **8 central links plus scanning** on the S3 controller is within spec (9 connections, 10 activities) but untested here. Peripherals asking for 7.5 ms intervals on 8 links may strain scheduling. | Bring-up phase 3 tests 1→8 devices. Without zero latency, if needed. |
-| R2 | **`tud_hid_n_report` from `bt_app`** (another task than `tud_task`) on the DWC2 port. | Fallback `usbd_defer_func` (§6.4). |
-| R3 | **`.noinit` survival** across panic and watchdog resets on the S3. | Fallback `RTC_NOINIT_ATTR`, 4 KB (§7.5). |
+| R2 | **(Resolved: works with a real mouse)** **`tud_hid_n_report` from `bt_app`** (another task than `tud_task`) on the DWC2 port. | Fallback `usbd_defer_func` (§6.4). |
+| R3 | **(Resolved: verified with `hangtest`)** **`.noinit` survival** across panic and watchdog resets on the S3. | Fallback `RTC_NOINIT_ATTR`, 4 KB (§7.5). |
 | R4 | **ROM USB-Serial-JTAG after the forced download boot** (§6.5). | **Resolved** in phase 2: works once the USB PHY is handed back before the restart. Fallback stays BOOT+RESET by hand. |
 | R5 | **NVS writes stall the USB interrupt** (not IRAM-safe) for a few ms. | Debounced and per-layer writes. Measure in bring-up. |
 | R6 | **HCI receive ring overflow** in the port (drops packets) during scan bursts with 8 links. | Ring sized by `HCI_HOST_ACL_PACKET_NUM`. Drops logged as breadcrumbs. Tune scan duplicate filter. |
 | F1 | **udev.** VID `303a` added to `~/cbin/setup/config-hidraw-permission` and its test. | Done. Run the script again to install the rule. |
+| F3 | **Pairing method.** The Keychron Nape Pro (on one of its host slots) accepts only LE Secure Connections and drops the link when offered legacy pairing, while the ProtoArc XK01 needs legacy. Both firmwares now flip the method after each failed attempt until a pairing succeeds (also across pairing windows). | Done (Pico and ESP32). |
+| F4 | **Device names.** Devices whose advertisement has no name were stored under their address; the ESP32 port reads the GAP Device Name over GATT after the HID service is up. | Done (ESP32 only, by decision). |
 | F2 | **Pico fixes.** Pico inconsistencies found during analysis, reported only (no change without approval): keyboard LED reports that arrive on the interrupt OUT endpoint (what Linux uses) still carry the report ID in `buffer[0]`, which the Pico's `tud_hid_set_report_cb` takes as the LED byte; `STATUS_UPDATE_INTERVAL_MS` and `PAIRING_SCAN_TIMEOUT_MS` are unused; the `Pico_2_W` by-id glob in `01-install.sh` can never match; the `00-build.sh` header says the default is pico2_w but it falls back to pico_w; the `crumb_index` sanity check expires after 65520 crumbs. | Report only. |
