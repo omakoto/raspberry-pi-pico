@@ -3,6 +3,7 @@
 #include "platform.h"
 #include "multiplexer.h"
 #include "device_bindings.h"
+#include "bond_table.h"
 #include "config.h"
 #include "btstack.h"
 #include "btstack_tlv.h"
@@ -16,33 +17,8 @@
 #define TLV_TAG_HOGD       ((((uint32_t) 'H') << 24 ) | (((uint32_t) 'O') << 16) | (((uint32_t) 'G') << 8) | 'D')
 #define TLV_TAG_HOG_TABLE  ((((uint32_t) 'H') << 24 ) | (((uint32_t) 'O') << 16) | (((uint32_t) 'G') << 8) | 'T')
 
-struct BondedDeviceRecord {
-    bd_addr_t addr;
-    bd_addr_type_t addr_type;
-    char name[32];
-    // When the device last connected, as a sequence number (higher = more recent; 0 = not since this
-    // was recorded). When the table is full, the least recently used device makes room.
-    uint32_t last_used;
-};
-
-struct BondedTable {
-    uint8_t count;
-    BondedDeviceRecord records[MAX_BLE_DEVICES];
-};
-
-// The record and table as stored before last_used existed (the table under TLV_TAG_HOG_TABLE, and a
-// single record under the older TLV_TAG_HOGD). Converted when loaded.
-struct BondedDeviceRecordV1 {
-    bd_addr_t addr;
-    bd_addr_type_t addr_type;
-    char name[32];
-};
-
-struct BondedTableV1 {
-    uint8_t count;
-    BondedDeviceRecordV1 records[MAX_BLE_DEVICES];
-};
-static_assert(sizeof(BondedTable) != sizeof(BondedTableV1), "the stored size tells the versions apart");
+// BondedDeviceRecord stores the address type as a 32-bit integer (see bond_table.h).
+static_assert(sizeof(bd_addr_type_t) == sizeof(uint32_t), "stored layout changed");
 
 enum BleMouseFormat : uint8_t {
     MOUSE_FORMAT_UNKNOWN = 0,
@@ -349,15 +325,6 @@ static void bonds_changed() {
     DeviceBindings::pairingChanged();
 }
 
-static void copy_v1_record(BondedDeviceRecord *to, const BondedDeviceRecordV1 &from, uint32_t last_used) {
-    memset(to, 0, sizeof(*to));
-    bd_addr_copy(to->addr, from.addr);
-    to->addr_type = from.addr_type;
-    memcpy(to->name, from.name, sizeof(to->name));
-    to->name[sizeof(to->name) - 1] = '\0';
-    to->last_used = last_used;
-}
-
 // Load bonded devices table from TLV, migrating single-device legacy entries if present
 static void load_bonded_devices() {
     memset(&s_bonded_table, 0, sizeof(s_bonded_table));
@@ -367,39 +334,29 @@ static void load_bonded_devices() {
     btstack_tlv_get_instance(&tlv_impl, &tlv_context);
     if (!tlv_impl) return;
 
-    // Static: too large for the bt_app task's stack. bt_app is the only caller.
-    static BondedTableV1 v1;
-    int len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOG_TABLE, (uint8_t *)&s_bonded_table, sizeof(s_bonded_table));
-    if (len == (int)sizeof(s_bonded_table) && s_bonded_table.count <= MAX_BLE_DEVICES) {
+    // Static: too large for the bt_app task's stack. bt_app is the only caller. The TLV returns the
+    // stored size, which tells the table versions apart (the current table is the larger one).
+    static BondedTable stored;
+    int len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOG_TABLE, (uint8_t *)&stored, sizeof(stored));
+    BondTableLoad result = bond_table_decode(&stored, len, &s_bonded_table);
+    if (result == BondTableLoad::CURRENT) {
         printf("[BLE Host] Loaded %u bonded device(s) from TLV table.\n", s_bonded_table.count);
-    } else if (len == (int)sizeof(v1) &&
-               tlv_impl->get_tag(tlv_context, TLV_TAG_HOG_TABLE, (uint8_t *)&v1, sizeof(v1)) == (int)sizeof(v1) &&
-               v1.count <= MAX_BLE_DEVICES) {
-        // Nothing records which device was used when, so the table order (the order they were
-        // added in) stands in for it.
-        memset(&s_bonded_table, 0, sizeof(s_bonded_table));
-        s_bonded_table.count = v1.count;
-        for (uint8_t i = 0; i < v1.count; i++) {
-            copy_v1_record(&s_bonded_table.records[i], v1.records[i], i + 1u);
-        }
+    } else if (result == BondTableLoad::CONVERTED) {
         save_bonded_devices();
         printf("[BLE Host] Converted %u bonded device(s) to the current table format.\n", s_bonded_table.count);
     } else {
-        memset(&s_bonded_table, 0, sizeof(s_bonded_table));
         // Fall back to legacy single-device TLV tag if present
         BondedDeviceRecordV1 legacy_record;
         len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOGD, (uint8_t *)&legacy_record, sizeof(legacy_record));
         if (len == (int)sizeof(legacy_record)) {
             s_bonded_table.count = 1;
-            copy_v1_record(&s_bonded_table.records[0], legacy_record, 1);
+            bond_record_from_v1(&s_bonded_table.records[0], legacy_record, 1);
             save_bonded_devices();
             printf("[BLE Host] Migrated legacy bonded device '%s' (%s) to table.\n",
-                   legacy_record.name, bd_addr_to_str(legacy_record.addr));
+                   s_bonded_table.records[0].name, bd_addr_to_str(s_bonded_table.records[0].addr));
         }
     }
-    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
-        if (s_bonded_table.records[i].last_used > s_last_use_seq) s_last_use_seq = s_bonded_table.records[i].last_used;
-    }
+    s_last_use_seq = bond_table_max_last_used(s_bonded_table);
 
     // Inspect le_device_db to discover any keys present without a metadata record
     for (int i = 0; i < le_device_db_max_count(); i++) {
@@ -445,69 +402,34 @@ static void remove_le_device_db_entry(const bd_addr_t addr) {
     }
 }
 
-// Makes room in a full table for a new device: drops the least recently used device, preferring
-// one that is not connected. Its BTstack keys go too, so that it cannot reconnect in the background
-// and push yet another device out. Returns the freed index.
-static uint8_t evict_least_recently_used_bond() {
-    int victim = -1;
-    bool victim_connected = true;
-    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
-        BleSlot *slot = find_slot_by_addr(s_bonded_table.records[i].addr);
-        bool connected = slot && slot->con_handle != HCI_CON_HANDLE_INVALID;
-        if (victim < 0 || (victim_connected && !connected) ||
-            (connected == victim_connected && s_bonded_table.records[i].last_used < s_bonded_table.records[victim].last_used)) {
-            victim = i;
-            victim_connected = connected;
-        }
-    }
-    BondedDeviceRecord &r = s_bonded_table.records[victim];
-    printf("[BLE Host] Bonded device table full: dropping the least recently used '%s' (%s)\n",
-           r.name, bd_addr_to_str(r.addr));
-    BleSlot *slot = find_slot_by_addr(r.addr);
-    if (slot && slot->con_handle != HCI_CON_HANDLE_INVALID) {
-        gap_disconnect(slot->con_handle);
-    }
-    remove_le_device_db_entry(r.addr);
-    return (uint8_t)victim;
-}
-
 // Add or update an entry in the bonded devices table. connected says that the device has just
-// connected (or paired), which makes it the most recently used one.
+// connected (or paired), which makes it the most recently used one. When the table is full, the
+// least recently used device, preferring one that is not connected, makes room; its BTstack keys go
+// too, so that it cannot reconnect in the background and push yet another device out.
 static void add_or_update_bonded_device(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name,
                                         bool connected) {
+    bool device_connected[MAX_BLE_DEVICES] = {};
     for (uint8_t i = 0; i < s_bonded_table.count; i++) {
-        if (bd_addr_cmp(addr, s_bonded_table.records[i].addr) == 0) {
-            s_bonded_table.records[i].addr_type = addr_type;
-            if (name && name[0] != '\0') {
-                snprintf(s_bonded_table.records[i].name, sizeof(s_bonded_table.records[i].name), "%s", name);
-            }
-            if (connected) s_bonded_table.records[i].last_used = ++s_last_use_seq;
-            bonds_changed();
-            return;
+        BleSlot *slot = find_slot_by_addr(s_bonded_table.records[i].addr);
+        device_connected[i] = slot && slot->con_handle != HCI_CON_HANDLE_INVALID;
+    }
+    BondUpsertResult r = bond_table_upsert(s_bonded_table, addr, addr_type, name, bd_addr_to_str(addr),
+                                           connected, s_last_use_seq, device_connected);
+    if (r.evicted) {
+        const BondedDeviceRecord &old = r.evicted_record;
+        printf("[BLE Host] Bonded device table full: dropping the least recently used '%s' (%s)\n",
+               old.name, bd_addr_to_str(old.addr));
+        BleSlot *slot = find_slot_by_addr(old.addr);
+        if (slot && slot->con_handle != HCI_CON_HANDLE_INVALID) {
+            gap_disconnect(slot->con_handle);
         }
+        remove_le_device_db_entry(old.addr);
     }
-
-    uint8_t target_idx = 0;
-    if (s_bonded_table.count < MAX_BLE_DEVICES) {
-        target_idx = s_bonded_table.count++;
-    } else {
-        target_idx = evict_least_recently_used_bond();
-    }
-
-    memset(&s_bonded_table.records[target_idx], 0, sizeof(s_bonded_table.records[target_idx]));
-    bd_addr_copy(s_bonded_table.records[target_idx].addr, addr);
-    s_bonded_table.records[target_idx].addr_type = addr_type;
-    s_bonded_table.records[target_idx].last_used = ++s_last_use_seq;
-    if (name && name[0] != '\0') {
-        snprintf(s_bonded_table.records[target_idx].name, sizeof(s_bonded_table.records[target_idx].name), "%s", name);
-    } else {
-        snprintf(s_bonded_table.records[target_idx].name, sizeof(s_bonded_table.records[target_idx].name),
-                 "%s", bd_addr_to_str(addr));
-    }
-
     bonds_changed();
-    printf("[BLE Host] Saved bonded device [%u]: '%s' (%s)\n",
-           target_idx, s_bonded_table.records[target_idx].name, bd_addr_to_str(addr));
+    if (r.added) {
+        printf("[BLE Host] Saved bonded device [%d]: '%s' (%s)\n",
+               r.index, s_bonded_table.records[r.index].name, bd_addr_to_str(addr));
+    }
 }
 
 static bool is_bonded_device_addr(const bd_addr_t addr) {

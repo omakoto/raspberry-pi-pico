@@ -1,9 +1,11 @@
 #!/bin/bash
 #
 # Builds and runs test/host_test.cpp, which exercises the virtual matrix and multiplexer on the host
-# with USB and flash stubbed out, plus the log ring and the runtime VIAL definition. Run it every time
-# touching main/multiplexer.cpp, main/macros.cpp, main/virtual_matrix.cpp, main/device_bindings.cpp, main/log_ring.cpp,
-# main/vial_definition.cpp, main/config.h or gen-vial-layout.py.
+# with USB and flash stubbed out, plus the log ring, the runtime VIAL definition, the bonded device
+# table and the stored bindings format. Run it every time touching main/multiplexer.cpp,
+# main/macros.cpp, main/virtual_matrix.cpp, main/device_bindings.cpp, main/log_ring.cpp,
+# main/vial_definition.cpp, main/bond_table.cpp, main/bindings_format.cpp, main/storage.h,
+# main/config.h or gen-vial-layout.py.
 #
 # With --coverage it also reports how much of each main/ source the tests run.
 
@@ -79,6 +81,12 @@ build host_test host_test.cpp ../main/multiplexer.cpp ../main/virtual_matrix.cpp
 
 build log_ring_test log_ring_test.cpp ../main/log_ring.cpp
 "$out/log_ring_test/log_ring_test"
+
+build bond_table_test bond_table_test.cpp ../main/bond_table.cpp
+"$out/bond_table_test/bond_table_test"
+
+build bindings_format_test bindings_format_test.cpp ../main/bindings_format.cpp
+"$out/bindings_format_test/bindings_format_test"
 
 build vial_definition_test vial_definition_test.cpp ../main/vial_definition.cpp
 "$out/vial_definition_test/vial_definition_test" "$out/definition.xz" "$out/largest.xz"

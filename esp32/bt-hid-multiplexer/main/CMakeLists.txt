@@ -11,6 +11,8 @@ idf_component_register(
         "macros.cpp"
         "virtual_matrix.cpp"
         "device_bindings.cpp"
+        "bond_table.cpp"
+        "bindings_format.cpp"
         "vial_server.cpp"
         "vial_definition.cpp"
         "ble_hid_host.cpp"
