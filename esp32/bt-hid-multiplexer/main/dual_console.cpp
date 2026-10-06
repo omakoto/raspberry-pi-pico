@@ -284,7 +284,7 @@ void dual_console_handle_command(const char *cmd) {
         if (last == DeviceBindings::NO_DEVICE) {
             dual_printf("  Active Layer: %u\r\n", VirtualMatrix::getActiveLayer());
         } else {
-            dual_printf("  Active Layer: %u (device used last: %u; layer selected by layer keys: %u)\r\n",
+            dual_printf("  Active Layer: %u (device used last: %u; layer of the unbound devices: %u)\r\n",
                         VirtualMatrix::getEffectiveLayer(last), last, VirtualMatrix::getActiveLayer());
         }
         dual_printf("  Scanning:     %s\r\n", BleHidHost::isScanning() ? "Active" : "Idle");

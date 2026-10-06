@@ -205,10 +205,15 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
 ### Layers and what is supported
 
 - **Keys:** the matrix is 16×16, one cell per HID keyboard usage, so every key and modifier can be
-  remapped. Keys left `Transparent` on an upper layer use the layer below.
+  remapped. Keys left `Transparent` on an upper layer use the next lower layer that is switched on
+  (layers no layer key selected are skipped), and finally layer 0; for a device bound to a layer, its
+  own layer comes just before layer 0.
 - **Keycodes that work:** basic keys, modifiers, modifier-wrapped keys such as `LSFT(KC_A)`,
   `MO`/`TG`/`TO`/`DF` layer keys (in the numbering of the VIAL protocol version the firmware reports),
   `KC_NO`, `KC_TRNS`, mouse buttons 1–5, the mouse wheel/cursor keycodes, and macros `M0`–`M15`.
+- **Layer keys and per-device layers:** a layer key only switches layers for its own group of devices.
+  All unbound devices are one group; the devices bound to the same layer are another. So a layer key
+  on a bound device does not change what any other device does, except devices bound to the same layer.
 - **Macros:** edit them in VIAL's **Macros** tab (16 macros, 1024 bytes in total) and put `M0`…`M15`
   on a key or mouse button. A macro can type text (ASCII, US layout; other characters are skipped),
   tap, press and release keys (including modifier-wrapped ones) and wait. One macro plays at a time;

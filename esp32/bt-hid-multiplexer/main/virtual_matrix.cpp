@@ -6,9 +6,8 @@
 
 uint16_t VirtualMatrix::keymap_[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS];
 uint16_t VirtualMatrix::active_translation_[MAX_KEYBOARDS][256];
-uint8_t VirtualMatrix::default_layer_ = 0;
-uint32_t VirtualMatrix::momentary_layer_mask_ = 0;
-uint32_t VirtualMatrix::toggle_layer_mask_ = 0;
+VirtualMatrix::LayerState VirtualMatrix::layer_state_[NUM_LAYERS];
+uint8_t VirtualMatrix::layer_key_group_[MAX_KEYBOARDS][256];
 bool VirtualMatrix::save_pending_ = false;
 uint32_t VirtualMatrix::last_edit_ms_ = 0;
 
@@ -28,54 +27,61 @@ void VirtualMatrix::init() {
         StorageManager::saveKeymap(keymap_);
     }
 
-    default_layer_ = 0;
-    momentary_layer_mask_ = 0;
-    toggle_layer_mask_ = 0;
-
-    for (uint8_t d = 0; d < MAX_KEYBOARDS; d++) {
-        for (int k = 0; k < 256; k++) {
-            active_translation_[d][k] = 0;
-        }
-    }
+    memset(layer_state_, 0, sizeof(layer_state_));
+    memset(active_translation_, 0, sizeof(active_translation_));
+    memset(layer_key_group_, 0, sizeof(layer_key_group_));
 }
 
-uint8_t VirtualMatrix::computeActiveLayer() {
+uint8_t VirtualMatrix::groupOf(uint8_t dev_idx) {
+    uint8_t layer = DeviceBindings::layerFor(dev_idx);
+    return (layer == DeviceBindings::NO_LAYER) ? 0 : layer;
+}
+
+uint8_t VirtualMatrix::computeActiveLayer(uint8_t group) {
+    const LayerState &st = layer_state_[group];
     for (int l = NUM_LAYERS - 1; l >= 0; l--) {
-        if (momentary_layer_mask_ & (1UL << l)) {
+        if (st.momentary_mask & (1UL << l)) {
             return (uint8_t)l;
         }
     }
     for (int l = NUM_LAYERS - 1; l >= 0; l--) {
-        if (toggle_layer_mask_ & (1UL << l)) {
+        if (st.toggle_mask & (1UL << l)) {
             return (uint8_t)l;
         }
     }
-    return default_layer_;
+    return st.default_layer;
 }
 
 uint8_t VirtualMatrix::getActiveLayer() {
-    return computeActiveLayer();
+    return computeActiveLayer(0);
 }
 
 uint16_t VirtualMatrix::resolveAction(uint8_t dev_idx, uint8_t raw_keycode) {
     uint8_t row = raw_keycode / MATRIX_COLS;
     uint8_t col = raw_keycode % MATRIX_COLS;
-    uint8_t active = computeActiveLayer();
-    uint8_t device_layer = DeviceBindings::layerFor(dev_idx);
+    uint8_t group = groupOf(dev_idx);
+    const LayerState &st = layer_state_[group];
 
-    if (device_layer == DeviceBindings::NO_LAYER) {
-        for (int l = active; l >= 0; l--) {
-            uint16_t action = keymap_[l][row][col];
-            if (action != KC_TRNS_) return action;
-        }
-        return KC_NO_;
+    // Transparent entries fall through the layers that are switched on in the device's group, as in
+    // QMK, rather than through every lower layer: layers nobody selected (such as the layers of
+    // other bound devices) must not leak into the lookup. The order is the active layer, the other
+    // switched-on layers from the highest down, the device's own layer if it is bound, then layer 0.
+    // Layer 0 must come last even while it is the active layer.
+    uint8_t order[NUM_LAYERS + 2];
+    int n = 0;
+    uint8_t active = computeActiveLayer(group);
+    if (active != 0) order[n++] = active;
+    uint32_t enabled = st.momentary_mask | st.toggle_mask | (1UL << st.default_layer);
+    for (int l = NUM_LAYERS - 1; l > 0; l--) {
+        if (enabled & (1UL << l)) order[n++] = (uint8_t)l;
     }
+    if (group != 0) order[n++] = group;
+    order[n++] = 0;
 
-    // Bound device: a held layer key still wins, then the device's own layer, then the base layer.
-    // The base layer must come last even while it is the active layer.
-    const uint8_t order[3] = {active != 0 ? active : device_layer, device_layer, 0};
-    for (int i = 0; i < 3; i++) {
-        if (i > 0 && order[i] == order[i - 1]) continue;
+    uint32_t visited = 0;
+    for (int i = 0; i < n; i++) {
+        if (visited & (1UL << order[i])) continue;
+        visited |= (1UL << order[i]);
         uint16_t action = keymap_[order[i]][row][col];
         if (action != KC_TRNS_) return action;
     }
@@ -84,10 +90,9 @@ uint16_t VirtualMatrix::resolveAction(uint8_t dev_idx, uint8_t raw_keycode) {
 
 uint8_t VirtualMatrix::getEffectiveLayer(uint8_t dev_idx) {
     // The same precedence as resolveAction().
-    uint8_t active = computeActiveLayer();
-    if (active != 0) return active;
-    uint8_t device_layer = DeviceBindings::layerFor(dev_idx);
-    return (device_layer == DeviceBindings::NO_LAYER) ? 0 : device_layer;
+    uint8_t group = (dev_idx < MAX_KEYBOARDS) ? groupOf(dev_idx) : 0;
+    uint8_t active = computeActiveLayer(group);
+    return (active != 0) ? active : group;
 }
 
 bool VirtualMatrix::processKeyPress(uint8_t dev_idx, uint8_t raw_keycode, uint16_t &out_keycode) {
@@ -96,28 +101,23 @@ bool VirtualMatrix::processKeyPress(uint8_t dev_idx, uint8_t raw_keycode, uint16
     uint16_t action = resolveAction(dev_idx, raw_keycode);
 
     // Handle Layer Switch Actions
-    if (IS_ACTION_MO(action)) {
-        uint8_t target_l = ACTION_LAYER_NUM(action);
-        if (target_l < NUM_LAYERS) momentary_layer_mask_ |= (1UL << target_l);
-        active_translation_[dev_idx][raw_keycode] = action;
-        out_keycode = 0;
-        return false;
-    }
-    if (IS_ACTION_TG(action)) {
-        uint8_t target_l = ACTION_LAYER_NUM(action);
-        if (target_l < NUM_LAYERS) toggle_layer_mask_ ^= (1UL << target_l);
-        active_translation_[dev_idx][raw_keycode] = action;
-        out_keycode = 0;
-        return false;
-    }
-    if (IS_ACTION_TO(action)) {
+    if (IS_ACTION_MO(action) || IS_ACTION_TG(action) || IS_ACTION_TO(action)) {
+        uint8_t group = groupOf(dev_idx);
+        LayerState &st = layer_state_[group];
         uint8_t target_l = ACTION_LAYER_NUM(action);
         if (target_l < NUM_LAYERS) {
-            default_layer_ = target_l;
-            toggle_layer_mask_ = 0;
-            momentary_layer_mask_ = 0;
+            if (IS_ACTION_MO(action)) {
+                st.momentary_mask |= (1UL << target_l);
+            } else if (IS_ACTION_TG(action)) {
+                st.toggle_mask ^= (1UL << target_l);
+            } else {
+                st.default_layer = target_l;
+                st.toggle_mask = 0;
+                st.momentary_mask = 0;
+            }
         }
         active_translation_[dev_idx][raw_keycode] = action;
+        layer_key_group_[dev_idx][raw_keycode] = group;
         out_keycode = 0;
         return false;
     }
@@ -136,7 +136,9 @@ bool VirtualMatrix::processKeyRelease(uint8_t dev_idx, uint8_t raw_keycode, uint
 
     if (IS_ACTION_MO(original_action)) {
         uint8_t target_l = ACTION_LAYER_NUM(original_action);
-        if (target_l < NUM_LAYERS) momentary_layer_mask_ &= ~(1UL << target_l);
+        if (target_l < NUM_LAYERS) {
+            layer_state_[layer_key_group_[dev_idx][raw_keycode]].momentary_mask &= ~(1UL << target_l);
+        }
         out_keycode = 0;
         return false;
     }
@@ -162,7 +164,9 @@ void VirtualMatrix::purgeDevice(uint8_t dev_idx) {
         if (action != 0) {
             if (IS_ACTION_MO(action)) {
                 uint8_t target_l = ACTION_LAYER_NUM(action);
-                momentary_layer_mask_ &= ~(1UL << target_l);
+                if (target_l < NUM_LAYERS) {
+                    layer_state_[layer_key_group_[dev_idx][k]].momentary_mask &= ~(1UL << target_l);
+                }
             }
             active_translation_[dev_idx][k] = 0;
         }

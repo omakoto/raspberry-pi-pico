@@ -23,7 +23,7 @@ Example used throughout this manual: a Logitech device with a vertical wheel, a 
 
 ## Step 1. Pick a layer for the device
 
-The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device (binding a device to layer 0, with `devlayer 0`, just means "no binding": it uses the base layer like every device without one). Each layer can be used by several devices, but a layer you also use for `MO(n)` layer keys then changes what those keys do for the bound device, so pick one you are not using for anything else.
+The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device (binding a device to layer 0, with `devlayer 0`, just means "no binding": it uses the base layer like every device without one). Each layer can be used by several devices; devices bound to the same layer also share their layer keys (see "A layer key" below). Pick a layer you are not using for `MO(n)` and other layer keys: while such a key selects that layer, the devices it applies to see the bound device's mappings too.
 
 This manual uses **layer 3**.
 
@@ -116,7 +116,7 @@ Scroll the bound device's vertical wheel: each notch taps Volume Up or Down. Scr
 - **Another mouse action**, for example wheel → cursor movement, or swapping axes.
 - **A keyboard key**, a modifier or a modified key such as `LSFT(KC_A)`. A key on a *wheel or movement* position is **tapped once per wheel notch** (for movement, once per 24 counts of motion, see `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `main/config.h`).
 - **Volume keys:** `KC_MUTE`, `KC_VOLU`, `KC_VOLD`.
-- **A layer key** (`MO(1)` and so on) on one of the device's buttons. While held, that layer is looked up first, then the device's layer, then layer 0. This makes "hold a button and the wheel does something else" possible for just this device.
+- **A layer key** (`MO(1)`, `TG(1)`, `TO(1)` and so on) on one of the device's buttons. While the layer is selected, it is looked up first, then the device's layer, then layer 0. This makes "hold a button and the wheel does something else" possible for just this device. A layer key on a bound device only applies to the devices bound to the same layer. It does not change the layer of other devices, and layer keys on unbound devices do not change the layer of bound devices.
 - `KC_NO` to disable an input.
 
 Not available: other media keys (play/pause, next, previous), macros, tap dance, mod-tap.

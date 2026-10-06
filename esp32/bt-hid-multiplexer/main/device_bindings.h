@@ -7,8 +7,9 @@
 
 // Binds individual Bluetooth devices to a keymap layer, so one device can be remapped without
 // affecting the others. A bound device's input is looked up on its layer first (see
-// VirtualMatrix::resolveAction), so the layer is edited in VIAL like any other. Bindings are stored
-// in flash by Bluetooth address and so survive reboots and reconnects.
+// VirtualMatrix::resolveAction), so the layer is edited in VIAL like any other. Layer keys pressed on
+// a bound device only affect the devices bound to the same layer. Bindings are stored in flash by
+// Bluetooth address and so survive reboots and reconnects.
 class DeviceBindings {
 public:
     static const uint8_t NO_LAYER = 0xFF;

@@ -189,6 +189,43 @@ int main() {
     Multiplexer::handleKeyboardReport(0, 0, a, 1);
     CHECK(lastKbd().keys[0] == 0x05);
 
+    // Transparent keys skip layers that are not switched on, but fall through the ones that are
+    // (QMK's rule), and a bound device's own layer comes after them. Layer 1 maps A to C, layer 3
+    // maps A to D; button 1 is MO(2), button 2 is TG(1).
+    reset();
+    set(1, 0x04, 0x06);
+    set(3, 0x04, 0x07);
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5102);
+    set(0, VKEY_MOUSE_BTN_BASE + 1, 0x5300 + 1);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);      // MO(2): layer 1 is off, A stays A
+    Multiplexer::handleKeyboardReport(0, 0, a, 1);
+    CHECK(lastKbd().keys[0] == 0x04);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    Multiplexer::handleMouseReport(0, 0x03, 0, 0, 0, 0);      // TG(1) too: layer 2 falls to layer 1
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    Multiplexer::handleKeyboardReport(0, 0, a, 1);
+    CHECK(lastKbd().keys[0] == 0x06);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    Multiplexer::handleKeyboardReport(1, 0, a, 1);            // device 1, also unbound: layer 1 is on
+    CHECK(lastKbd().keys[0] == 0x06);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+    CHECK(DeviceBindings::bind(1, 3));
+    Multiplexer::handleKeyboardReport(1, 0, a, 1);            // bound to 3: the unbound TG(1) is ignored
+    CHECK(lastKbd().keys[0] == 0x07);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+    set(3, 0x04, KC_TRNS_);
+    Multiplexer::handleMouseReport(1, 0x02, 0, 0, 0, 0);      // its own TG(1) outranks its layer
+    Multiplexer::handleMouseReport(1, 0, 0, 0, 0, 0);
+    set(3, 0x04, 0x07);
+    Multiplexer::handleKeyboardReport(1, 0, a, 1);
+    CHECK(lastKbd().keys[0] == 0x06);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+    set(1, 0x04, KC_TRNS_);                                   // transparent on 1: its own layer next
+    Multiplexer::handleKeyboardReport(1, 0, a, 1);
+    CHECK(lastKbd().keys[0] == 0x07);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+
     // Mouse movement mapped to a key taps it once per wheel notch worth of movement (press, release,
     // press, release...), and the wheel taps once per notch. Volume keys go out as the keyboard
     // page volume usages.
@@ -269,7 +306,7 @@ int main() {
     CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x80);
     CHECK(!g_sent_mouse.empty() && lastMouse().dx == 4 && lastMouse().wheel == 0);
 
-    // A held layer key outranks the device layer; the device layer outranks the base layer.
+    // A layer key held on the device outranks the device layer; the device layer outranks the base layer.
     set(0, VKEY_MOUSE_BTN_BASE + 3, 0x5101);       // button 4 -> MO(1)
     set(1, VKEY_WHEEL_UP, 0x04);                   // layer 1: wheel up -> A
     g_sent_keyboard.clear();
@@ -289,7 +326,7 @@ int main() {
     CHECK(DeviceBindings::entryCount() == 0);
 
     // The effective layer shown on the OLED is the one of the device used last: its bound layer,
-    // unless a layer key selects another one.
+    // unless a layer key of its group selects another one.
     reset();
     CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::NO_DEVICE) == 0);
     CHECK(DeviceBindings::bind(1, 6));
@@ -303,12 +340,57 @@ int main() {
     Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);       // toggle layer 2 on the other device
     Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
     CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 2);
-    Multiplexer::handleMouseReport(1, 0, 2, 0, 0, 0);          // the toggled layer outranks the binding
-    CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 2);
-    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);       // toggle it off again
-    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
-    Multiplexer::handleMouseReport(1, 0, 2, 0, 0, 0);
+    Multiplexer::handleMouseReport(1, 0, 2, 0, 0, 0);          // unbound layer keys skip bound devices
     CHECK(VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice()) == 6);
+    Multiplexer::handleMouseReport(1, 0x01, 0, 0, 0, 0);       // the bound device toggles layer 2 itself
+    Multiplexer::handleMouseReport(1, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(1) == 2);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);       // the unbound one toggles it off
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(0) == 0 && VirtualMatrix::getEffectiveLayer(1) == 2);
+    Multiplexer::handleMouseReport(1, 0x01, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(1, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(1) == 6);
+
+    // Layer keys are shared by the devices bound to the same layer, and by all unbound devices, but
+    // not across those groups. Devices 0 and 1 are bound to layer 3, device 2 to layer 4, and devices
+    // 3 and 4 are unbound. Button 4 is MO(1); on layer 1, wheel up is A.
+    reset();
+    for (int d = 2; d <= 4; d++) g_connected[d] = true;
+    CHECK(DeviceBindings::bind(0, 3) && DeviceBindings::bind(1, 3) && DeviceBindings::bind(2, 4));
+    set(0, VKEY_MOUSE_BTN_BASE + 3, 0x5101);
+    set(1, VKEY_WHEEL_UP, 0x04);
+    Multiplexer::handleMouseReport(0, 0x08, 0, 0, 0, 0);       // device 0 holds MO(1)
+    for (int d = 0; d <= 4; d++) {
+        static const uint8_t expected[5] = {1, 1, 4, 0, 0};
+        CHECK(VirtualMatrix::getEffectiveLayer(d) == expected[d]);
+    }
+    g_sent_keyboard.clear();
+    g_sent_mouse.clear();
+    Multiplexer::handleMouseReport(1, 0, 0, 0, 1, 0);          // device 1 (same layer): wheel up is A
+    pump();
+    CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x04);
+    g_sent_keyboard.clear();
+    Multiplexer::handleMouseReport(2, 0, 0, 0, 1, 0);          // device 2 (other layer): plain wheel
+    Multiplexer::handleMouseReport(3, 0, 0, 0, 1, 0);          // device 3 (unbound): plain wheel
+    pump();
+    CHECK(g_sent_keyboard.empty());
+    CHECK(!g_sent_mouse.empty() && lastMouse().wheel == 1);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);          // release MO(1)
+    CHECK(VirtualMatrix::getEffectiveLayer(1) == 3);
+    Multiplexer::handleMouseReport(3, 0x08, 0, 0, 0, 0);       // device 3 (unbound) holds MO(1)
+    CHECK(VirtualMatrix::getEffectiveLayer(4) == 1 && VirtualMatrix::getActiveLayer() == 1);
+    CHECK(VirtualMatrix::getEffectiveLayer(0) == 3 && VirtualMatrix::getEffectiveLayer(2) == 4);
+    // Binding the device while the key is held: the release still ends the layer in the old group.
+    CHECK(DeviceBindings::bind(3, 4));
+    CHECK(VirtualMatrix::getEffectiveLayer(3) == 4);
+    Multiplexer::handleMouseReport(3, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 0 && VirtualMatrix::getEffectiveLayer(4) == 0);
+    // A disconnect while held does the same.
+    Multiplexer::handleMouseReport(1, 0x08, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(0) == 1);
+    Multiplexer::purgeMouse(1);
+    CHECK(VirtualMatrix::getEffectiveLayer(0) == 3);
 
     // Binding by address (from VIAL) works for devices that are not connected, and a connected device
     // with that address picks it up.
