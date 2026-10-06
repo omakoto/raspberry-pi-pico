@@ -232,6 +232,10 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
 
 ## Tests
 
-`test/run-host-test.sh` builds the keymap/multiplexer logic and the log ring with the host compiler and
-runs their tests. Run it after touching `main/multiplexer.cpp`, `main/virtual_matrix.cpp`,
-`main/device_bindings.cpp`, `main/log_ring.cpp` or `main/config.h`.
+`test/run-host-test.sh` builds the keymap/multiplexer logic, the macros, the log ring and the VIAL
+definition with the host compiler and runs their tests. Run it after touching `main/multiplexer.cpp`,
+`main/macros.cpp`, `main/virtual_matrix.cpp`, `main/device_bindings.cpp`, `main/log_ring.cpp`,
+`main/vial_definition.cpp`, `main/config.h` or `gen-vial-layout.py`.
+
+`test/run-host-test.sh --coverage` also prints the line coverage of each of those sources and keeps
+gcov's annotated copies, with the lines that never ran marked `#####`.

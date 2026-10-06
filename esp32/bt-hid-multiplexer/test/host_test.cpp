@@ -13,25 +13,48 @@
 std::vector<SentKeyboard> g_sent_keyboard;
 std::vector<SentMouse> g_sent_mouse;
 int g_usb_fail_count = 0;
+bool g_usb_ready = true;
 uint32_t g_now_ms = 0;
 
+// Fake flash. Loading finds nothing (a first boot) unless g_flash_loadable is set, which simulates a
+// reboot: then whatever was saved last is loaded.
+static bool g_flash_loadable = false;
+static bool g_keymap_needs_save = false;  // what loadKeymap reports, e.g. after a format upgrade
 static int g_saves = 0;
 static uint16_t g_flash[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS];
 void StorageManager::init() {}
-bool StorageManager::loadKeymap(uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS], bool &needs_save) { (void)km; needs_save = false; return false; }
+bool StorageManager::loadKeymap(uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS], bool &needs_save) {
+    needs_save = false;
+    if (!g_flash_loadable) return false;
+    memcpy(km, g_flash, sizeof(g_flash));
+    needs_save = g_keymap_needs_save;
+    return true;
+}
 void StorageManager::saveKeymap(const uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]) {
     memcpy(g_flash, km, sizeof(g_flash));
     g_saves++;
 }
 void StorageManager::clearKeymap() {}
 static DeviceBindingEntry g_flash_bindings[MAX_DEVICE_BINDINGS];
-bool StorageManager::loadBindings(DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) { (void)e; return false; }
+bool StorageManager::loadBindings(DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) {
+    if (!g_flash_loadable) return false;
+    memcpy(e, g_flash_bindings, sizeof(g_flash_bindings));
+    return true;
+}
 void StorageManager::saveBindings(const DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) {
     memcpy(g_flash_bindings, e, sizeof(g_flash_bindings));
 }
 static int g_macro_saves = 0;
-bool StorageManager::loadMacros(uint8_t *buffer) { (void)buffer; return false; }
-void StorageManager::saveMacros(const uint8_t *buffer) { (void)buffer; g_macro_saves++; }
+static uint8_t g_flash_macros[MACRO_BUFFER_SIZE];
+bool StorageManager::loadMacros(uint8_t *buffer) {
+    if (!g_flash_loadable) return false;
+    memcpy(buffer, g_flash_macros, sizeof(g_flash_macros));
+    return true;
+}
+void StorageManager::saveMacros(const uint8_t *buffer) {
+    memcpy(g_flash_macros, buffer, sizeof(g_flash_macros));
+    g_macro_saves++;
+}
 
 // Fake Bluetooth addresses: device d is 00:00:00:00:00:d+1, except the ones marked disconnected.
 static bool g_connected[MAX_KEYBOARDS];
@@ -49,6 +72,9 @@ static void reset() {
     g_sent_keyboard.clear();
     g_sent_mouse.clear();
     g_usb_fail_count = 0;
+    g_usb_ready = true;
+    g_flash_loadable = false;
+    g_keymap_needs_save = false;
     memset(g_connected, 0, sizeof(g_connected));
     g_connected[0] = g_connected[1] = true;
     DeviceBindings::init(fake_address);
@@ -73,6 +99,26 @@ static void set_macros(const uint8_t *data, uint16_t len) {
 static void set(int layer, int vkey, uint16_t kc) { VirtualMatrix::setKeycode(layer, vkey / 16, vkey % 16, kc); }
 static SentKeyboard lastKbd() { return g_sent_keyboard.back(); }
 static SentMouse lastMouse() { return g_sent_mouse.back(); }
+
+// Plays macro index with F1 (pressed, run to the end, released) and returns the reports it sent.
+static std::vector<SentKeyboard> play_macro(int index) {
+    set(0, 0x3A, KC_MACRO_FIRST_ + index);
+    g_sent_keyboard.clear();
+    uint8_t f1[1] = {0x3A};
+    Multiplexer::handleKeyboardReport(0, 0, f1, 1);
+    pump();
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    return g_sent_keyboard;
+}
+
+// The reports with a key down, which a macro sends once per key it types.
+static std::vector<SentKeyboard> typed_keys(const std::vector<SentKeyboard> &reports) {
+    std::vector<SentKeyboard> typed;
+    for (auto &k : reports) {
+        if (k.keys[0] != 0) typed.push_back(k);
+    }
+    return typed;
+}
 
 int main() {
     // Defaults pass everything through.
@@ -599,6 +645,387 @@ int main() {
     g_now_ms = 8600;
     MacroStore::flushPendingSave();
     CHECK(g_macro_saves == 1);
+
+    // A device that disconnects while keys are held releases them, including a held layer key, and
+    // the keys of other devices stay down. Device 0 holds button 4 (MO(1)) and Shift+A; device 1
+    // holds B. Layer 1 maps A to D and B to C. The firmware purges both halves of a device on
+    // disconnect.
+    reset();
+    set(0, VKEY_MOUSE_BTN_BASE + 3, 0x5101);
+    set(1, 0x04, 0x07);
+    set(1, 0x05, 0x06);
+    uint8_t dc_a[1] = {0x04};
+    uint8_t dc_b[1] = {0x05};
+    Multiplexer::handleMouseReport(0, 0x08, 0, 0, 0, 0);
+    Multiplexer::handleKeyboardReport(0, 0x02, dc_a, 1);
+    Multiplexer::handleKeyboardReport(1, 0, dc_b, 1);
+    CHECK(VirtualMatrix::getActiveLayer() == 1);
+    CHECK(lastKbd().mods == 0x02 && lastKbd().keys[0] == 0x07 && lastKbd().keys[1] == 0x06);
+    Multiplexer::purgeKeyboard(0);
+    Multiplexer::purgeMouse(0);
+    CHECK(VirtualMatrix::getActiveLayer() == 0);
+    CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0x06 && lastKbd().keys[1] == 0);
+    CHECK(DeviceBindings::lastActiveDevice() == 1);  // only the device that went away is forgotten
+    // After reconnecting, A is looked up again on the base layer rather than keeping what it was
+    // translated to before the disconnect.
+    Multiplexer::handleKeyboardReport(0, 0, dc_a, 1);
+    CHECK(lastKbd().keys[0] == 0x04 && lastKbd().keys[1] == 0x06);
+    Multiplexer::purgeKeyboard(0);
+    CHECK(DeviceBindings::lastActiveDevice() == DeviceBindings::NO_DEVICE);
+    CHECK(lastKbd().keys[0] == 0x06);
+    Multiplexer::purgeKeyboard(1);
+    CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0);
+
+    // Host LEDs (Caps Lock etc.): the first state always counts as changed, so that it is sent to the
+    // devices once; after that only real changes do.
+    reset();
+    CHECK(Multiplexer::getHostLeds() == 0);
+    CHECK(Multiplexer::hasLedsChanged());
+    Multiplexer::acknowledgeLeds();
+    CHECK(!Multiplexer::hasLedsChanged());
+    Multiplexer::setHostLeds(0x02);
+    CHECK(Multiplexer::getHostLeds() == 0x02 && Multiplexer::hasLedsChanged());
+    Multiplexer::acknowledgeLeds();
+    CHECK(!Multiplexer::hasLedsChanged());
+    Multiplexer::setHostLeds(0x02);
+    CHECK(!Multiplexer::hasLedsChanged());
+
+    // Keys held across reports stay down while others come and go.
+    reset();
+    uint8_t ka[1] = {0x04};
+    uint8_t kab[2] = {0x04, 0x05};
+    uint8_t kb[1] = {0x05};
+    Multiplexer::handleKeyboardReport(0, 0, ka, 1);
+    Multiplexer::handleKeyboardReport(0, 0, kab, 2);
+    CHECK(lastKbd().keys[0] == 0x04 && lastKbd().keys[1] == 0x05);
+    Multiplexer::handleKeyboardReport(0, 0, kb, 1);
+    CHECK(lastKbd().keys[0] == 0x05 && lastKbd().keys[1] == 0);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // Two keys mapped to the same keycode send it once; a key mapped to cursor movement sends
+    // nothing (mouse keys are only for mouse motion).
+    set(0, 0x05, 0x04);  // B -> A
+    Multiplexer::handleKeyboardReport(0, 0, kab, 2);
+    CHECK(lastKbd().keys[0] == 0x04 && lastKbd().keys[1] == 0);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    set(0, 0x06, KC_MS_U_);  // C -> mouse up
+    uint8_t kc_c[1] = {0x06};
+    g_sent_mouse.clear();
+    Multiplexer::handleKeyboardReport(0, 0, kc_c, 1);
+    CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0);
+    CHECK(g_sent_mouse.empty());
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // A report holds at most 6 keys: a device's 7th key, and keys of other devices beyond 6, are
+    // dropped.
+    reset();
+    uint8_t seven[7] = {0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A};
+    Multiplexer::handleKeyboardReport(0, 0, seven, 7);
+    CHECK(lastKbd().keys[0] == 0x04 && lastKbd().keys[5] == 0x09);
+    uint8_t kz[1] = {0x1D};
+    Multiplexer::handleKeyboardReport(1, 0, kz, 1);
+    CHECK(lastKbd().keys[5] == 0x09);
+    for (int i = 0; i < 6; i++) CHECK(lastKbd().keys[i] != 0x1D && lastKbd().keys[i] != 0x0A);
+
+    // Motion can be remapped to any direction: here the axes are swapped, and real pan scrolls
+    // horizontally (the default), as does left motion remapped to it.
+    reset();
+    set(0, VKEY_MOTION_RIGHT, KC_MS_D_);
+    set(0, VKEY_MOTION_DOWN, KC_MS_L_);
+    Multiplexer::handleMouseReport(0, 0, 5, 7, 0, 0);
+    CHECK(lastMouse().dx == -7 && lastMouse().dy == 5);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 1);
+    CHECK(lastMouse().pan == 1 && lastMouse().dx == 0 && lastMouse().dy == 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, -2);
+    CHECK(lastMouse().pan == -2);
+    set(0, VKEY_MOTION_LEFT, KC_WH_L_);
+    Multiplexer::handleMouseReport(0, 0, -30, 0, 0, 0);  // 30 counts = 1 notch left, 6 left over
+    CHECK(lastMouse().pan == -1 && lastMouse().dx == 0);
+    Multiplexer::handleMouseReport(0, 0, -18, 0, 0, 0);  // 6 + 18 = 24 -> one more notch
+    CHECK(lastMouse().pan == -1);
+
+    // Motion mapped to a mouse button or a layer key is dropped (they have no press/release here).
+    reset();
+    set(0, VKEY_WHEEL_UP, KC_BTN1_);
+    set(0, VKEY_WHEEL_DOWN, 0x5101);
+    g_sent_keyboard.clear();
+    g_sent_mouse.clear();
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 3, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, -3, 0);
+    pump();
+    CHECK(g_sent_keyboard.empty() && g_sent_mouse.empty());
+    CHECK(VirtualMatrix::getActiveLayer() == 0);
+
+    // Fast motion mapped to a key queues at most 16 taps; the rest is dropped instead of typing on
+    // long after the motion stops.
+    set(0, VKEY_WHEEL_UP, 0x04);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 100, 0);
+    pump();
+    CHECK(g_sent_keyboard.size() == 32);
+
+    // Motion larger than a report can carry (-127..127) is sent over several reports.
+    reset();
+    g_sent_mouse.clear();
+    Multiplexer::handleMouseReport(0, 0, 300, -200, 0, 0);
+    CHECK(g_sent_mouse.size() == 1 && lastMouse().dx == 127 && lastMouse().dy == -127);
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 2 && lastMouse().dx == 127 && lastMouse().dy == -73);
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 3 && lastMouse().dx == 46 && lastMouse().dy == 0);
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 3);
+
+    // While USB is busy nothing is sent; the state goes out once it is ready.
+    reset();
+    g_usb_ready = false;
+    Multiplexer::handleKeyboardReport(0, 0, ka, 1);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    CHECK(g_sent_keyboard.empty() && g_sent_mouse.empty());
+    g_usb_ready = true;
+    Multiplexer::flushKeyboard();
+    Multiplexer::flushMouse();
+    CHECK(g_sent_keyboard.size() == 1 && lastKbd().keys[0] == 0x04);
+    CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0x01);
+
+    // TO(n) switches the base layer and clears toggled layers; releasing it does not switch back.
+    // Button 3 is TG(1), button 1 is TO(2), and layer 2 maps button 2 to TO(0) and A to B.
+    reset();
+    set(0, VKEY_MOUSE_BTN_BASE + 2, 0x5301);
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5000 + 2);
+    set(2, VKEY_MOUSE_BTN_BASE + 1, 0x5000 + 0);
+    set(2, 0x04, 0x05);
+    Multiplexer::handleMouseReport(0, 0x04, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 1);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 2);
+    Multiplexer::handleKeyboardReport(0, 0, ka, 1);
+    CHECK(lastKbd().keys[0] == 0x05);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    Multiplexer::handleMouseReport(0, 0x02, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 0);
+    Multiplexer::handleKeyboardReport(0, 0, ka, 1);
+    CHECK(lastKbd().keys[0] == 0x04);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // A key that is transparent on every layer, layer 0 included, is disabled.
+    set(0, 0x07, KC_TRNS_);
+    uint8_t kd[1] = {0x07};
+    Multiplexer::handleKeyboardReport(0, 0, kd, 1);
+    CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // Macro corner cases.
+    reset();
+    {
+        const uint8_t macros[] = {
+            // M0: Shift and A down, then the macro ends.
+            1, 2, 0xE1, 1, 2, 0x04, 0,
+            // M1: all 8 modifiers down; a macro holds at most 6 keys.
+            1, 2, 0xE0, 1, 2, 0xE1, 1, 2, 0xE2, 1, 2, 0xE3, 1, 2, 0xE4, 1, 2, 0xE5, 1, 2, 0xE6,
+            1, 2, 0xE7, 0,
+            // M2: "a", an unknown action (skipped), "b".
+            'a', 1, 9, 'b', 0,
+            // M3-M6: "c" to "f", each followed by an action that is cut short by the macro's end.
+            'c', 1, 0,
+            'd', 1, 1, 0,
+            'e', 1, 5, 0x04, 0,
+            'f', 1, 4, 2, 0,
+            // M7: LSFT(KC_NO), a 16-bit keycode whose low byte is 0 (encoded as 0xFF02).
+            1, 5, 0x02, 0xFF, 0,
+            // M8: releases a key it did not press, then types "g".
+            1, 3, 0x04, 'g', 0,
+        };
+        set_macros(macros, sizeof(macros));
+    }
+    {
+        // Keys a macro leaves down are released when it ends, so that they cannot get stuck.
+        std::vector<SentKeyboard> r = play_macro(0);
+        bool held = false;
+        for (auto &k : r) held = held || (k.mods == 0x02 && k.keys[0] == 0x04);
+        CHECK(held);
+        CHECK(!r.empty() && r.back().mods == 0 && r.back().keys[0] == 0);
+        CHECK(!Multiplexer::macroRunning());
+    }
+    {
+        std::vector<SentKeyboard> r = play_macro(1);
+        uint8_t most = 0;
+        for (auto &k : r) most |= k.mods;
+        CHECK(most == 0x3F);
+        CHECK(!r.empty() && r.back().mods == 0);
+    }
+    {
+        std::vector<SentKeyboard> t = typed_keys(play_macro(2));
+        CHECK(t.size() == 2 && t[0].keys[0] == 0x04 && t[1].keys[0] == 0x05);
+    }
+    for (int m = 3; m <= 6; m++) {
+        std::vector<SentKeyboard> t = typed_keys(play_macro(m));
+        CHECK(t.size() == 1 && t[0].keys[0] == 0x06 + (m - 3));
+        CHECK(!Multiplexer::macroRunning());
+    }
+    {
+        std::vector<SentKeyboard> r = play_macro(7);
+        bool shift = false;
+        for (auto &k : r) shift = shift || (k.mods == 0x02 && k.keys[0] == 0);
+        CHECK(shift);
+        CHECK(!r.empty() && r.back().mods == 0);
+    }
+    {
+        std::vector<SentKeyboard> t = typed_keys(play_macro(8));
+        CHECK(t.size() == 1 && t[0].keys[0] == 0x0A);
+    }
+
+    // Macro text is typed with US layout keycodes, shifted where needed.
+    {
+        static const struct { char c; uint8_t mods; uint8_t key; } chars[] = {
+            {'0', 0, 0x27}, {'\n', 0, 0x28}, {'\t', 0, 0x2B}, {'\b', 0, 0x2A}, {' ', 0, 0x2C},
+            {'-', 0, 0x2D}, {'=', 0, 0x2E}, {'[', 0, 0x2F}, {']', 0, 0x30}, {'\\', 0, 0x31},
+            {';', 0, 0x33}, {'\'', 0, 0x34}, {'`', 0, 0x35}, {',', 0, 0x36}, {'.', 0, 0x37},
+            {'/', 0, 0x38}, {'!', 2, 0x1E}, {'@', 2, 0x1F}, {'#', 2, 0x20}, {'$', 2, 0x21},
+            {'%', 2, 0x22}, {'^', 2, 0x23}, {'&', 2, 0x24}, {'*', 2, 0x25}, {'(', 2, 0x26},
+            {')', 2, 0x27}, {'_', 2, 0x2D}, {'+', 2, 0x2E}, {'{', 2, 0x2F}, {'}', 2, 0x30},
+            {'|', 2, 0x31}, {':', 2, 0x33}, {'"', 2, 0x34}, {'~', 2, 0x35}, {'<', 2, 0x36},
+            {'>', 2, 0x37}, {'?', 2, 0x38}, {'z', 0, 0x1D}, {'Z', 2, 0x1D}, {'9', 0, 0x26},
+        };
+        const int n = sizeof(chars) / sizeof(chars[0]);
+        uint8_t text[n + 1];
+        for (int i = 0; i < n; i++) text[i] = (uint8_t)chars[i].c;
+        text[n] = 0;
+        set_macros(text, sizeof(text));
+        std::vector<SentKeyboard> t = typed_keys(play_macro(0));
+        CHECK(t.size() == (size_t)n);
+        for (int i = 0; i < n && i < (int)t.size(); i++) {
+            if (t[i].mods != chars[i].mods || t[i].keys[0] != chars[i].key) {
+                printf("FAIL %s:%d: macro typed '%c' as mods %02x key %02x\n", __FILE__, __LINE__,
+                       chars[i].c, t[i].mods, t[i].keys[0]);
+                g_failures++;
+            }
+        }
+    }
+
+    // The macro buffer as VIAL reads and resets it. Reads past the end return zeros, writes past
+    // the end are ignored, and a macro without a NUL ends at the end of the buffer.
+    reset();
+    {
+        const uint8_t macros[] = {'h', 'i', 0};
+        set_macros(macros, sizeof(macros));
+        uint8_t out[4];
+        memset(out, 0xAA, sizeof(out));
+        MacroStore::read(0, 4, out);
+        CHECK(out[0] == 'h' && out[1] == 'i' && out[2] == 0 && out[3] == 0);
+        CHECK(MacroStore::buffer()[1] == 'i');
+        const uint8_t tail[2] = {7, 8};
+        MacroStore::write(MACRO_BUFFER_SIZE - 1, 2, tail);
+        memset(out, 0xAA, sizeof(out));
+        MacroStore::read(MACRO_BUFFER_SIZE - 1, 3, out);
+        CHECK(out[0] == 7 && out[1] == 0 && out[2] == 0);
+
+        uint8_t fill[128];
+        memset(fill, 'a', sizeof(fill));
+        for (int off = 0; off < MACRO_BUFFER_SIZE; off += sizeof(fill)) {
+            MacroStore::write((uint16_t)off, sizeof(fill), fill);
+        }
+        const uint8_t *start = nullptr, *end = nullptr;
+        CHECK(MacroStore::find(0, &start, &end));
+        CHECK(start == MacroStore::buffer() && end == MacroStore::buffer() + MACRO_BUFFER_SIZE);
+        CHECK(!MacroStore::find(1, &start, &end));
+
+        // A reset clears the buffer and saves it right away; the edits before it are not saved again.
+        g_macro_saves = 0;
+        MacroStore::reset();
+        CHECK(g_macro_saves == 1 && MacroStore::buffer()[0] == 0);
+        g_now_ms += 1000;
+        MacroStore::flushPendingSave();
+        CHECK(g_macro_saves == 1);
+    }
+
+    // Binding entries as the console lists them: in table order, skipping removed ones. The table
+    // holds MAX_DEVICE_BINDINGS entries.
+    reset();
+    {
+        uint8_t addr[6];
+        uint8_t layer = 0;
+        CHECK(DeviceBindings::bind(0, 1) && DeviceBindings::bind(1, 2));
+        CHECK(DeviceBindings::getEntry(0, addr, &layer) && addr[5] == 1 && layer == 1);
+        CHECK(DeviceBindings::getEntry(1, addr, &layer) && addr[5] == 2 && layer == 2);
+        CHECK(!DeviceBindings::getEntry(2, addr, &layer));
+        CHECK(DeviceBindings::unbind(0));
+        CHECK(DeviceBindings::getEntry(0, addr, &layer) && addr[5] == 2 && layer == 2);
+        CHECK(!DeviceBindings::unbind(0));  // no longer bound
+        g_connected[1] = false;
+        CHECK(!DeviceBindings::unbind(1));  // not connected
+        uint8_t other[6] = {0, 0, 0, 0, 1, 0};
+        for (int i = 1; i < MAX_DEVICE_BINDINGS; i++) {
+            other[5] = (uint8_t)i;
+            CHECK(DeviceBindings::bindAddress(other, 3));
+        }
+        CHECK(DeviceBindings::entryCount() == MAX_DEVICE_BINDINGS);
+        other[5] = 0xFF;
+        CHECK(!DeviceBindings::bindAddress(other, 3));
+        other[5] = 1;
+        CHECK(DeviceBindings::bindAddress(other, 4));  // rebinding an existing entry still works
+    }
+
+    // The keymap, bindings and macros come back after a reboot. A keymap that the storage layer
+    // upgraded on loading is saved again in the new format.
+    reset();
+    {
+        uint8_t addr[6] = {0, 0, 0, 0, 2, 1};
+        set(1, 0x04, 0x05);
+        CHECK(DeviceBindings::bindAddress(addr, 3));
+        const uint8_t macros[] = {'m', 0};
+        set_macros(macros, sizeof(macros));
+        g_now_ms += 1000;
+        VirtualMatrix::flushPendingSave();
+        MacroStore::flushPendingSave();
+
+        g_flash_loadable = true;
+        g_keymap_needs_save = true;
+        g_saves = 0;
+        DeviceBindings::init(fake_address);
+        MacroStore::init();
+        Multiplexer::init();
+        VirtualMatrix::init();
+        CHECK(VirtualMatrix::getKeycode(1, 0, 4) == 0x05);
+        CHECK(g_saves == 1);
+        CHECK(DeviceBindings::layerForAddress(addr) == 3);
+        CHECK(MacroStore::buffer()[0] == 'm' && MacroStore::buffer()[1] == 0);
+        g_keymap_needs_save = false;
+        VirtualMatrix::init();
+        CHECK(g_saves == 1);
+    }
+
+    // Device indexes out of range are ignored.
+    reset();
+    {
+        g_sent_keyboard.clear();
+        g_sent_mouse.clear();
+        Multiplexer::handleKeyboardReport(MAX_KEYBOARDS, 0, ka, 1);
+        Multiplexer::handleMouseReport(MAX_MICE, 0x01, 5, 5, 0, 0);
+        Multiplexer::purgeKeyboard(MAX_KEYBOARDS);
+        Multiplexer::purgeMouse(MAX_MICE);
+        CHECK(g_sent_keyboard.empty() && g_sent_mouse.empty());
+        uint16_t out_kc = 0x1234;
+        CHECK(!VirtualMatrix::processKeyPress(MAX_KEYBOARDS, 0x04, out_kc));
+        CHECK(!VirtualMatrix::processKeyRelease(MAX_KEYBOARDS, 0x04, out_kc));
+        CHECK(VirtualMatrix::getActiveTranslation(MAX_KEYBOARDS, 0x04) == 0);
+        VirtualMatrix::purgeDevice(MAX_KEYBOARDS);
+        CHECK(VirtualMatrix::getKeycode(0, MATRIX_ROWS, 0) == 0 && VirtualMatrix::getKeycode(0, 0, MATRIX_COLS) == 0);
+        g_saves = 0;
+        VirtualMatrix::setKeycode(NUM_LAYERS, 0, 0, 0x05);
+        VirtualMatrix::setKeycode(0, MATRIX_ROWS, 0, 0x05);
+        g_now_ms += 1000;
+        VirtualMatrix::flushPendingSave();
+        CHECK(g_saves == 0);
+        CHECK(DeviceBindings::layerFor(MAX_KEYBOARDS) == DeviceBindings::NO_LAYER);
+        uint8_t addr[6];
+        CHECK(!DeviceBindings::addressOf(MAX_KEYBOARDS, addr));
+        Multiplexer::handleKeyboardReport(0, 0, ka, 1);
+        DeviceBindings::noteActivity(MAX_KEYBOARDS);
+        CHECK(DeviceBindings::lastActiveDevice() == 0);
+    }
 
     if (g_failures) { printf("%d FAILURES\n", g_failures); return 1; }
     printf("All host tests passed\n");

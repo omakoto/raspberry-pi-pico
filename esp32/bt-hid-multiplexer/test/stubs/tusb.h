@@ -10,8 +10,10 @@ extern std::vector<SentKeyboard> g_sent_keyboard;
 extern std::vector<SentMouse> g_sent_mouse;
 // While positive, report calls fail (return false without sending), counting it down.
 extern int g_usb_fail_count;
+// While false, the HID interface is busy and nothing can be sent.
+extern bool g_usb_ready;
 
-inline bool tud_hid_n_ready(uint8_t) { return true; }
+inline bool tud_hid_n_ready(uint8_t) { return g_usb_ready; }
 inline bool tud_hid_n_report(uint8_t, uint8_t, const void *report, uint16_t) {
     if (g_usb_fail_count > 0) { g_usb_fail_count--; return false; }
     const uint8_t *r = (const uint8_t *)report;
