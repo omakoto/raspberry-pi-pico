@@ -81,19 +81,27 @@ build log_ring_test log_ring_test.cpp ../main/log_ring.cpp
 "$out/log_ring_test/log_ring_test"
 
 build vial_definition_test vial_definition_test.cpp ../main/vial_definition.cpp
-"$out/vial_definition_test/vial_definition_test" "$out/definition.xz"
-# VIAL reads the definition with Python's lzma and json modules; so does this check.
-python3 - "$out/definition.xz" <<'PYEOF'
+"$out/vial_definition_test/vial_definition_test" "$out/definition.xz" "$out/largest.xz"
+# VIAL reads the definition with Python's lzma and json modules; so does this check. A list in
+# "labels" is a dropdown, a plain string a checkbox.
+python3 - "$out/definition.xz" "$out/largest.xz" <<'PYEOF'
 import json, lzma, sys
-d = json.loads(lzma.decompress(open(sys.argv[1], "rb").read()))
+def load(path):
+    return json.loads(lzma.decompress(open(path, "rb").read()))
+d = load(sys.argv[1])
 labels = d["layouts"]["labels"]
 choices = ["No binding"] + [f"Layer {n}" for n in range(1, 8)]
-assert labels == [["Keychron Nape Pro"] + choices,
+assert labels == [["Keychron Nape Pro (00:00)"] + choices,
                   ['Quote" Back\\slash ???'] + choices,
                   ["D6:54:CB:91:59:74"] + choices,
                   ["MX Dialpad (7B:44)"] + choices,
-                  ["MX Dialpad (05:06)"] + choices], labels
+                  ["MX Dialpad (05:06)"] + choices,
+                  "Unpaired: Keychron Nape Pro (AB:CD) (layer 3)",
+                  "Unpaired: E1:02:03:04:05:07 (layer 7)"], labels
 assert d["matrix"] == {"rows": 16, "cols": 16} and d["layouts"]["keymap"], d
+largest = load(sys.argv[2])["layouts"]["labels"]
+assert len(largest) == 16 and all(isinstance(l, list) for l in largest[:8]), largest
+assert all(isinstance(l, str) and l.startswith("Unpaired: ") for l in largest[8:]), largest
 print("VIAL definition decodes: OK")
 PYEOF
 

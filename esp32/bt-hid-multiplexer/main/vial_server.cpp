@@ -53,12 +53,17 @@
 bool VialServer::bootloader_requested_ = false;
 
 // The definition served to VIAL, rebuilt whenever VIAL asks for its size (which it does once per
-// connection, before fetching it) from the bonded devices of that moment. The layout options that
-// VIAL then reads and writes refer to s_devices, the devices listed in that definition, so a bond
-// added or removed in the meantime does not shift the dropdowns.
+// connection, before fetching it) from the bonded devices and unpaired bindings of that moment. The
+// layout options that VIAL then reads and writes refer to s_devices and s_unpaired, the devices
+// listed in that definition, so a bond or binding added or removed in the meantime does not shift
+// the options.
+static_assert(VIAL_MAX_DEVICE_OPTIONS >= MAX_BLE_DEVICES, "every bonded device needs a dropdown");
+static_assert(VIAL_MAX_UNPAIRED_OPTIONS >= MAX_UNPAIRED_BINDINGS, "every unpaired binding needs a checkbox");
 static VialDeviceEntry s_devices[VIAL_MAX_DEVICE_OPTIONS];
 static uint8_t s_device_count = 0;
-static uint8_t s_definition[4608];
+static VialDeviceEntry s_unpaired[VIAL_MAX_UNPAIRED_OPTIONS];
+static uint8_t s_unpaired_count = 0;
+static uint8_t s_definition[6400];
 static size_t s_definition_size = 0;
 
 static void rebuild_definition() {
@@ -68,25 +73,40 @@ static void rebuild_definition() {
         VialDeviceEntry &e = s_devices[s_device_count];
         if (BleHidHost::getBondedDevice(i, e.addr, e.name, sizeof(e.name))) s_device_count++;
     }
-    s_definition_size = vial_build_definition(s_devices, s_device_count, s_definition, sizeof(s_definition));
+    s_unpaired_count = 0;
+    DeviceBindingEntry b;
+    for (uint8_t i = 0; s_unpaired_count < VIAL_MAX_UNPAIRED_OPTIONS && DeviceBindings::getUnpaired(i, &b); i++) {
+        VialDeviceEntry &e = s_unpaired[s_unpaired_count++];
+        memcpy(e.addr, b.addr, sizeof(e.addr));
+        memcpy(e.name, b.name, sizeof(e.name));
+        e.layer = b.layer;
+    }
+    s_definition_size = vial_build_definition(s_devices, s_device_count, s_unpaired, s_unpaired_count,
+                                              s_definition, sizeof(s_definition));
     if (s_definition_size == 0) {
         printf("[Vial] Keyboard definition does not fit its buffer\n");
     }
 }
 
-// Dropdown choice of each listed device: 0 = no binding, N = bound to layer N.
+// Dropdown choice of each listed device (0 = no binding, N = bound to layer N), then whether each
+// listed unpaired binding still exists.
 static uint32_t get_layout_options() {
     uint8_t choices[VIAL_MAX_DEVICE_OPTIONS];
     for (uint8_t i = 0; i < s_device_count; i++) {
         uint8_t layer = DeviceBindings::layerForAddress(s_devices[i].addr);
         choices[i] = (layer == DeviceBindings::NO_LAYER) ? 0 : layer;
     }
-    return vial_pack_layout_options(choices, s_device_count);
+    bool kept[VIAL_MAX_UNPAIRED_OPTIONS];
+    for (uint8_t i = 0; i < s_unpaired_count; i++) {
+        kept[i] = DeviceBindings::layerForAddress(s_unpaired[i].addr) != DeviceBindings::NO_LAYER;
+    }
+    return vial_pack_layout_options(choices, s_device_count, kept, s_unpaired_count);
 }
 
 static void set_layout_options(uint32_t value) {
     uint8_t choices[VIAL_MAX_DEVICE_OPTIONS];
-    vial_unpack_layout_options(value, s_device_count, choices);
+    bool kept[VIAL_MAX_UNPAIRED_OPTIONS];
+    vial_unpack_layout_options(value, s_device_count, choices, s_unpaired_count, kept);
     for (uint8_t i = 0; i < s_device_count; i++) {
         uint8_t current = DeviceBindings::layerForAddress(s_devices[i].addr);
         uint8_t wanted = (choices[i] == 0) ? DeviceBindings::NO_LAYER : choices[i];
@@ -97,6 +117,23 @@ static void set_layout_options(uint32_t value) {
             snprintf(toast, sizeof(toast), "%.20s: no binding", s_devices[i].name);
         } else if (DeviceBindings::bindAddress(s_devices[i].addr, wanted)) {
             snprintf(toast, sizeof(toast), "%.20s: layer %u", s_devices[i].name, wanted);
+        } else {
+            snprintf(toast, sizeof(toast), "Binding table full");
+        }
+        printf("[Vial] %s\n", toast);
+        app_show_toast(toast);
+    }
+    for (uint8_t i = 0; i < s_unpaired_count; i++) {
+        const VialDeviceEntry &d = s_unpaired[i];
+        bool exists = DeviceBindings::layerForAddress(d.addr) != DeviceBindings::NO_LAYER;
+        if (kept[i] == exists) continue;
+        char toast[48];
+        if (!kept[i]) {
+            DeviceBindings::unbindAddress(d.addr);
+            snprintf(toast, sizeof(toast), "%.20s: binding removed", d.name[0] ? d.name : "Device");
+        } else if (DeviceBindings::bindAddress(d.addr, d.layer, d.name)) {
+            // Checked again in the same VIAL session: the binding comes back as it was.
+            snprintf(toast, sizeof(toast), "%.20s: layer %u", d.name[0] ? d.name : "Device", d.layer);
         } else {
             snprintf(toast, sizeof(toast), "Binding table full");
         }

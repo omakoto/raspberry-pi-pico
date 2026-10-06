@@ -36,13 +36,18 @@ void StorageManager::saveKeymap(const uint16_t km[NUM_LAYERS][MATRIX_ROWS][MATRI
 }
 void StorageManager::clearKeymap() {}
 static DeviceBindingEntry g_flash_bindings[MAX_DEVICE_BINDINGS];
-bool StorageManager::loadBindings(DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) {
+static bool g_bindings_need_save = false;  // what loadBindings reports, e.g. after a format upgrade
+static int g_binding_saves = 0;
+bool StorageManager::loadBindings(DeviceBindingEntry e[MAX_DEVICE_BINDINGS], bool &needs_save) {
+    needs_save = false;
     if (!g_flash_loadable) return false;
     memcpy(e, g_flash_bindings, sizeof(g_flash_bindings));
+    needs_save = g_bindings_need_save;
     return true;
 }
 void StorageManager::saveBindings(const DeviceBindingEntry e[MAX_DEVICE_BINDINGS]) {
     memcpy(g_flash_bindings, e, sizeof(g_flash_bindings));
+    g_binding_saves++;
 }
 static int g_macro_saves = 0;
 static uint8_t g_flash_macros[MACRO_BUFFER_SIZE];
@@ -65,6 +70,30 @@ static bool fake_address(uint8_t dev_idx, uint8_t addr[6]) {
     return true;
 }
 
+// Fake pairings: device d's address is paired as "Device d" while g_paired_dev[d] is set, and the
+// extra addresses 00:00:00:00:01:i (devices that are not connected) as "Extra i" while
+// g_paired_extra[i] is set.
+static bool g_paired_dev[MAX_KEYBOARDS];
+static bool g_paired_extra[32];
+static char g_dev_name[MAX_KEYBOARDS][32];
+static bool fake_paired(const uint8_t addr[6], char *name, size_t name_size) {
+    if (addr[0] || addr[1] || addr[2] || addr[3]) return false;
+    if (addr[4] == 0 && addr[5] >= 1 && addr[5] <= MAX_KEYBOARDS && g_paired_dev[addr[5] - 1]) {
+        snprintf(name, name_size, "%s", g_dev_name[addr[5] - 1]);
+        return true;
+    }
+    if (addr[4] == 1 && addr[5] < 32 && g_paired_extra[addr[5]]) {
+        snprintf(name, name_size, "Extra %u", addr[5]);
+        return true;
+    }
+    return false;
+}
+static void extra_addr(uint8_t i, uint8_t addr[6]) {
+    memset(addr, 0, 6);
+    addr[4] = 1;
+    addr[5] = i;
+}
+
 static int g_failures = 0;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); g_failures++; } } while (0)
 
@@ -75,9 +104,16 @@ static void reset() {
     g_usb_ready = true;
     g_flash_loadable = false;
     g_keymap_needs_save = false;
+    g_bindings_need_save = false;
     memset(g_connected, 0, sizeof(g_connected));
     g_connected[0] = g_connected[1] = true;
-    DeviceBindings::init(fake_address);
+    for (int d = 0; d < MAX_KEYBOARDS; d++) {
+        g_paired_dev[d] = true;
+        snprintf(g_dev_name[d], sizeof(g_dev_name[d]), "Device %d", d);
+    }
+    memset(g_paired_extra, 0, sizeof(g_paired_extra));
+    DeviceBindings::init(fake_address, fake_paired);
+    DeviceBindings::pairingChanged();
     DeviceBindings::clearAll();
     MacroStore::init();
     Multiplexer::init();
@@ -941,31 +977,108 @@ int main() {
         CHECK(g_macro_saves == 1);
     }
 
-    // Binding entries as the console lists them: in table order, skipping removed ones. The table
-    // holds MAX_DEVICE_BINDINGS entries.
+    // Binding entries as the console lists them: in table order, skipping removed ones, with the
+    // paired device's name.
     reset();
     {
-        uint8_t addr[6];
-        uint8_t layer = 0;
+        DeviceBindingEntry e;
         CHECK(DeviceBindings::bind(0, 1) && DeviceBindings::bind(1, 2));
-        CHECK(DeviceBindings::getEntry(0, addr, &layer) && addr[5] == 1 && layer == 1);
-        CHECK(DeviceBindings::getEntry(1, addr, &layer) && addr[5] == 2 && layer == 2);
-        CHECK(!DeviceBindings::getEntry(2, addr, &layer));
+        CHECK(DeviceBindings::getEntry(0, &e) && e.addr[5] == 1 && e.layer == 1 && strcmp(e.name, "Device 0") == 0);
+        CHECK(DeviceBindings::getEntry(1, &e) && e.addr[5] == 2 && e.layer == 2 && e.unpaired_seq == 0);
+        CHECK(!DeviceBindings::getEntry(2, &e));
         CHECK(DeviceBindings::unbind(0));
-        CHECK(DeviceBindings::getEntry(0, addr, &layer) && addr[5] == 2 && layer == 2);
+        CHECK(DeviceBindings::getEntry(0, &e) && e.addr[5] == 2 && e.layer == 2);
         CHECK(!DeviceBindings::unbind(0));  // no longer bound
         g_connected[1] = false;
         CHECK(!DeviceBindings::unbind(1));  // not connected
-        uint8_t other[6] = {0, 0, 0, 0, 1, 0};
-        for (int i = 1; i < MAX_DEVICE_BINDINGS; i++) {
-            other[5] = (uint8_t)i;
-            CHECK(DeviceBindings::bindAddress(other, 3));
+    }
+
+    // A binding outlives the device's pairing: it becomes an unpaired binding, still applies to the
+    // address, and is a paired one again when the device is paired again. A renamed device's binding
+    // takes the new name.
+    reset();
+    {
+        DeviceBindingEntry e;
+        CHECK(DeviceBindings::bind(1, 3));
+        CHECK(DeviceBindings::unpairedCount() == 0);
+        g_paired_dev[1] = false;
+        DeviceBindings::pairingChanged();
+        CHECK(DeviceBindings::unpairedCount() == 1);
+        CHECK(DeviceBindings::getUnpaired(0, &e) && e.addr[5] == 2 && e.layer == 3 && strcmp(e.name, "Device 1") == 0);
+        CHECK(!DeviceBindings::getUnpaired(1, &e));
+        CHECK(DeviceBindings::layerFor(1) == 3);
+        g_paired_dev[1] = true;
+        strcpy(g_dev_name[1], "Renamed");
+        DeviceBindings::pairingChanged();
+        CHECK(DeviceBindings::unpairedCount() == 0 && DeviceBindings::layerFor(1) == 3);
+        CHECK(DeviceBindings::getEntry(0, &e) && strcmp(e.name, "Renamed") == 0 && e.unpaired_seq == 0);
+
+        // Removing an unpaired binding (VIAL's checkbox), and putting it back as it was.
+        g_paired_dev[1] = false;
+        DeviceBindings::pairingChanged();
+        CHECK(DeviceBindings::getUnpaired(0, &e));
+        CHECK(DeviceBindings::unbindAddress(e.addr) && DeviceBindings::unpairedCount() == 0);
+        CHECK(DeviceBindings::layerFor(1) == DeviceBindings::NO_LAYER);
+        CHECK(DeviceBindings::bindAddress(e.addr, e.layer, e.name));
+        DeviceBindingEntry back;
+        CHECK(DeviceBindings::getUnpaired(0, &back) && back.layer == 3 && strcmp(back.name, "Renamed") == 0);
+        CHECK(DeviceBindings::layerFor(1) == 3);
+    }
+
+    // Only the MAX_UNPAIRED_BINDINGS most recently unpaired bindings are kept, newest first. Ten
+    // devices are bound to layer 2, then unpaired one at a time; the first two are dropped.
+    reset();
+    {
+        uint8_t addr[6];
+        for (uint8_t i = 0; i < 10; i++) {
+            g_paired_extra[i] = true;
+            extra_addr(i, addr);
+            CHECK(DeviceBindings::bindAddress(addr, 2));
+        }
+        CHECK(DeviceBindings::unpairedCount() == 0 && DeviceBindings::entryCount() == 10);
+        for (uint8_t i = 0; i < 10; i++) {
+            g_paired_extra[i] = false;
+            DeviceBindings::pairingChanged();
+        }
+        CHECK(DeviceBindings::unpairedCount() == MAX_UNPAIRED_BINDINGS);
+        CHECK(DeviceBindings::entryCount() == MAX_UNPAIRED_BINDINGS);
+        for (uint8_t i = 0; i < 10; i++) {
+            extra_addr(i, addr);
+            CHECK(DeviceBindings::layerForAddress(addr) == (i < 2 ? DeviceBindings::NO_LAYER : 2));
+        }
+        DeviceBindingEntry e;
+        for (uint8_t k = 0; k < MAX_UNPAIRED_BINDINGS; k++) {
+            char name[16];
+            snprintf(name, sizeof(name), "Extra %u", 9 - k);
+            CHECK(DeviceBindings::getUnpaired(k, &e) && e.addr[5] == 9 - k && strcmp(e.name, name) == 0);
+        }
+        CHECK(!DeviceBindings::getUnpaired(MAX_UNPAIRED_BINDINGS, &e));
+
+        // A device bound while not paired (e.g. restored) is an unpaired binding at once and pushes
+        // out the oldest one.
+        extra_addr(20, addr);
+        CHECK(DeviceBindings::bindAddress(addr, 5, "Old mouse"));
+        CHECK(DeviceBindings::unpairedCount() == MAX_UNPAIRED_BINDINGS);
+        CHECK(DeviceBindings::getUnpaired(0, &e) && e.addr[5] == 20 && strcmp(e.name, "Old mouse") == 0);
+        extra_addr(2, addr);
+        CHECK(DeviceBindings::layerForAddress(addr) == DeviceBindings::NO_LAYER);
+
+        // Unpairing several at once (clearing all bonds) keeps the cap too.
+        for (uint8_t i = 0; i < 8; i++) {
+            g_paired_extra[21 + i] = true;
+            extra_addr(21 + i, addr);
+            CHECK(DeviceBindings::bindAddress(addr, 4));
         }
         CHECK(DeviceBindings::entryCount() == MAX_DEVICE_BINDINGS);
-        other[5] = 0xFF;
-        CHECK(!DeviceBindings::bindAddress(other, 3));
-        other[5] = 1;
-        CHECK(DeviceBindings::bindAddress(other, 4));  // rebinding an existing entry still works
+        // With 8 paired and 8 unpaired bindings the table is full.
+        g_paired_extra[30] = true;
+        extra_addr(30, addr);
+        CHECK(!DeviceBindings::bindAddress(addr, 4));
+        memset(g_paired_extra, 0, sizeof(g_paired_extra));
+        DeviceBindings::pairingChanged();
+        CHECK(DeviceBindings::unpairedCount() == MAX_UNPAIRED_BINDINGS);
+        CHECK(DeviceBindings::getUnpaired(0, &e) && e.layer == 4);
+        CHECK(DeviceBindings::getUnpaired(MAX_UNPAIRED_BINDINGS - 1, &e) && e.layer == 4);
     }
 
     // The keymap, bindings and macros come back after a reboot. A keymap that the storage layer
@@ -984,7 +1097,7 @@ int main() {
         g_flash_loadable = true;
         g_keymap_needs_save = true;
         g_saves = 0;
-        DeviceBindings::init(fake_address);
+        DeviceBindings::init(fake_address, fake_paired);
         MacroStore::init();
         Multiplexer::init();
         VirtualMatrix::init();
@@ -995,6 +1108,14 @@ int main() {
         g_keymap_needs_save = false;
         VirtualMatrix::init();
         CHECK(g_saves == 1);
+
+        // Bindings stored in an older format are written back in the current one, once.
+        g_binding_saves = 0;
+        DeviceBindings::init(fake_address, fake_paired);
+        CHECK(g_binding_saves == 0);
+        g_bindings_need_save = true;
+        DeviceBindings::init(fake_address, fake_paired);
+        CHECK(g_binding_saves == 1 && DeviceBindings::layerForAddress(addr) == 3);
     }
 
     // Device indexes out of range are ignored.

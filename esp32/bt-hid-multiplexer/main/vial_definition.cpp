@@ -147,32 +147,42 @@ static void put_text(Writer &w, const char *s) {
     w.put((const uint8_t *)s, strlen(s));
 }
 
-size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count, uint8_t *out, size_t out_size) {
+// How a device is named in VIAL: its name, or its address if it has none. Two devices of the same
+// model would be indistinguishable, so a name that another listed device (paired or not) also has
+// gets the end of the address added.
+static void device_label(const VialDeviceEntry &d, const VialDeviceEntry *devices, uint8_t count,
+                         const VialDeviceEntry *unpaired, uint8_t unpaired_count, char *label, size_t size) {
+    const uint8_t *a = d.addr;
+    if (d.name[0] == '\0') {
+        snprintf(label, size, "%02X:%02X:%02X:%02X:%02X:%02X", a[0], a[1], a[2], a[3], a[4], a[5]);
+        return;
+    }
+    int same = 0;
+    for (uint8_t j = 0; j < count; j++) same += strcmp(devices[j].name, d.name) == 0;
+    for (uint8_t j = 0; j < unpaired_count; j++) same += strcmp(unpaired[j].name, d.name) == 0;
+    if (same > 1) {
+        snprintf(label, size, "%.31s (%02X:%02X)", d.name, a[4], a[5]);
+    } else {
+        snprintf(label, size, "%s", d.name);
+    }
+}
+
+size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count,
+                             const VialDeviceEntry *unpaired, uint8_t unpaired_count,
+                             uint8_t *out, size_t out_size) {
     // Static: too large for the bt_app task's stack. bt_app is the only caller.
-    static uint8_t json[4096];
+    static uint8_t json[6144];
     Writer w{json, sizeof(json)};
     put_text(w, VIAL_DEF_PREFIX);
     put_text(w, "\"labels\":[");
     if (count > VIAL_MAX_DEVICE_OPTIONS) count = VIAL_MAX_DEVICE_OPTIONS;
+    if (unpaired_count > VIAL_MAX_UNPAIRED_OPTIONS) unpaired_count = VIAL_MAX_UNPAIRED_OPTIONS;
+    char label[48];
     for (uint8_t i = 0; i < count; i++) {
         if (i > 0) w.put(',');
+        // A list: a dropdown.
         w.put('[');
-        char label[48];
-        const uint8_t *a = devices[i].addr;
-        if (devices[i].name[0] == '\0') {
-            snprintf(label, sizeof(label), "%02X:%02X:%02X:%02X:%02X:%02X", a[0], a[1], a[2], a[3], a[4], a[5]);
-        } else {
-            // Two devices of the same model would be indistinguishable: add the end of the address.
-            bool duplicate = false;
-            for (uint8_t j = 0; j < count; j++) {
-                if (j != i && strcmp(devices[j].name, devices[i].name) == 0) duplicate = true;
-            }
-            if (duplicate) {
-                snprintf(label, sizeof(label), "%.31s (%02X:%02X)", devices[i].name, a[4], a[5]);
-            } else {
-                snprintf(label, sizeof(label), "%s", devices[i].name);
-            }
-        }
+        device_label(devices[i], devices, count, unpaired, unpaired_count, label, sizeof(label));
         put_json_string(w, label);
         put_text(w, ",\"No binding\"");
         for (int layer = 1; layer < (1 << VIAL_OPTION_BITS); layer++) {
@@ -181,6 +191,14 @@ size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count, uint
             put_text(w, choice);
         }
         w.put(']');
+    }
+    for (uint8_t i = 0; i < unpaired_count; i++) {
+        if (count > 0 || i > 0) w.put(',');
+        // A plain string: a checkbox.
+        device_label(unpaired[i], devices, count, unpaired, unpaired_count, label, sizeof(label));
+        char text[80];
+        snprintf(text, sizeof(text), "Unpaired: %s (layer %u)", label, unpaired[i].layer);
+        put_json_string(w, text);
     }
     put_text(w, "],");
     put_text(w, VIAL_DEF_SUFFIX);
@@ -192,15 +210,24 @@ size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count, uint
 // Layout options
 // ---------------------------------------------------------------------------------------------
 
-uint32_t vial_pack_layout_options(const uint8_t *choices, uint8_t count) {
+uint32_t vial_pack_layout_options(const uint8_t *choices, uint8_t count,
+                                  const bool *checked, uint8_t checked_count) {
     uint32_t value = 0;
     for (uint8_t i = 0; i < count; i++) {
         value = (value << VIAL_OPTION_BITS) | (choices[i] & ((1u << VIAL_OPTION_BITS) - 1));
     }
+    for (uint8_t i = 0; i < checked_count; i++) {
+        value = (value << 1) | (checked[i] ? 1u : 0u);
+    }
     return value;
 }
 
-void vial_unpack_layout_options(uint32_t value, uint8_t count, uint8_t *choices) {
+void vial_unpack_layout_options(uint32_t value, uint8_t count, uint8_t *choices,
+                                uint8_t checked_count, bool *checked) {
+    for (uint8_t i = 0; i < checked_count; i++) {
+        checked[i] = (value >> (checked_count - 1 - i)) & 1u;
+    }
+    value >>= checked_count;
     for (uint8_t i = 0; i < count; i++) {
         uint8_t shift = (uint8_t)(VIAL_OPTION_BITS * (count - 1 - i));
         choices[i] = (uint8_t)((value >> shift) & ((1u << VIAL_OPTION_BITS) - 1));

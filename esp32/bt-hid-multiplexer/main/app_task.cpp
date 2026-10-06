@@ -308,11 +308,16 @@ static bool device_address(uint8_t dev_idx, uint8_t addr[6]) {
     return BleHidHost::getSlotAddress(dev_idx, addr);
 }
 
+// Whether a device is paired (bonded), and its name.
+static bool paired_device(const uint8_t addr[6], char *name, size_t name_size) {
+    return BleHidHost::findBondedDevice(addr, name, name_size);
+}
+
 // Runs on the bt_app task before the run loop starts.
 static void bt_app_setup() {
     // Keymap (loads NVS), device bindings and multiplexer state, before USB can deliver requests.
     VialServer::init();
-    DeviceBindings::init(device_address);
+    DeviceBindings::init(device_address, paired_device);
     MacroStore::init();
     Multiplexer::init();
     ButtonHandler::init();

@@ -34,6 +34,8 @@ The binding applies at once and is saved in flash, by the device's Bluetooth add
 
 The list also contains paired devices that are switched off, so a device can be bound before it connects.
 
+A binding is kept when its device stops being paired; see [Devices that are no longer paired](#devices-that-are-no-longer-paired).
+
 **Layout files:** loading a saved layout file in VIAL restores these dropdowns too, which rebinds devices. It matches them by their position in the list, so a file saved with different pairings can bind the wrong devices. Check the Layout tab after loading one.
 
 ## Step 3. Edit the layer in VIAL
@@ -97,9 +99,19 @@ All of these are in VIAL's **Layout** tab:
 | --- | --- |
 | Move a device to another layer | pick the other layer in its dropdown |
 | Remove a binding | pick **No binding** |
-| See which device is bound to which layer | look at the dropdowns |
+| Remove the binding of a device that is no longer paired | clear its **Unpaired** checkbox |
+| See which device is bound to which layer | look at the dropdowns and checkboxes |
 
-Up to 8 devices can be bound at the same time. Resetting the keymap (holding the button for 8 s) keeps the bindings.
+Every paired device (up to 8) can be bound.
+
+## Devices that are no longer paired
+
+A binding is not removed when its device stops being paired. That happens when you remove the device's pairing, when holding the button for 8 s removes all pairings, or when pairing a ninth device drops the pairing of the device used least recently (the multiplexer keeps 8 pairings).
+
+- The binding then shows up at the end of the **Layout** tab as a checkbox, `Unpaired: <name> (layer N)`, checked.
+- **To remove it,** clear the checkbox. Checking it again before you reload VIAL puts it back.
+- **If the device is paired again** with the same Bluetooth address, it gets its layer back by itself and returns to the dropdowns.
+- Up to 8 of these are kept. When a ninth device stops being paired, the binding of the device that was unpaired longest ago is removed.
 
 ## Troubleshooting
 
@@ -107,5 +119,4 @@ Up to 8 devices can be bound at the same time. Resetting the keymap (holding the
 - **Two dropdowns have the same name:** they get the end of their Bluetooth address added. The OLED shows the name of the device used last, and the serial console's `devices` command shows the addresses (see the [README](../README.md#serial-console)).
 - **A key in VIAL does nothing:** make sure you edited the layer the device is bound to (see its dropdown in the Layout tab), and that the key is not Transparent on that layer if you expect it to differ from layer 0.
 - **The wheel scrolls in the wrong direction or too slowly:** wheel direction follows the key (wheel up → Volume Up). The distance for one tap is `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `main/config.h` (it only matters when *cursor movement* is mapped to a key or the wheel).
-- **The binding disappeared after re-pairing:** bindings are stored by Bluetooth address. A device that uses a different random address after being re-paired counts as a new device, so bind it again.
-- **The OLED says `Binding table full`:** bindings of devices that are no longer paired still take one of the 8 places, and VIAL no longer lists them. The `reset` console command removes them, together with the bonds, the keymap and the macros.
+- **The binding disappeared after re-pairing:** bindings are stored by Bluetooth address. A device that uses a different random address after being re-paired counts as a new device, so bind it again. Its old binding stays as an `Unpaired` checkbox until you clear it.

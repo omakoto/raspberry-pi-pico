@@ -127,7 +127,12 @@
 // Persistent storage (NVS namespace of this firmware; BTstack keeps its bonds in "BTstack").
 #define NVS_NAMESPACE           "bthidmux"
 #define FLASH_BINDINGS_MAGIC    0x42494E44 // 'BIND'
-#define MAX_DEVICE_BINDINGS     8
+// Bindings of devices that are no longer paired are kept (VIAL lists them, so they can be removed
+// there, and a device paired again gets its layer back), up to this many; the ones unpaired longest
+// ago are dropped first.
+#define MAX_UNPAIRED_BINDINGS   8
+// Enough for every paired device (MAX_BLE_DEVICES) plus the unpaired ones.
+#define MAX_DEVICE_BINDINGS     (MAX_BLE_DEVICES + MAX_UNPAIRED_BINDINGS)
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 // Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded.
 #define FLASH_KEYMAP_VERSION    5

@@ -185,14 +185,14 @@ static void print_device_bindings() {
             dual_printf("  layer %u\r\n", layer);
         }
     }
-    dual_println("Saved bindings:");
+    dual_println("Saved bindings (address, layer, name):");
     uint8_t n = DeviceBindings::entryCount();
     for (uint8_t i = 0; i < n; i++) {
-        uint8_t addr[6], layer = 0;
-        DeviceBindings::getEntry(i, addr, &layer);
+        DeviceBindingEntry e;
+        if (!DeviceBindings::getEntry(i, &e)) break;
         dual_printf("  ");
-        print_addr(addr);
-        dual_printf("  layer %u\r\n", layer);
+        print_addr(e.addr);
+        dual_printf("  layer %u  %s%s\r\n", e.layer, e.name, e.unpaired_seq != 0 ? " (unpaired)" : "");
     }
     if (n == 0) dual_println("  (none)");
     uint8_t last = DeviceBindings::lastActiveDevice();

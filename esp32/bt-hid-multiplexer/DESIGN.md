@@ -108,7 +108,7 @@ esp32/bt-hid-multiplexer/
 │   ├── ble_hid_host.*        ported (§4)
 │   ├── multiplexer.*         ported, nearly unchanged
 │   ├── virtual_matrix.*      ported, nearly unchanged
-│   ├── device_bindings.*     ported, unchanged
+│   ├── device_bindings.*     ported; keeps bindings of unpaired devices (§8.2)
 │   ├── vial_server.*         ported (UID, bootloader jump)
 │   ├── vial_layout.h         regenerated
 │   ├── usb_descriptors.*     ported: descriptors handed to esp_tinyusb, HID report descriptors
@@ -512,21 +512,22 @@ factory,  app,  factory, 0x20000, 0x200000
 |---|---|---|
 | `km_hdr` | `{magic 'VIAL', version 5, layers 8}` | Keymap header |
 | `km0` … `km7` | One 512 B blob per layer (16×16 `uint16_t`) | The 4 KB keymap in 2 flash sectors |
-| `bind` | `DeviceBindingStorageData` (magic `'BIND'`, version 1, 8 entries) | Bindings sector |
+| `bind` | `BindingsBlob` (magic `'BIND'`, version 2, 16 entries of address, layer, name and unpaired order) | Bindings sector |
 
 - **Checksums.** NVS stores a CRC per entry, so the Pico's own checksums become redundant. The magic and version stay, to detect layout changes.
-- **No migration.** There are no legacy formats to load (no 4-layer keymap, no legacy bindings offset), because this firmware starts fresh.
+- **No migration from the Pico.** There are no Pico formats to load (no 4-layer keymap, no legacy bindings offset), because this firmware starts fresh.
+- **Bindings version 1** (8 entries of address and layer) is converted to version 2 when loaded. Version 2 keeps the bindings of devices that are no longer bonded ("unpaired bindings", at most `MAX_UNPAIRED_BINDINGS` = 8, the oldest dropped first) with the device's name, so that VIAL can list them as checkboxes after the per-device dropdowns: 8 dropdowns of 3 bits and 8 checkboxes of 1 bit fill VIA's 32-bit layout options value. `DeviceBindings::pairingChanged()` keeps the bindings in step with the bonded table; `ble_hid_host.cpp` calls it after every change to it.
 - **Writes.**
   - Keymap: debounced by 500 ms, as before. Only the layers whose contents changed are written, compared against a shadow copy of the last saved data. A typical VIAL edit therefore rewrites 512 B, not 4 KB.
   - `resetKeymap` writes all 8 layers.
   - Bindings: written at once on `bind`, `unbind` and `clearAll`.
   - All writes happen on `bt_app`, as on the Pico, where writes ran in the main loop with interrupts off.
 - **Cost of a write.** A flash erase or write stalls both cores' cache. BT controller ISRs are in IRAM and keep running. The DWC2 USB interrupt is not IRAM-safe and is delayed by the length of the write. This is the same trade-off the Pico made ("tens of ms" with interrupts off), and debouncing keeps writes rare.
-- **BTstack bonds.** BTstack's `btstack_tlv_esp32` stores bonds in NVS namespace `BTstack`, committing on every store. `ble_hid_host.cpp`'s own `HOGT` bonded-table tag goes through the same TLV, unchanged. The legacy `HOGD` migration code is kept unchanged (harmless, and it keeps the file close to the Pico's).
+- **BTstack bonds.** BTstack's `btstack_tlv_esp32` stores bonds in NVS namespace `BTstack`, committing on every store. `ble_hid_host.cpp`'s own `HOGT` bonded-table tag goes through the same TLV. Each record carries a `last_used` sequence number, bumped on every connection, so that a ninth bonded device replaces the least recently used one (preferring one that is not connected), whose BTstack keys are removed too. A table stored without `last_used` is told apart by its size and converted, using the table order as the order of use. The legacy `HOGD` migration code is kept (harmless).
 - **Not persisted, as on the Pico:** mouse speed, `authreq`, log toggles (decided, Q3).
 - **Factory reset**, as on the Pico:
   - `reset` (console) clears the BTstack bonds through the existing `clearBonds` (TLV deletes), resets the keymap, and clears the bindings.
-  - The 8 s button press clears the bonds and resets the keymap, and keeps the bindings (Q4).
+  - The 8 s button press clears the bonds and resets the keymap, and keeps the bindings (Q4), which become unpaired bindings.
 - **Last resort.** `idf.py erase-flash` resets everything.
 
 ---

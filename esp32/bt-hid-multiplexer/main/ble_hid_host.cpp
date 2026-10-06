@@ -2,6 +2,7 @@
 #include "log_ring.h"
 #include "platform.h"
 #include "multiplexer.h"
+#include "device_bindings.h"
 #include "config.h"
 #include "btstack.h"
 #include "btstack_tlv.h"
@@ -19,12 +20,29 @@ struct BondedDeviceRecord {
     bd_addr_t addr;
     bd_addr_type_t addr_type;
     char name[32];
+    // When the device last connected, as a sequence number (higher = more recent; 0 = not since this
+    // was recorded). When the table is full, the least recently used device makes room.
+    uint32_t last_used;
 };
 
 struct BondedTable {
     uint8_t count;
     BondedDeviceRecord records[MAX_BLE_DEVICES];
 };
+
+// The record and table as stored before last_used existed (the table under TLV_TAG_HOG_TABLE, and a
+// single record under the older TLV_TAG_HOGD). Converted when loaded.
+struct BondedDeviceRecordV1 {
+    bd_addr_t addr;
+    bd_addr_type_t addr_type;
+    char name[32];
+};
+
+struct BondedTableV1 {
+    uint8_t count;
+    BondedDeviceRecordV1 records[MAX_BLE_DEVICES];
+};
+static_assert(sizeof(BondedTable) != sizeof(BondedTableV1), "the stored size tells the versions apart");
 
 enum BleMouseFormat : uint8_t {
     MOUSE_FORMAT_UNKNOWN = 0,
@@ -70,6 +88,7 @@ struct BleSlot {
 
 static BleSlot s_slots[MAX_BLE_DEVICES];
 static BondedTable s_bonded_table;
+static uint32_t s_last_use_seq = 0;  // the highest last_used handed out
 static uint16_t s_global_mouse_speed_percent = 100;
 
 static bool s_is_scanning = false;
@@ -323,6 +342,22 @@ static void save_bonded_devices() {
     printf("[BLE Host] Persisted %u bonded device(s) to TLV table.\n", s_bonded_table.count);
 }
 
+// Saves the table and lets the device bindings follow it (bindings of devices that are no longer
+// bonded become unpaired bindings; names are refreshed).
+static void bonds_changed() {
+    save_bonded_devices();
+    DeviceBindings::pairingChanged();
+}
+
+static void copy_v1_record(BondedDeviceRecord *to, const BondedDeviceRecordV1 &from, uint32_t last_used) {
+    memset(to, 0, sizeof(*to));
+    bd_addr_copy(to->addr, from.addr);
+    to->addr_type = from.addr_type;
+    memcpy(to->name, from.name, sizeof(to->name));
+    to->name[sizeof(to->name) - 1] = '\0';
+    to->last_used = last_used;
+}
+
 // Load bonded devices table from TLV, migrating single-device legacy entries if present
 static void load_bonded_devices() {
     memset(&s_bonded_table, 0, sizeof(s_bonded_table));
@@ -332,20 +367,38 @@ static void load_bonded_devices() {
     btstack_tlv_get_instance(&tlv_impl, &tlv_context);
     if (!tlv_impl) return;
 
+    // Static: too large for the bt_app task's stack. bt_app is the only caller.
+    static BondedTableV1 v1;
     int len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOG_TABLE, (uint8_t *)&s_bonded_table, sizeof(s_bonded_table));
     if (len == (int)sizeof(s_bonded_table) && s_bonded_table.count <= MAX_BLE_DEVICES) {
         printf("[BLE Host] Loaded %u bonded device(s) from TLV table.\n", s_bonded_table.count);
+    } else if (len == (int)sizeof(v1) &&
+               tlv_impl->get_tag(tlv_context, TLV_TAG_HOG_TABLE, (uint8_t *)&v1, sizeof(v1)) == (int)sizeof(v1) &&
+               v1.count <= MAX_BLE_DEVICES) {
+        // Nothing records which device was used when, so the table order (the order they were
+        // added in) stands in for it.
+        memset(&s_bonded_table, 0, sizeof(s_bonded_table));
+        s_bonded_table.count = v1.count;
+        for (uint8_t i = 0; i < v1.count; i++) {
+            copy_v1_record(&s_bonded_table.records[i], v1.records[i], i + 1u);
+        }
+        save_bonded_devices();
+        printf("[BLE Host] Converted %u bonded device(s) to the current table format.\n", s_bonded_table.count);
     } else {
+        memset(&s_bonded_table, 0, sizeof(s_bonded_table));
         // Fall back to legacy single-device TLV tag if present
-        BondedDeviceRecord legacy_record;
+        BondedDeviceRecordV1 legacy_record;
         len = tlv_impl->get_tag(tlv_context, TLV_TAG_HOGD, (uint8_t *)&legacy_record, sizeof(legacy_record));
         if (len == (int)sizeof(legacy_record)) {
             s_bonded_table.count = 1;
-            memcpy(&s_bonded_table.records[0], &legacy_record, sizeof(legacy_record));
+            copy_v1_record(&s_bonded_table.records[0], legacy_record, 1);
             save_bonded_devices();
             printf("[BLE Host] Migrated legacy bonded device '%s' (%s) to table.\n",
                    legacy_record.name, bd_addr_to_str(legacy_record.addr));
         }
+    }
+    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
+        if (s_bonded_table.records[i].last_used > s_last_use_seq) s_last_use_seq = s_bonded_table.records[i].last_used;
     }
 
     // Inspect le_device_db to discover any keys present without a metadata record
@@ -373,17 +426,63 @@ static void load_bonded_devices() {
             }
         }
     }
+
+    // The bindings stay as they were until the bonds are known.
+    DeviceBindings::pairingChanged();
 }
 
-// Add or update an entry in the bonded devices table
-static void add_or_update_bonded_device(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name) {
+// Removes the BTstack bond (keys) of an address, if there is one.
+static void remove_le_device_db_entry(const bd_addr_t addr) {
+    for (int i = 0; i < le_device_db_max_count(); i++) {
+        int db_type = 0;
+        bd_addr_t db_addr;
+        le_device_db_info(i, &db_type, db_addr, nullptr);
+        if (db_type != BD_ADDR_TYPE_UNKNOWN && bd_addr_cmp(addr, db_addr) == 0) {
+            le_device_db_remove(i);
+            printf("[BLE Host] Removed bond from le_device_db slot %d (%s)\n", i, bd_addr_to_str(addr));
+            return;
+        }
+    }
+}
+
+// Makes room in a full table for a new device: drops the least recently used device, preferring
+// one that is not connected. Its BTstack keys go too, so that it cannot reconnect in the background
+// and push yet another device out. Returns the freed index.
+static uint8_t evict_least_recently_used_bond() {
+    int victim = -1;
+    bool victim_connected = true;
+    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
+        BleSlot *slot = find_slot_by_addr(s_bonded_table.records[i].addr);
+        bool connected = slot && slot->con_handle != HCI_CON_HANDLE_INVALID;
+        if (victim < 0 || (victim_connected && !connected) ||
+            (connected == victim_connected && s_bonded_table.records[i].last_used < s_bonded_table.records[victim].last_used)) {
+            victim = i;
+            victim_connected = connected;
+        }
+    }
+    BondedDeviceRecord &r = s_bonded_table.records[victim];
+    printf("[BLE Host] Bonded device table full: dropping the least recently used '%s' (%s)\n",
+           r.name, bd_addr_to_str(r.addr));
+    BleSlot *slot = find_slot_by_addr(r.addr);
+    if (slot && slot->con_handle != HCI_CON_HANDLE_INVALID) {
+        gap_disconnect(slot->con_handle);
+    }
+    remove_le_device_db_entry(r.addr);
+    return (uint8_t)victim;
+}
+
+// Add or update an entry in the bonded devices table. connected says that the device has just
+// connected (or paired), which makes it the most recently used one.
+static void add_or_update_bonded_device(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name,
+                                        bool connected) {
     for (uint8_t i = 0; i < s_bonded_table.count; i++) {
         if (bd_addr_cmp(addr, s_bonded_table.records[i].addr) == 0) {
             s_bonded_table.records[i].addr_type = addr_type;
             if (name && name[0] != '\0') {
                 snprintf(s_bonded_table.records[i].name, sizeof(s_bonded_table.records[i].name), "%s", name);
             }
-            save_bonded_devices();
+            if (connected) s_bonded_table.records[i].last_used = ++s_last_use_seq;
+            bonds_changed();
             return;
         }
     }
@@ -392,11 +491,13 @@ static void add_or_update_bonded_device(const bd_addr_t addr, bd_addr_type_t add
     if (s_bonded_table.count < MAX_BLE_DEVICES) {
         target_idx = s_bonded_table.count++;
     } else {
-        target_idx = 0; // Overwrite oldest slot if capacity reached
+        target_idx = evict_least_recently_used_bond();
     }
 
+    memset(&s_bonded_table.records[target_idx], 0, sizeof(s_bonded_table.records[target_idx]));
     bd_addr_copy(s_bonded_table.records[target_idx].addr, addr);
     s_bonded_table.records[target_idx].addr_type = addr_type;
+    s_bonded_table.records[target_idx].last_used = ++s_last_use_seq;
     if (name && name[0] != '\0') {
         snprintf(s_bonded_table.records[target_idx].name, sizeof(s_bonded_table.records[target_idx].name), "%s", name);
     } else {
@@ -404,7 +505,7 @@ static void add_or_update_bonded_device(const bd_addr_t addr, bd_addr_type_t add
                  "%s", bd_addr_to_str(addr));
     }
 
-    save_bonded_devices();
+    bonds_changed();
     printf("[BLE Host] Saved bonded device [%u]: '%s' (%s)\n",
            target_idx, s_bonded_table.records[target_idx].name, bd_addr_to_str(addr));
 }
@@ -503,7 +604,7 @@ static void handle_name_read_event(uint8_t packet_type, uint16_t channel, uint8_
     if (strcmp(name, slot->name) == 0) return;  // nothing new; spare the flash write
     memcpy(slot->name, name, sizeof(name));
     printf("[BLE Host] Slot %u: device name '%s' (from GAP Device Name)\n", slot->dev_idx, slot->name);
-    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
+    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name, false);
 }
 
 static void schedule_name_read(BleSlot *slot);
@@ -932,6 +1033,16 @@ uint8_t BleHidHost::getBondedCount() {
     return s_bonded_table.count;
 }
 
+bool BleHidHost::findBondedDevice(const uint8_t addr[6], char *name, size_t name_size) {
+    for (uint8_t i = 0; i < s_bonded_table.count; i++) {
+        if (memcmp(addr, s_bonded_table.records[i].addr, 6) == 0) {
+            snprintf(name, name_size, "%s", s_bonded_table.records[i].name);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool BleHidHost::getBondedDevice(uint8_t idx, uint8_t addr[6], char *name, size_t name_size) {
     if (idx >= s_bonded_table.count) return false;
     memcpy(addr, s_bonded_table.records[idx].addr, 6);
@@ -1016,6 +1127,7 @@ void BleHidHost::clearBonds() {
     for (int i = 0; i < le_device_db_max_count(); i++) {
         le_device_db_remove(i);
     }
+    DeviceBindings::pairingChanged();
 
     for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
         if (s_slots[i].con_handle != HCI_CON_HANDLE_INVALID) {
@@ -1457,22 +1569,13 @@ void BleHidHost::unbond(uint8_t idx) {
         gap_disconnect(slot->con_handle);
     }
 
-    for (int i = 0; i < le_device_db_max_count(); i++) {
-        int db_type = 0;
-        bd_addr_t db_addr;
-        le_device_db_info(i, &db_type, db_addr, nullptr);
-        if (db_type != BD_ADDR_TYPE_UNKNOWN && bd_addr_cmp(target_addr, db_addr) == 0) {
-            le_device_db_remove(i);
-            printf("[BLE Host] Removed bond from le_device_db slot %d (%s)\n", i, bd_addr_to_str(target_addr));
-            break;
-        }
-    }
+    remove_le_device_db_entry(target_addr);
 
     for (uint8_t i = idx; i < s_bonded_table.count - 1; i++) {
         s_bonded_table.records[i] = s_bonded_table.records[i + 1];
     }
     s_bonded_table.count--;
-    save_bonded_devices();
+    bonds_changed();
     printf("[BLE Host] Unbonded [%u] '%s' (%s). %u bonded device(s) remaining.\n",
            idx, name, bd_addr_to_str(target_addr), s_bonded_table.count);
 }
@@ -1517,7 +1620,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     slot->connected_ms = platform_now_ms();
                     s_active_passkey = 0;
 
-                    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
+                    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name, true);
                     slot->name_read_attempts = 0;
                     schedule_name_read(slot);
 
@@ -1836,7 +1939,7 @@ void BleHidHost::smPacketHandler(uint8_t packet_type, uint16_t channel, uint8_t 
                 apply_auth_req(false);  // the next device gets the configured policy first again
                 print_link_security(h, "after pairing");
                 if (slot) {
-                    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name);
+                    add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name, true);
                 }
                 connect_hids_handle = h;
             } else {

@@ -11,6 +11,12 @@ struct DeviceBindingEntry {
     uint8_t addr[6];
     uint8_t layer;
     uint8_t used;
+    // 0 while the device is paired. Otherwise the order in which bound devices stopped being paired
+    // (higher = more recent), so that the oldest unpaired bindings are dropped first.
+    uint32_t unpaired_seq;
+    // The device's name, kept so that a binding can still be shown by name once the device is no
+    // longer paired. May be empty.
+    char name[32];
 };
 
 // Keymap and device bindings in NVS (namespace NVS_NAMESPACE). Writes block both cores for the
@@ -24,7 +30,9 @@ public:
     // Writes only the layers that differ from what is stored.
     static void saveKeymap(const uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]);
     static void clearKeymap();
-    static bool loadBindings(DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]);
+    // Loads the stored bindings. needs_save is set when they were stored in an older format and
+    // should be written back in the current one.
+    static bool loadBindings(DeviceBindingEntry entries[MAX_DEVICE_BINDINGS], bool &needs_save);
     static void saveBindings(const DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]);
     // The VIAL macro buffer (MACRO_BUFFER_SIZE bytes).
     static bool loadMacros(uint8_t *buffer);

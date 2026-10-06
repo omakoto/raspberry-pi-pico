@@ -147,9 +147,10 @@ Device 2 bound to layer 3. Edit that layer in VIAL.
   device reconnected. Move or click the device and try again.
 - If another device sent input in between, the wrong one gets bound: `devlayer clear`, then try again
   without touching anything else.
+- `devlayer list` also shows the bindings of devices that are no longer paired, marked `(unpaired)`.
+  Remove those in VIAL's Layout tab (their `Unpaired` checkboxes).
 - `resetkeymap` resets the keymap and keeps the bindings; `reset` removes them, together with the
-  bonds, the keymap and the macros. It is the only way to remove the bindings of devices that are no
-  longer paired.
+  bonds, the keymap and the macros.
 
 ### Hang recovery and the previous run's log
 
@@ -177,8 +178,12 @@ Device 2 bound to layer 3. Edit that layer in VIAL.
    keyboard and press Enter.
 4. **Connected:** the OLED shows `BT: <name>` and the input goes to the computer.
 
-Holding the button for 8 s clears all bonds and resets the keymap (the per-device bindings stay; the
-`reset` console command clears those as well).
+Holding the button for 8 s clears all bonds and resets the keymap (the per-device bindings stay, and
+apply again when the devices are paired again; the `reset` console command clears those as well).
+
+Up to 8 devices stay paired. Pairing a ninth removes the pairing of the device used least recently
+(preferring one that is not connected); its per-device binding is kept, see
+[manual/per-device-mapping.md](manual/per-device-mapping.md#devices-that-are-no-longer-paired).
 
 ### Pairing policy: LE legacy pairing first, Secure Connections next
 The firmware offers **LE legacy pairing without MITM** first. If a pairing attempt fails (the device
@@ -224,8 +229,10 @@ connects but some of its reports stay silent, check `log on` output for `GATT cl
    edit.
 4. **Per-device layers:** the **Layout** tab has one dropdown per paired device, labelled with its
    name: pick a layer to remap that device on its own, see
-   [manual/per-device-mapping.md](manual/per-device-mapping.md). The firmware builds the VIAL keyboard
-   definition at runtime for this (`main/vial_definition.cpp`), so reload vial.rocks after pairing.
+   [manual/per-device-mapping.md](manual/per-device-mapping.md). Bindings of devices that are no
+   longer paired follow as `Unpaired` checkboxes; clear one to remove that binding. The firmware
+   builds the VIAL keyboard definition at runtime for this (`main/vial_definition.cpp`), so reload
+   vial.rocks after pairing.
 
 The device uses Espressif's vendor ID with esp_tinyusb's generic HID product ID (`303a:4004`), which
 other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage page `0xFF60`).
