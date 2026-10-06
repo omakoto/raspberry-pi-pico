@@ -25,8 +25,8 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
   devices; new devices are only accepted during pairing mode.
 - **VIAL keymapping (WebHID):** remap every key, modifier, mouse button and mouse movement across 8
   layers at [vial.rocks](https://vial.rocks/); per-device layers, set in VIAL's Layout tab (one
-  dropdown per paired device, by name) or with `devlayer`
-  ([manual/per-device-mapping.md](manual/per-device-mapping.md)). Saved in NVS.
+  dropdown per paired device, by name, see
+  [manual/per-device-mapping.md](manual/per-device-mapping.md)). Saved in NVS.
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
 - **SSD1306 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
   the 6-digit passkey when a keyboard needs one. Optional: the firmware runs without a display.
@@ -105,8 +105,8 @@ Commands:
 - `pair` / `scan`: 60-second pairing window; `stop`: stop pairing and scanning
 - `status`, `devices`, `bonds`, `desc`: connection state, connected devices, bonds, HID descriptors
 - `mousespeed [<percent>] | [<slot> <percent>]`: mouse speed scaling
-- `devlayer` (`dl`) `[<layer> | <dev> <layer> | clear [<dev>] | list]`: per-device layers, see
-  [manual/per-device-mapping.md](manual/per-device-mapping.md)
+- `devlayer` (`dl`) `[<layer> | <dev> <layer> | clear [<dev>] | list]`: per-device layers, the same
+  as VIAL's Layout tab, see [Per-device layers from the console](#per-device-layers-from-the-console)
 - `notif [slot]`, `getreport <slot> [id]`, `getmode <slot>`, `mode <slot> <0|1>`, `suspend <slot>`:
   HID-over-GATT diagnostics
 - `connparam <slot> <lat> [ms]`, `leds [mask]`: request LL connection parameters; show/set the host
@@ -122,6 +122,34 @@ Commands:
 - `lastlog`: the previous run's log; `hangtest`: hang on purpose to test the watchdog
 - `bootloader`: reboot into download mode; `reboot`: restart
 - `help`
+
+### Per-device layers from the console
+
+[manual/per-device-mapping.md](manual/per-device-mapping.md) binds devices to layers in VIAL's Layout
+tab. `devlayer` (alias `dl`) does the same from the console. It refers to connected devices by their
+index, or binds **the device that sent input most recently**, so you don't have to name the device:
+
+| Command | Effect |
+| --- | --- |
+| `devlayer <layer>` | Bind the device used last to `<layer>` (1–7); `0` removes its binding |
+| `devlayer <dev> <layer>` | Bind connected device `<dev>` |
+| `devlayer clear [<dev>]` | Remove the binding of the device used last, or of `<dev>` |
+| `devlayer list` (or just `devlayer`) | Connected devices with index, name, address and bound layer; the saved bindings; the device used last |
+
+To bind a device without knowing its index, use only that device (e.g. scroll its wheel once), then
+type `devlayer 3` right away:
+
+```
+Device 2 bound to layer 3. Edit that layer in VIAL.
+```
+
+- `No device has sent input yet`: the multiplexer only remembers input since it booted or since that
+  device reconnected. Move or click the device and try again.
+- If another device sent input in between, the wrong one gets bound: `devlayer clear`, then try again
+  without touching anything else.
+- `resetkeymap` resets the keymap and keeps the bindings; `reset` removes them, together with the
+  bonds, the keymap and the macros. It is the only way to remove the bindings of devices that are no
+  longer paired.
 
 ### Hang recovery and the previous run's log
 

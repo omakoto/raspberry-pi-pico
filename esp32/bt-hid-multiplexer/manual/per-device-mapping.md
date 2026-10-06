@@ -4,83 +4,50 @@ By default the keymap you edit in [VIAL](https://vial.rocks/) is shared by every
 
 **Per-device mapping** fixes that. You *bind* one Bluetooth device to one keymap layer. That device is then looked up on its own layer first, so whatever you put there applies to that device only. Everything you leave **Transparent** on that layer behaves as before.
 
+You do all of it in VIAL: bind the device in the **Layout** tab, then edit its layer in the **Keymap** tab.
+
 Example used throughout this manual: a Logitech device with a vertical wheel, a horizontal wheel and four side buttons, where the vertical wheel should control the volume, while the wheels of your other mice keep scrolling.
-
----
-
-**Tip:** `dl` is a short alias for `devlayer`; everywhere below, `dl 3` works the same as `devlayer 3`.
 
 ---
 
 ## What you need
 
 - The multiplexer flashed and running (see the main [README](../README.md)).
-- The device paired with the multiplexer (see [How to Pair a Device](../README.md#how-to-pair-a-device)) and working.
-- VIAL access from Chrome (on Linux, run `~/cbin/setup/config-hidraw-permission` once, see [Keymapping with VIAL](../README.md#keymapping-with-vial)).
-- Optionally the serial console, for the `devlayer` command (Step 2, option B). On the DevKitC it is the `UART` USB-C port; on the XIAO it needs a USB-UART adapter on `D6`/`D7`. The board's own USB serial port is only present when `GPIO7` (XIAO `D8`) is connected to GND before the board is plugged in (see the README). Run `./02-monitor.sh` from the project directory. Anything you type there is a *console command*.
+- The device paired with the multiplexer (see [How to Pair a Device](../README.md#how-to-pair-a-device)). It does not need to be switched on to be bound.
+- VIAL access from Chrome or another Chromium-based browser (on Linux, run `~/cbin/setup/config-hidraw-permission` once, see [Keymapping with VIAL](../README.md#keymapping-with-vial)).
 
 ---
 
 ## Step 1. Pick a layer for the device
 
-The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device (binding a device to layer 0, with `devlayer 0`, just means "no binding": it uses the base layer like every device without one). Each layer can be used by several devices; devices bound to the same layer also share their layer keys (see "A layer key" below). Pick a layer you are not using for `MO(n)` and other layer keys: while such a key selects that layer, the devices it applies to see the bound device's mappings too.
+The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device. Each layer can be used by several devices; devices bound to the same layer also share their layer keys (see "A layer key" below). Pick a layer you are not using for `MO(n)` and other layer keys: while such a key selects that layer, the devices it applies to see the bound device's mappings too.
 
 This manual uses **layer 3**.
 
 ## Step 2. Bind the device to the layer
 
-### Option A: in VIAL (no console needed)
+1. Open (or reload) [vial.rocks](https://vial.rocks/), click **Start** and select the multiplexer. VIAL reads the list of paired devices when it connects, so reload it after pairing a new device.
+2. Open the **Layout** tab. It has one dropdown per paired device, labelled with the device's name. Two devices with the same name get the end of their Bluetooth address added, e.g. `MX Dialpad (7B:44)`.
+3. Set the device's dropdown to **Layer 3**.
 
-1. Open (or reload) [vial.rocks](https://vial.rocks/) and connect to the multiplexer. VIAL reads the device list when it connects, so reload it after pairing a new device.
-2. Open the **Layout** tab. It has one dropdown per paired (bonded) Bluetooth device, labelled with the device's name. Two devices with the same name get the end of their Bluetooth address added, e.g. `MX Dialpad (7B:44)`.
-3. Set the device's dropdown to **Layer 3**. The OLED confirms it (`<name>: layer 3`); the binding applies at once and is saved. `No binding` removes it.
+The binding applies at once and is saved in flash, by the device's Bluetooth address, so it survives reconnects and reboots. The OLED confirms it (`<name>: layer 3`). Nothing changes yet, because layer 3 is still all Transparent.
 
-The list also contains devices that are switched off, so a device can be bound before it connects. Note that loading a saved layout file in VIAL restores these dropdowns too, which rebinds devices (by their position in the list, so a file saved with different pairings can bind the wrong devices).
+The list also contains paired devices that are switched off, so a device can be bound before it connects.
 
-### Option B: with the `devlayer` console command
-
-The multiplexer does not make you pick the device by name or ID. It binds the device that sent input most recently:
-
-1. Make sure **only the device you want to bind** is being used: put your hand on it and leave your other keyboards and mice alone. For the example, scroll the Logitech wheel once or click one of its buttons.
-2. Immediately type this in the serial console:
-
-   ```
-   devlayer 3
-   ```
-
-3. You should see:
-
-   ```
-   Device 2 bound to layer 3. Edit that layer in VIAL.
-   ```
-
-   (The device number depends on the order devices connected in.) If you see `No device has sent input yet`, move or click the device and try again.
-
-4. Check it:
-
-   ```
-   devlayer list
-   ```
-
-   shows every connected device with its index, name, Bluetooth address and bound layer, and the saved bindings. Your device should say `layer 3`.
-
-If the wrong device got bound (because another mouse moved in between), fix it with `devlayer clear` (unbinds the device used last) or `devlayer clear <idx>` and start over. You can also bind explicitly by index from `devlayer list`: `devlayer <idx> <layer>`.
-
-The binding is saved in flash by the device's Bluetooth address. It survives reconnects and reboots. Nothing changes yet, because layer 3 is still all Transparent.
+**Layout files:** loading a saved layout file in VIAL restores these dropdowns too, which rebinds devices. It matches them by their position in the list, so a file saved with different pairings can bind the wrong devices. Check the Layout tab after loading one.
 
 ## Step 3. Edit the layer in VIAL
 
-1. Open <https://vial.rocks/> in Chrome, click **Start** and select the multiplexer.
-2. Select **layer 3** with VIAL's layer selector.
-3. Find the **bottom row** of the key map, the mouse row (below the F13–F24 row). From left to right it contains:
+1. Open the **Keymap** tab and select **layer 3** with VIAL's layer selector.
+2. Find the **bottom row** of the key map, the mouse row (below the F13–F24 row). From left to right it contains:
    - **8 mouse buttons**, in order: button 1 (left), 2 (right), 3 (middle), 4, 5, 6, 7, 8.
    - A gap, then **8 movement keys**: cursor up, cursor down, cursor left, cursor right, **wheel up, wheel down, wheel left, wheel right**.
-4. Click the key you want to change, then pick a keycode from VIAL's keycode list (the volume keys are in its media section). For the example:
+3. Click the key you want to change, then pick a keycode from VIAL's keycode list (the volume keys are in its media section). For the example:
    - the **wheel up** key → **Volume Up** (`KC_VOLU`)
    - the **wheel down** key → **Volume Down** (`KC_VOLD`)
 
    Changes apply immediately and are saved to flash half a second after your last edit.
-5. Leave everything else **Transparent** (`KC_TRNS`, which is what every key on layers 1–7 starts as): those inputs behave as on layer 0.
+4. Leave everything else **Transparent** (`KC_TRNS`, which is what every key on layers 1–7 starts as): those inputs behave as on layer 0.
 
 ### Which physical input is which key
 
@@ -117,27 +84,28 @@ Scroll the bound device's vertical wheel: each notch taps Volume Up or Down. Scr
 - **A keyboard key**, a modifier or a modified key such as `LSFT(KC_A)`. A key on a *wheel or movement* position is **tapped once per wheel notch** (for movement, once per 24 counts of motion, see `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `main/config.h`).
 - **Volume keys:** `KC_MUTE`, `KC_VOLU`, `KC_VOLD`.
 - **A layer key** (`MO(1)`, `TG(1)`, `TO(1)` and so on) on one of the device's buttons. While the layer is selected, it is looked up first, then the device's layer, then layer 0. This makes "hold a button and the wheel does something else" possible for just this device. A layer key on a bound device only applies to the devices bound to the same layer. It does not change the layer of other devices, and layer keys on unbound devices do not change the layer of bound devices.
+- **A macro** (`M0`–`M15`, edited in VIAL's **Macros** tab) on a key or button. Macros on wheel or movement positions do nothing.
 - `KC_NO` to disable an input.
 
-Not available: other media keys (play/pause, next, previous), macros, tap dance, mod-tap.
+Not available: other media keys (play/pause, next, previous), tap dance, mod-tap.
 
 ## Changing or removing a binding
 
-| To do this | Type |
-| --- | --- |
-| Move a device to another layer | move the device, then `devlayer 2` |
-| Unbind the device used last | `devlayer clear` (or `devlayer 0`) |
-| Unbind a specific device | `devlayer clear <idx>` (or `devlayer <idx> 0`) |
-| See devices and bindings | `devlayer list` |
-| Reset the keymap but keep the bindings | `resetkeymap` |
-| Remove all bindings (together with bonds and keymap) | `reset` |
+All of these are in VIAL's **Layout** tab:
 
-Up to 8 devices can be bound at the same time.
+| To do this | Do this |
+| --- | --- |
+| Move a device to another layer | pick the other layer in its dropdown |
+| Remove a binding | pick **No binding** |
+| See which device is bound to which layer | look at the dropdowns |
+
+Up to 8 devices can be bound at the same time. Resetting the keymap (holding the button for 8 s) keeps the bindings.
 
 ## Troubleshooting
 
-- **`No device has sent input yet`:** the multiplexer only remembers the device that sent input since it booted or since that device reconnected. Move or click the device, then run the command again.
-- **It bound the wrong device:** another device sent input between your last touch and the command. `devlayer clear`, then repeat Step 2 without touching anything else.
-- **A key in VIAL does nothing:** make sure you edited the layer the device is bound to (`devlayer list`), and that the key is not Transparent on that layer if you expect it to differ from layer 0.
+- **The device is not in the Layout tab:** VIAL reads the list when it connects. Reload vial.rocks after pairing the device. Only paired devices are listed.
+- **Two dropdowns have the same name:** they get the end of their Bluetooth address added. The OLED shows the name of the device used last, and the serial console's `devices` command shows the addresses (see the [README](../README.md#serial-console)).
+- **A key in VIAL does nothing:** make sure you edited the layer the device is bound to (see its dropdown in the Layout tab), and that the key is not Transparent on that layer if you expect it to differ from layer 0.
 - **The wheel scrolls in the wrong direction or too slowly:** wheel direction follows the key (wheel up → Volume Up). The distance for one tap is `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `main/config.h` (it only matters when *cursor movement* is mapped to a key or the wheel).
 - **The binding disappeared after re-pairing:** bindings are stored by Bluetooth address. A device that uses a different random address after being re-paired counts as a new device, so bind it again.
+- **The OLED says `Binding table full`:** bindings of devices that are no longer paired still take one of the 8 places, and VIAL no longer lists them. The `reset` console command removes them, together with the bonds, the keymap and the macros.
