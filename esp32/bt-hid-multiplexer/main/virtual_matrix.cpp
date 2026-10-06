@@ -98,6 +98,15 @@ uint8_t VirtualMatrix::getEffectiveLayer(uint8_t dev_idx) {
 bool VirtualMatrix::processKeyPress(uint8_t dev_idx, uint8_t raw_keycode, uint16_t &out_keycode) {
     if (dev_idx >= MAX_KEYBOARDS) return false;
 
+    // A key that is already held keeps what it was translated to. Some keyboards report a held
+    // modifier both as a modifier bit and in the key array, or list a key twice; both are the same
+    // virtual key. Translating it again (with the layer its first press may have switched on) would
+    // overwrite the stored action, and the release would then not undo a layer key.
+    if (active_translation_[dev_idx][raw_keycode] != 0) {
+        out_keycode = 0;
+        return false;
+    }
+
     uint16_t action = resolveAction(dev_idx, raw_keycode);
 
     // Handle Layer Switch Actions

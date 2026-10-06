@@ -20,6 +20,10 @@ public:
     // Rate-decoupled flush to USB HID host
     static void flushMouse();
     static void flushKeyboard();
+    // Sends the current keyboard and mouse state again, even if it has not changed, on the next
+    // flush. Used when the host may have missed reports (a failed transfer, a resume or a mount), so
+    // that a release it missed cannot leave a key or button held on the host.
+    static void resendState();
 
     // Continues a macro that is waiting out a delay; call every few ms.
     static void poll();
@@ -68,6 +72,7 @@ private:
     static int32_t tap_remainder_[8];
     static void enqueueTap(uint16_t action);
     static uint8_t merged_mouse_buttons_;
+    static bool mouse_resend_;
 
     // Macro playback (VIAL macros M0..): a macro's steps run one at a time, each followed by a
     // keyboard report, so the host sees every press and release. Taps go through the tap queue;

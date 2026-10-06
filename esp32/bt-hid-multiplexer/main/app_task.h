@@ -14,6 +14,7 @@ void app_post_host_leds(uint8_t leds);           // keyboard LED output report f
 void app_post_vial_request(const uint8_t *req);  // 32-byte VIAL RawHID request
 void app_post_usb_ready();                       // a HID IN transfer completed
 void app_post_usb_state_changed();               // USB mounted / unmounted
+void app_post_usb_resend();                      // the host may have missed HID reports
 void app_post_console_line(const char *line);    // console command line (NUL-terminated)
 
 // Shows a short message on the OLED; bt_app task only.

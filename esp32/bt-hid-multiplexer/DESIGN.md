@@ -241,6 +241,7 @@ This reproduces the single-context assumption the Pico code was written under. O
 | Keyboard LED output report | TinyUSB `tud_hid_set_report_cb` (inst 0) | Store the latest byte in an atomic and post `on_host_leds`. That runs `Multiplexer::setHostLeds` followed by `BleHidHost::sendHostLeds`. |
 | VIAL request | TinyUSB `tud_hid_set_report_cb` (inst 1) | Copy the 32 B request into a 4-entry FreeRTOS queue and post `on_vial`. That runs `VialServer::handleRawReport` and then sends or retries the reply (§6.4). |
 | HID IN endpoint free | TinyUSB `tud_hid_report_complete_cb` (inst 0/1) | Post `on_usb_ready`. That runs `Multiplexer::flushKeyboard/flushMouse` and the VIAL reply retry. |
+| HID IN transfer failed, or bus resumed | TinyUSB `tud_hid_report_failed_cb` (inst 0), `tud_resume_cb` | Post `on_usb_resend`. That calls `Multiplexer::resendState()` and flushes, so the host gets the current state even if the lost report was a release. A failure on inst 1 posts `on_usb_ready`. |
 | USB mounted, unmounted, suspended | TinyUSB callbacks | Set a flag. The UI shows USB health. |
 | Console line | `console` task | Copy the line (≤128 B) into a 4-entry queue and post `on_console_line`. `handle_command()` runs there, as on the Pico. Its output goes through `printf` into the log ring. |
 | CDC 1200-baud touch | TinyUSB `tud_cdc_line_coding_cb` | Post `on_bootloader_request`. |
@@ -256,7 +257,7 @@ The message list must also hold periodic work that was previously polled from th
 | Pico main loop stage | ESP32 timer on `bt_app` |
 |---|---|
 | `VirtualMatrix::flushPendingSave()` every pass | 100 ms timer (the 500 ms debounce is unchanged) |
-| `Multiplexer::flush*()` every pass | Event driven: on report arrival (as before), on `on_usb_ready`, and when USB is mounted. Output is only ever left pending after a send attempt found the endpoint busy, and the transfer occupying it always ends with a completion or failure callback (both post `on_usb_ready`), so no polling timer is needed. |
+| `Multiplexer::flush*()` every pass | Event driven: on report arrival (as before), on `on_usb_ready`, on `on_usb_resend`, and when USB is mounted (which also resends the current state). Output is only marked as sent once TinyUSB accepts the report. It is only ever left pending after a send attempt found the endpoint busy or the bus suspended, and the transfer occupying the endpoint always ends with a completion or failure callback, and a suspended bus with a resume or a remount, so no polling timer is needed. |
 | `ButtonHandler::update()` | 10 ms timer, reading `GPIO4` with `gpio_get_level`. |
 | Scan check (1 s) | 1 s timer |
 | OLED state-change detection | `bt_app` publishes the snapshot on every change. The `ui` task compares and redraws. |

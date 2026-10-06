@@ -134,10 +134,19 @@ static void on_usb_state_changed(void *context) {
     bool mounted = usb_hid_mounted();
     printf("[USB] %s\n", mounted ? "Mounted" : "Unmounted");
     if (mounted) {
-        // Input that arrived while the host was away.
+        // Input that arrived while the host was away, including keys that are still held.
+        Multiplexer::resendState();
         Multiplexer::flushKeyboard();
         Multiplexer::flushMouse();
     }
+}
+
+static void on_usb_resend(void *context) {
+    (void) context;
+    StageScope stage(STAGE_REPORT_FLUSH);
+    Multiplexer::resendState();
+    Multiplexer::flushKeyboard();
+    Multiplexer::flushMouse();
 }
 
 static void on_console_line(void *context) {
@@ -153,6 +162,7 @@ static btstack_context_callback_registration_t s_vial_request_cb = {nullptr, &on
 static btstack_context_callback_registration_t s_usb_ready_cb = {nullptr, &on_usb_ready, nullptr};
 static btstack_context_callback_registration_t s_host_leds_cb = {nullptr, &on_host_leds, nullptr};
 static btstack_context_callback_registration_t s_usb_state_cb = {nullptr, &on_usb_state_changed, nullptr};
+static btstack_context_callback_registration_t s_usb_resend_cb = {nullptr, &on_usb_resend, nullptr};
 static btstack_context_callback_registration_t s_console_line_cb = {nullptr, &on_console_line, nullptr};
 
 // --------------------------------------------------------------------+
@@ -188,6 +198,10 @@ void app_post_usb_ready() {
 
 void app_post_usb_state_changed() {
     btstack_run_loop_execute_on_main_thread(&s_usb_state_cb);
+}
+
+void app_post_usb_resend() {
+    btstack_run_loop_execute_on_main_thread(&s_usb_resend_cb);
 }
 
 // --------------------------------------------------------------------+

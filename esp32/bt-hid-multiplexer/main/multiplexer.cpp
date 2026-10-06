@@ -23,6 +23,7 @@ uint16_t Multiplexer::tap_active_ = 0;
 bool Multiplexer::tap_pressed_sent_ = false;
 int32_t Multiplexer::tap_remainder_[8];
 uint8_t Multiplexer::merged_mouse_buttons_ = 0;
+bool Multiplexer::mouse_resend_ = false;
 const uint8_t *Multiplexer::macro_pos_ = nullptr;
 const uint8_t *Multiplexer::macro_end_ = nullptr;
 uint32_t Multiplexer::macro_wait_until_ms_ = 0;
@@ -48,6 +49,7 @@ void Multiplexer::init() {
     tap_pressed_sent_ = false;
     memset(tap_remainder_, 0, sizeof(tap_remainder_));
     merged_mouse_buttons_ = 0;
+    mouse_resend_ = false;
     macro_pos_ = nullptr;
     macro_end_ = nullptr;
     macro_held_count_ = 0;
@@ -218,6 +220,7 @@ void Multiplexer::flushKeyboard() {
 
     // A tapped key needs a report with it down and then a report with it up, even when the same key
     // is tapped again right away.
+    uint16_t releasing_tap = tap_pressed_sent_ ? tap_active_ : 0;
     if (tap_pressed_sent_) {
         tap_active_ = 0;
         tap_pressed_sent_ = false;
@@ -235,7 +238,16 @@ void Multiplexer::flushKeyboard() {
     report[1] = 0x00; // Reserved
     memcpy(&report[2], out.keys, 6);
 
-    tud_hid_n_report(0, REPORT_ID_KEYBOARD, report, sizeof(report));
+    if (!tud_hid_n_report(0, REPORT_ID_KEYBOARD, report, sizeof(report))) {
+        // Not sent: stay dirty, and keep a tap's release pending, so that this report goes out on
+        // the next flush. Dropping it could leave a key held on the host.
+        if (releasing_tap != 0) {
+            tap_active_ = releasing_tap;
+            tap_pressed_sent_ = true;
+        }
+        kbd_dirty_ = true;
+        return;
+    }
     if (tap_active_ != 0) {
         tap_pressed_sent_ = true;
     }
@@ -358,7 +370,8 @@ void Multiplexer::flushMouse() {
     collectOutputs(out);
     uint8_t merged_buttons = out.mouse_buttons;
 
-    if (accum_dx_ == 0 && accum_dy_ == 0 && accum_wheel_ == 0 && accum_pan_ == 0 && merged_buttons == merged_mouse_buttons_) {
+    if (accum_dx_ == 0 && accum_dy_ == 0 && accum_wheel_ == 0 && accum_pan_ == 0 &&
+        merged_buttons == merged_mouse_buttons_ && !mouse_resend_) {
         return;
     }
 
@@ -368,14 +381,23 @@ void Multiplexer::flushMouse() {
     int8_t report_wheel = (accum_wheel_ > 127) ? 127 : ((accum_wheel_ < -127) ? -127 : (int8_t)accum_wheel_);
     int8_t report_pan = (accum_pan_ > 127) ? 127 : ((accum_pan_ < -127) ? -127 : (int8_t)accum_pan_);
 
+    // Transmit standard 5-byte mouse report (buttons, dx, dy, wheel, pan) matching descriptor. The
+    // state only counts as sent once the report is accepted, so that a report that could not be
+    // queued (e.g. a button release) goes out on the next flush.
+    if (!tud_hid_n_mouse_report(0, REPORT_ID_MOUSE, merged_buttons, report_dx, report_dy, report_wheel, report_pan)) {
+        return;
+    }
     accum_dx_ -= report_dx;
     accum_dy_ -= report_dy;
     accum_wheel_ -= report_wheel;
     accum_pan_ -= report_pan;
     merged_mouse_buttons_ = merged_buttons;
+    mouse_resend_ = false;
+}
 
-    // Transmit standard 5-byte mouse report (buttons, dx, dy, wheel, pan) matching descriptor
-    tud_hid_n_mouse_report(0, REPORT_ID_MOUSE, merged_buttons, report_dx, report_dy, report_wheel, report_pan);
+void Multiplexer::resendState() {
+    kbd_dirty_ = true;
+    mouse_resend_ = true;
 }
 
 void Multiplexer::setHostLeds(uint8_t leds) {

@@ -12,6 +12,7 @@
 
 std::vector<SentKeyboard> g_sent_keyboard;
 std::vector<SentMouse> g_sent_mouse;
+int g_usb_fail_count = 0;
 uint32_t g_now_ms = 0;
 
 static int g_saves = 0;
@@ -47,6 +48,7 @@ static int g_failures = 0;
 static void reset() {
     g_sent_keyboard.clear();
     g_sent_mouse.clear();
+    g_usb_fail_count = 0;
     memset(g_connected, 0, sizeof(g_connected));
     g_connected[0] = g_connected[1] = true;
     DeviceBindings::init(fake_address);
@@ -391,6 +393,74 @@ int main() {
     CHECK(VirtualMatrix::getEffectiveLayer(0) == 1);
     Multiplexer::purgeMouse(1);
     CHECK(VirtualMatrix::getEffectiveLayer(0) == 3);
+
+    // A virtual key pressed again while held keeps its first translation, so that the release still
+    // ends a layer key. LCtrl (0xE0) is MO(1), and layer 1 maps that position to A. Some keyboards
+    // report a held modifier both as a modifier bit and in the key array.
+    reset();
+    set(0, 0xE0, 0x5101);
+    set(1, 0xE0, 0x04);
+    uint8_t lctrl[1] = {0xE0};
+    Multiplexer::handleKeyboardReport(0, 0x01, lctrl, 1);
+    CHECK(VirtualMatrix::getActiveLayer() == 1);
+    CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0);  // the layer key itself sends nothing
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 0);
+    // The same for a key listed twice in one report.
+    set(0, 0x04, 0x5101);
+    set(1, 0x04, 0x05);
+    uint8_t twice[2] = {0x04, 0x04};
+    Multiplexer::handleKeyboardReport(0, 0, twice, 2);
+    CHECK(VirtualMatrix::getActiveLayer() == 1);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 0);
+
+    // A report that USB does not accept is sent on the next flush, so that a release is not lost.
+    reset();
+    uint8_t key_a[1] = {0x04};
+    Multiplexer::handleKeyboardReport(0, 0x02, key_a, 1);       // LShift + A
+    CHECK(lastKbd().mods == 0x02 && lastKbd().keys[0] == 0x04);
+    g_sent_keyboard.clear();
+    g_usb_fail_count = 1;
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    CHECK(g_sent_keyboard.empty());
+    Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 1 && lastKbd().mods == 0 && lastKbd().keys[0] == 0);
+    Multiplexer::flushKeyboard();
+    CHECK(g_sent_keyboard.size() == 1);                          // and only once
+    // The same for a mouse button release.
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    CHECK(lastMouse().buttons == 0x01);
+    g_sent_mouse.clear();
+    g_usb_fail_count = 2;                                        // the keyboard and the mouse flush
+    Multiplexer::handleMouseReport(0, 0, 3, 0, 0, 0);
+    CHECK(g_sent_mouse.empty());
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0 && lastMouse().dx == 3);
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 1);
+    // And for the release half of a tap (wheel up mapped to LShift).
+    set(0, VKEY_WHEEL_UP, 0xE1);
+    g_sent_keyboard.clear();
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 1, 0);           // sends the tap's press
+    CHECK(g_sent_keyboard.size() == 1 && lastKbd().mods == 0x02);
+    g_usb_fail_count = 1;
+    Multiplexer::flushKeyboard();                                // its release fails
+    CHECK(g_sent_keyboard.size() == 1);
+    pump();
+    CHECK(g_sent_keyboard.size() == 2 && lastKbd().mods == 0);
+    // resendState() sends the current state again even though nothing changed.
+    Multiplexer::handleKeyboardReport(0, 0x02, key_a, 1);
+    g_sent_keyboard.clear();
+    g_sent_mouse.clear();
+    Multiplexer::resendState();
+    Multiplexer::flushKeyboard();
+    Multiplexer::flushMouse();
+    CHECK(g_sent_keyboard.size() == 1 && lastKbd().mods == 0x02 && lastKbd().keys[0] == 0x04);
+    CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0);
+    Multiplexer::flushKeyboard();
+    Multiplexer::flushMouse();
+    CHECK(g_sent_keyboard.size() == 1 && g_sent_mouse.size() == 1);
 
     // Binding by address (from VIAL) works for devices that are not connected, and a connected device
     // with that address picks it up.

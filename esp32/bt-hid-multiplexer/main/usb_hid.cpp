@@ -165,12 +165,24 @@ extern "C" void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *repo
     app_post_usb_ready();
 }
 
-// A failed transfer frees the endpoint too; whatever was waiting for it is sent now.
+// A failed transfer frees the endpoint too. The report it carried did not reach the host, so the
+// current keyboard and mouse state is sent again: if it was a release, the key or button would
+// otherwise stay held on the host.
 extern "C" void tud_hid_report_failed_cb(uint8_t instance, hid_report_type_t report_type, uint8_t const *report,
                                          uint16_t xferred_bytes) {
-    (void) instance;
     (void) report_type;
     (void) report;
     (void) xferred_bytes;
-    app_post_usb_ready();
+    if (instance == 0) {
+        app_post_usb_resend();
+    } else {
+        app_post_usb_ready();
+    }
+}
+
+// While the bus is suspended nothing is sent, so input that changed meanwhile is sent on resume.
+// esp_tinyusb leaves this callback to the application unless CONFIG_TINYUSB_RESUME_CALLBACK is set
+// (which would then make this a duplicate definition).
+extern "C" void tud_resume_cb(void) {
+    app_post_usb_resend();
 }
