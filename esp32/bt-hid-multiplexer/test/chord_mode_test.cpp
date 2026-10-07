@@ -67,6 +67,84 @@ static void test_pass_through() {
     CHECK(!st.button_down);
 }
 
+// Keys held together arrive merged into one report: their modifiers ORed, their keys side by side.
+// The sequences are as captured from the device.
+static void test_merged_reports() {
+    ChordState st = {};
+    // Hold 8 (Ctrl+Z), tap 9 (Space), release 8.
+    CHECK(send(&st, 0x01, 0x1D).is(0, 0x60));
+    CHECK(send(&st, 0x01, 0x1D, 0x2C).is(0, 0x60, 0x61));
+    CHECK(send(&st, 0x01, 0x1D).is(0, 0x60));
+    CHECK(send(&st, 0).is(0));
+
+    // Hold 9, tap 8, release 9.
+    CHECK(send(&st, 0x00, 0x2C).is(0, 0x61));
+    CHECK(send(&st, 0x01, 0x1D, 0x2C).is(0, 0x60, 0x61));
+    CHECK(send(&st, 0x00, 0x2C).is(0, 0x61));
+    CHECK(send(&st, 0).is(0));
+
+    // 8 and 9 at once, 8 released first.
+    CHECK(send(&st, 0x01, 0x1D, 0x2C).is(0, 0x60, 0x61));
+    CHECK(send(&st, 0x00, 0x2C).is(0, 0x61));
+    CHECK(send(&st, 0).is(0));
+
+    // Hold 4 (Shift), tap 8: Ctrl+Shift+Z is 4 and 8, not key 10, because 4 was held.
+    CHECK(send(&st, 0x02).is(0, 0x5C));
+    CHECK(send(&st, 0x03, 0x1D).is(0, 0x5C, 0x60));
+    CHECK(send(&st, 0x02).is(0, 0x5C));
+    CHECK(send(&st, 0).is(0));
+
+    // Hold 8, tap 4. Holding 8 and pressing 10 would look the same; 4 is taken because 10 would
+    // leave 8 adding nothing to the report.
+    CHECK(send(&st, 0x01, 0x1D).is(0, 0x60));
+    CHECK(send(&st, 0x03, 0x1D).is(0, 0x5C, 0x60));
+    CHECK(send(&st, 0x01, 0x1D).is(0, 0x60));
+    CHECK(send(&st, 0).is(0));
+
+    // From nothing held, Ctrl+Shift+Z is key 10.
+    CHECK(send(&st, 0x03, 0x1D).is(0, 0x62));
+    CHECK(send(&st, 0).is(0));
+
+    // Hold 1 (Ctrl+O), tap 2 (Ctrl+N).
+    CHECK(send(&st, 0x01, 0x12).is(0, 0x59));
+    CHECK(send(&st, 0x01, 0x12, 0x11).is(0, 0x59, 0x5A));
+    CHECK(send(&st, 0x01, 0x12).is(0, 0x59));
+    CHECK(send(&st, 0).is(0));
+
+    // Hold 5 (Ctrl), tap 1: Ctrl+O is 5 and 1 because 5 was held.
+    CHECK(send(&st, 0x01).is(0, 0x5D));
+    CHECK(send(&st, 0x01, 0x12).is(0, 0x59, 0x5D));
+    CHECK(send(&st, 0x01).is(0, 0x5D));
+    CHECK(send(&st, 0).is(0));
+
+    // A report that nothing adds up to passes through, and the next one starts from scratch.
+    CHECK(send(&st, 0x01, 0x1D).is(0, 0x60));
+    CHECK(send(&st, 0x05, 0x1D, 0x04).is(0x05, 0x1D, 0x04));
+    CHECK(send(&st, 0x03, 0x1D).is(0, 0x62));
+    CHECK(send(&st, 0).is(0));
+    CHECK(!st.button_down);
+}
+
+// When two sets of shortcuts differ equally from what was held, the one where every shortcut adds
+// something to the report wins, whatever the table order.
+static void test_redundant_set_loses() {
+    static const ChordEntry entries[] = {
+        {0x03, 0x1D, 0x62},  // Ctrl+Shift+Z, listed first
+        {0x01, 0x1D, 0x60},  // Ctrl+Z
+        {0x02, 0x00, 0x5C},  // Shift
+    };
+    const ChordProfile profile = {"Test", entries, 3, 0x58};
+    ChordState st = {};
+    const uint8_t ctrl_z[6] = {0x1D, 0, 0, 0, 0, 0};
+    Out o;
+    chord_translate(profile, &st, 0x01, ctrl_z, true, 5000, &o.mods, o.keys);
+    CHECK(o.is(0, 0x60));
+    // Ctrl+Z held, then Ctrl+Shift+Z: Ctrl+Z and Shift, not Ctrl+Z and Ctrl+Shift+Z (where Ctrl+Z
+    // would add nothing).
+    chord_translate(profile, &st, 0x03, ctrl_z, true, 5000, &o.mods, o.keys);
+    CHECK(o.is(0, 0x60, 0x5C));
+}
+
 // The dial button sends an empty report on press and another on release.
 static void test_idle_button() {
     ChordState st = {};
@@ -88,7 +166,7 @@ static void test_idle_button() {
     Out o;
     CHECK(send(&st, 0).is(0, 0x58));
     chord_translate(*ack05(), &st, 0x01, six, true, 5000, &o.mods, o.keys);
-    const uint8_t want[6] = {0x59, 0x5A, 0x5F, 0x60, 0x56, 0x57};
+    const uint8_t want[6] = {0x56, 0x57, 0x59, 0x5A, 0x5F, 0x60};
     CHECK(o.mods == 0 && memcmp(o.keys, want, 6) == 0);
     CHECK(send(&st, 0x01, 0x12).is(0, 0x59, 0x58));
 }
@@ -113,6 +191,8 @@ int main() {
     test_profile_lookup();
     test_ack05_keys();
     test_pass_through();
+    test_merged_reports();
+    test_redundant_set_loses();
     test_idle_button();
     test_expire();
     if (g_failures) {

@@ -27,6 +27,8 @@ static const ChordEntry ACK05_ENTRIES[] = {
     {MOD_LCTRL | MOD_LSHIFT, KC_Z, KC_KP_0},     // key 10
 };
 
+static_assert(sizeof(ACK05_ENTRIES) / sizeof(ACK05_ENTRIES[0]) <= CHORD_MAX_ENTRIES, "too many entries");
+
 static const ChordProfile PROFILES[] = {
     {"Shortcut Remote", ACK05_ENTRIES, sizeof(ACK05_ENTRIES) / sizeof(ACK05_ENTRIES[0]), KC_KP_ENTER},
 };
@@ -38,14 +40,73 @@ const ChordProfile *chord_profile_for(const char *device_name) {
     return nullptr;
 }
 
-static bool lookup(const ChordProfile &profile, uint8_t modifiers, uint8_t key, uint8_t *out) {
-    for (uint8_t i = 0; i < profile.entry_count; i++) {
-        if (profile.entries[i].modifiers == modifiers && profile.entries[i].key == key) {
-            *out = profile.entries[i].out;
-            return true;
-        }
+static bool has_key(const uint8_t keys[6], uint8_t key) {
+    for (uint8_t i = 0; i < 6; i++) {
+        if (keys[i] == key) return true;
     }
     return false;
+}
+
+// Whether the shortcuts `set` (bits are entry indices) add up to exactly the report.
+static bool explains(const ChordProfile &profile, uint16_t set, uint8_t modifiers, const uint8_t keys[6]) {
+    uint8_t union_modifiers = 0;
+    for (uint8_t i = 0; i < profile.entry_count; i++) {
+        if (set & (1u << i)) union_modifiers |= profile.entries[i].modifiers;
+    }
+    if (union_modifiers != modifiers) return false;
+    for (uint8_t k = 0; k < 6; k++) {
+        if (keys[k] == 0) continue;
+        bool found = false;
+        for (uint8_t i = 0; i < profile.entry_count && !found; i++) {
+            found = (set & (1u << i)) && profile.entries[i].key == keys[k];
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+// Whether a shortcut of `set` could be left out and the rest would still add up to the report.
+static bool has_redundant(const ChordProfile &profile, uint16_t set, uint8_t modifiers, const uint8_t keys[6]) {
+    for (uint8_t i = 0; i < profile.entry_count; i++) {
+        if ((set & (1u << i)) && explains(profile, set & ~(1u << i), modifiers, keys)) return true;
+    }
+    return false;
+}
+
+// Finds which shortcuts are held. The device reports the shortcuts of all its held keys merged into
+// one report (their modifiers ORed, their keys side by side), so this looks for the set of
+// shortcuts that adds up to exactly the report. Several sets can: holding key 4 (Shift) and key 8
+// (Ctrl+Z) gives Ctrl+Shift+Z, which is also key 10 alone. Keys are pressed and released one at a
+// time, so the set that differs least from the keys held before wins, and among those, one where
+// every shortcut adds something to the report. Returns false if no set adds up to the report.
+static bool decode(const ChordProfile &profile, uint16_t held, uint8_t modifiers, const uint8_t keys[6],
+                   uint16_t *out_held) {
+    // The shortcuts that fit in the report.
+    uint8_t candidates[CHORD_MAX_ENTRIES];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < profile.entry_count; i++) {
+        const ChordEntry &e = profile.entries[i];
+        if ((e.modifiers & ~modifiers) == 0 && (e.key == 0 || has_key(keys, e.key))) candidates[n++] = i;
+    }
+
+    bool found = false;
+    uint16_t best = 0;
+    int best_score = 0;
+    for (uint32_t pick = 1; pick < (1u << n); pick++) {
+        uint16_t set = 0;
+        for (uint8_t j = 0; j < n; j++) {
+            if (pick & (1u << j)) set |= (uint16_t)(1u << candidates[j]);
+        }
+        if (!explains(profile, set, modifiers, keys)) continue;
+        int score = __builtin_popcount(set ^ held) * 2 + (has_redundant(profile, set, modifiers, keys) ? 1 : 0);
+        if (!found || score < best_score) {
+            found = true;
+            best = set;
+            best_score = score;
+        }
+    }
+    *out_held = best;
+    return found;
 }
 
 // The translated report plus the idle button, if it is down and there is room for it.
@@ -74,23 +135,21 @@ void chord_translate(const ChordProfile &profile, ChordState *state, uint8_t mod
             state->button_down = !state->button_down;
             state->button_down_ms = now_ms;
         }
+        state->held_entries = 0;
         state->out_modifiers = 0;
         memset(state->out_keys, 0, 6);
     } else {
-        // Each key with the report's modifiers is one shortcut; with no keys, the modifiers are.
-        uint8_t mapped[6] = {0};
-        uint8_t n = 0;
-        bool known = true;
-        for (uint8_t i = 0; i < 6; i++) {
-            if (keys[i] == 0) continue;
-            if (!lookup(profile, modifiers, keys[i], &mapped[n++])) known = false;
-        }
-        if (n == 0 && !lookup(profile, modifiers, 0, &mapped[n++])) known = false;
-
-        if (known) {
+        uint16_t held;
+        if (decode(profile, state->held_entries, modifiers, keys, &held)) {
+            state->held_entries = held;
             state->out_modifiers = 0;
-            memcpy(state->out_keys, mapped, 6);
+            memset(state->out_keys, 0, 6);
+            uint8_t n = 0;
+            for (uint8_t i = 0; i < profile.entry_count && n < 6; i++) {
+                if (held & (1u << i)) state->out_keys[n++] = profile.entries[i].out;
+            }
         } else {
+            state->held_entries = 0;
             state->out_modifiers = modifiers;
             memcpy(state->out_keys, keys, 6);
         }

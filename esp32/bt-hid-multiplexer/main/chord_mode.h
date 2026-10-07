@@ -10,7 +10,8 @@
 // bare Ctrl on a third, so in the virtual matrix its keys share the Ctrl and Z positions and cannot
 // be remapped one by one. Each key press arrives as one report holding the whole shortcut, so in
 // chord mode every report is looked up as a whole, and a known shortcut becomes a single key of its
-// own (with its modifiers dropped), which VIAL can then remap like any other key.
+// own (with its modifiers dropped), which VIAL can then remap like any other key. Keys held together
+// arrive merged into one report, which is split back into the shortcuts of the keys held.
 //
 // The ACK05's dial button has no shortcut: it sends an empty report when pressed and another when
 // released. An empty report while nothing is held is therefore taken as that button.
@@ -23,6 +24,9 @@ struct ChordEntry {
     uint8_t key;        // the keycode it sends, 0 for a modifier-only shortcut
     uint8_t out;        // the keycode reported instead
 };
+
+// The most entries a profile can have (they are tracked as bits of a uint16_t).
+#define CHORD_MAX_ENTRIES 16
 
 struct ChordProfile {
     const char *device_name;
@@ -40,6 +44,7 @@ const ChordProfile *chord_profile_for(const char *device_name);
 // Per-device state. All zero is the initial state.
 struct ChordState {
     bool input_held;           // the last report from the device was not empty
+    uint16_t held_entries;     // the shortcuts held, as bits of entry indices
     bool button_down;
     uint32_t button_down_ms;
     uint8_t out_modifiers;     // the translated report without the idle button
