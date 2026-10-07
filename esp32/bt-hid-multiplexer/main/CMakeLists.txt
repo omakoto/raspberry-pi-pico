@@ -14,6 +14,7 @@ idf_component_register(
         "bond_table.cpp"
         "bindings_format.cpp"
         "hid_descriptor.cpp"
+        "chord_mode.cpp"
         "vial_server.cpp"
         "vial_definition.cpp"
         "ble_hid_host.cpp"

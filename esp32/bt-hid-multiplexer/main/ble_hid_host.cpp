@@ -5,6 +5,7 @@
 #include "device_bindings.h"
 #include "bond_table.h"
 #include "hid_descriptor.h"
+#include "chord_mode.h"
 #include "config.h"
 #include "btstack.h"
 #include "btstack_tlv.h"
@@ -54,6 +55,8 @@ struct BleSlot {
     bool has_mouse_report;           // the report descriptor says which report is the mouse
     bool has_keyboard_layout;        // the report descriptor says where the keyboard report is
     HidKeyboardLayout keyboard_layout;
+    const ChordProfile *chord_profile;  // non-null if the keyboard reports go through chord mode
+    ChordState chord_state;
     uint16_t mouse_speed_percent;    // mouse sensitivity scaling (default 100)
     int32_t scale_rem_x;             // fractional count accumulator for X
     int32_t scale_rem_y;             // fractional count accumulator for Y
@@ -65,6 +68,10 @@ struct BleSlot {
 // peripheral's last parameter update, and at most a few times per connection before giving up.
 #define ZERO_LATENCY_DELAY_MS     10000
 #define MAX_ZERO_LATENCY_ATTEMPTS 3
+
+// How long after the HID service comes up an empty report is not taken for a chord mode device's
+// idle button (see chord_mode.h).
+#define CHORD_CONNECT_GRACE_MS 1000
 
 static BleSlot s_slots[MAX_BLE_DEVICES];
 static BondedTable s_bonded_table;
@@ -1221,6 +1228,25 @@ static void resolve_input_reports(BleSlot *slot) {
         printf("[BLE Host] Slot %u '%s': detected Keyboard report (ID %u, modifiers at %d, %u keys at %u)\n",
                slot->dev_idx, slot->name, info.keyboard.report_id, info.keyboard.modifier_offset,
                info.keyboard.key_count, info.keyboard.keys_offset);
+        slot->chord_profile = chord_profile_for(slot->name);
+        if (slot->chord_profile) {
+            printf("[BLE Host] Slot %u '%s': chord mode (each shortcut is a key of its own)\n",
+                   slot->dev_idx, slot->name);
+        }
+    }
+}
+
+void BleHidHost::expireChordButtons() {
+    uint32_t now = platform_now_ms();
+    for (uint8_t i = 0; i < MAX_BLE_DEVICES; i++) {
+        BleSlot *slot = &s_slots[i];
+        uint8_t modifiers;
+        uint8_t keys[6];
+        if (slot->chord_profile && chord_expire(*slot->chord_profile, &slot->chord_state, now, &modifiers, keys)) {
+            printf("[BLE Host] Slot %u '%s': idle button released after %u s without a release report\n",
+                   slot->dev_idx, slot->name, CHORD_IDLE_BUTTON_TIMEOUT_MS / 1000);
+            Multiplexer::handleKeyboardReport(slot->dev_idx, modifiers, keys, 6);
+        }
     }
 }
 
@@ -1567,11 +1593,20 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 uint8_t modifiers;
                 uint8_t keys[6];
                 if (hid_keyboard_report_decode(slot->keyboard_layout, data, data_len, &modifiers, keys)) {
-                    Multiplexer::handleKeyboardReport(dev_idx, modifiers, keys, 6);
                     if (log_this_report && (modifiers != 0 || keys[0] != 0)) {
                         printf("[BLE Host] Key press on slot %u ('%s'): mod=0x%02X key=0x%02X\n",
                                dev_idx, slot->name, modifiers, keys[0]);
                     }
+                    if (slot->chord_profile) {
+                        // An empty report right after connecting may release a key that woke the
+                        // device up, so it is not taken for the idle button then.
+                        uint32_t now = platform_now_ms();
+                        bool allow_idle_button = slot->connected_ms != 0 &&
+                                                 now - slot->connected_ms >= CHORD_CONNECT_GRACE_MS;
+                        chord_translate(*slot->chord_profile, &slot->chord_state, modifiers, keys,
+                                        allow_idle_button, now, &modifiers, keys);
+                    }
+                    Multiplexer::handleKeyboardReport(dev_idx, modifiers, keys, 6);
                 } else if (report_log_allowed()) {
                     printf("[BLE Host] Short keyboard report for slot %u (id %u, data_len %u)\n",
                            dev_idx, report_id, data_len);

@@ -27,6 +27,12 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
   layers at [vial.rocks](https://vial.rocks/); per-device layers, set in VIAL's Layout tab (one
   dropdown per paired device, by name, see
   [manual/per-device-mapping.md](manual/per-device-mapping.md)). Saved in NVS.
+- **Chord mode for shortcut keypads:** the XP-Pen ACK05 Mini Keydial sends fixed shortcuts (Ctrl+Z,
+  Ctrl+Shift+Z, a bare Ctrl, ...) that share keys and cannot be remapped one by one. The multiplexer
+  turns it into a numeric keypad instead: dial left/right = Keypad `-`/`+`, the dial button = Keypad
+  Enter, and keys 1-10 (top left to bottom right) = Keypad `1`-`9`, `0`. Each is a key of its own
+  that VIAL can remap, e.g. in the pad's per-device layer. With Num Lock off, the host reads
+  Keypad `1`-`9`/`0` as navigation keys. See [manual/xppen-ack05.md](manual/xppen-ack05.md).
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
 - **SSD1306 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
   the 6-digit passkey when a keyboard needs one. Optional: the firmware runs without a display.
@@ -272,7 +278,7 @@ definition, the bonded device table, the stored bindings format and the HID repo
 with the host compiler and runs their tests. Run it after touching `main/multiplexer.cpp`,
 `main/macros.cpp`, `main/virtual_matrix.cpp`, `main/device_bindings.cpp`, `main/log_ring.cpp`,
 `main/vial_definition.cpp`, `main/bond_table.cpp`, `main/bindings_format.cpp`,
-`main/hid_descriptor.cpp`, `main/storage.h`, `main/config.h` or `gen-vial-layout.py`.
+`main/hid_descriptor.cpp`, `main/chord_mode.cpp`, `main/storage.h`, `main/config.h` or `gen-vial-layout.py`.
 
 `test/run-host-test.sh --coverage` also prints the line coverage of each of those sources and keeps
 gcov's annotated copies, with the lines that never ran marked `#####`.

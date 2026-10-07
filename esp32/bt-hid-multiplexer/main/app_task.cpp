@@ -211,6 +211,7 @@ void app_post_usb_resend() {
 static void on_heartbeat(btstack_timer_source_t *ts) {
     esp_task_wdt_reset();
     LogRing::heartbeat(platform_now_ms());
+    BleHidHost::expireChordButtons();
     btstack_run_loop_set_timer(ts, HEARTBEAT_INTERVAL_MS);
     btstack_run_loop_add_timer(ts);
 }

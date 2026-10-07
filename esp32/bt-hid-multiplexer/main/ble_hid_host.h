@@ -36,6 +36,9 @@ public:
     static void dumpDescriptor();
     static void dumpDevices();
     static void sendHostLeds(uint8_t leds);
+    // Releases chord mode idle buttons whose release report never came (see chord_mode.h). Called
+    // periodically from the BTstack context.
+    static void expireChordButtons();
 
     // Mouse sensitivity scaling (percent, e.g. 100 = 100%, 50 = 50%, 25 = 25%)
     static void setMouseSpeed(uint8_t slot_idx, uint16_t percent);
