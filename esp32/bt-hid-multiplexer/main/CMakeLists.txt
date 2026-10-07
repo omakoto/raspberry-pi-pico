@@ -13,6 +13,7 @@ idf_component_register(
         "device_bindings.cpp"
         "bond_table.cpp"
         "bindings_format.cpp"
+        "hid_descriptor.cpp"
         "vial_server.cpp"
         "vial_definition.cpp"
         "ble_hid_host.cpp"

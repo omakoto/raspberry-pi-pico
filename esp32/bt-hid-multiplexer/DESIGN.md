@@ -108,6 +108,8 @@ esp32/bt-hid-multiplexer/
 │   ├── ble_hid_host.*        ported (§4)
 │   ├── bond_table.*          the bonded table's stored layout, conversion and eviction choice (§8.2),
 │   │                         apart from ble_hid_host so that the host tests can run them
+│   ├── hid_descriptor.*      finds the keyboard/mouse/LED reports in a peripheral's report
+│   │                         descriptor (§4), apart from ble_hid_host so that it is host-tested
 │   ├── multiplexer.*         ported, nearly unchanged
 │   ├── virtual_matrix.*      ported, nearly unchanged
 │   ├── device_bindings.*     ported; keeps bindings of unpaired devices (§8.2)
@@ -124,9 +126,10 @@ esp32/bt-hid-multiplexer/
 │   └── button_handler.*      ported
 └── test/
     ├── run-host-test.sh      same tests as the Pico (multiplexer, keymap, bindings, log ring),
-    │                         plus the VIAL definition, the bonded table and the bindings format
+    │                         plus the VIAL definition, the bonded table, the bindings format
+    │                         and the report descriptor parser
     ├── host_test.cpp, log_ring_test.cpp, vial_definition_test.cpp,
-    ├── bond_table_test.cpp, bindings_format_test.cpp
+    ├── bond_table_test.cpp, bindings_format_test.cpp, hid_descriptor_test.cpp
     └── stubs/                platform.h / tusb.h stubs instead of the Pico SDK stubs
 ```
 
@@ -562,7 +565,10 @@ Copy every comment and keep the code.
 3. **Pairing delay.** Wait 200 ms after connecting before calling `sm_request_pairing`.
 4. **No re-enable after connect.** Do not call `hids_client_enable_notifications` after `HID_SERVICE_CONNECTED`.
 5. **Early reports.** Accept HID reports before `HID_SERVICE_CONNECTED`, and mark the slot connected on the first report.
-6. **Mouse report ID.** The mouse report ID from the descriptor wins over the "ID 1 = keyboard" guess (Keychron M5 8K). Without a descriptor ID, assume ID 2.
+6. **Report IDs from the descriptor.** `hid_descriptor.cpp` reads the report descriptor for the keyboard report (its ID, and where the modifiers and the keycode array are) and the mouse report (the first one with relative X/Y, or else the first absolute one). These win over the guesses by ID and length:
+   - The mouse ID wins over the "ID 1 = keyboard" guess (Keychron M5 8K).
+   - The keyboard layout handles keyboards on other IDs or without the boot keyboard's reserved byte (XP-Pen ACK05: 7 bytes on ID 6, a relative mouse on ID 1 after an absolute pointer on ID 9).
+   - The guesses only fill in for what the descriptor did not say: without a known mouse, assume ID 2 and guess mice by length; without a known keyboard, assume ID 1 or 7/8-byte ID 0 reports. Other reports are dropped, with a rate-limited "Unhandled" line.
 7. **Zero slave latency** (`BLE_ZERO_SLAVE_LATENCY`).
    - Send the request 10 s after the last parameter update, at most 3 times, at the shortest interval observed.
    - Recompute the supervision timeout.
@@ -700,7 +706,7 @@ Update `esp32/README.md` §5 (the project list) to add the new project.
 ### 13.2 Host tests
 
 - `test/run-host-test.sh` builds `multiplexer.cpp`, `virtual_matrix.cpp`, `device_bindings.cpp` and `log_ring.cpp` with `g++` against stubs, the same as the Pico.
-  - It also builds `vial_definition.cpp`, `bond_table.cpp` and `bindings_format.cpp`. The last two hold the stored-format conversions and the bonded-table eviction choice, kept apart from `ble_hid_host.cpp` and `storage.cpp` (which need BTstack and NVS) so that they can be tested. Their tests build the old formats byte by byte, as older firmware stored them.
+  - It also builds `vial_definition.cpp`, `bond_table.cpp`, `bindings_format.cpp` and `hid_descriptor.cpp` (tested with the XP-Pen ACK05's real descriptor and made-up ones). The last two hold the stored-format conversions and the bonded-table eviction choice, kept apart from `ble_hid_host.cpp` and `storage.cpp` (which need BTstack and NVS) so that they can be tested. Their tests build the old formats byte by byte, as older firmware stored them.
   - The Pico stubs (`pico.h`, `pico/time.h`, `hardware/sync.h`) are replaced by a `platform.h` stub that provides a settable `platform_now_ms()`, no-op critical sections, and `__NOINIT_ATTR` defined as empty.
   - The `tusb.h` stub stays.
 - `host_test.cpp` and `log_ring_test.cpp` are copied, with `MAX_KEYBOARDS` now 8.
