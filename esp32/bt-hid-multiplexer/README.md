@@ -67,6 +67,21 @@ into the computer that should receive the keyboard and mouse input.
 | USB serial enable | jumper to GND | `GPIO7` | `D8` | Row B, silk `7` | Read once at boot, see below |
 | Console UART0 | TX / RX | `GPIO43` / `GPIO44` | `D6` / `D7` | (on-board bridge) | 115200 8N1 |
 
+#### OLED pull-ups
+
+I2C needs pull-up resistors on SDA and SCL. The firmware enables the ESP32's internal pull-ups, but
+they are weak (about 45 kΩ), so it relies on the module's own. Most 0.96" SSD1306 modules have
+4.7-10 kΩ pull-ups. Some 1.3" SH1106 modules (e.g. the Hosyond 1.3" module) have weak ones or none.
+A display without them may work at 400 kHz but is marginal: it can glitch or stay blank. Add
+**4.7 kΩ from SDA to 3V3 and from SCL to 3V3** if that happens.
+
+`i2cscan` on the [serial console](#serial-console) shows whether the bus is healthy. A healthy bus
+lists only the display (`0x3C`). With weak pull-ups SDA rises too slowly, and the scan also lists
+other, mostly even addresses (e.g. `0x28 0x3C 0x4E 0x74`), because a line still on its way up after
+the address byte reads as an ACK. If nothing answers at an odd address and every even address
+"answers", the module is probably not connected or not powered: check VCC at the module and the SDA
+and SCL wires.
+
 Free pins for later: `GPIO1`, `GPIO2`, `GPIO8`, `GPIO9` (XIAO `D0`, `D1`, `D9`, `D10`) and `GPIO3`
 (`D2`, a strapping pin). The on-board BOOT button is not used by the firmware; it is how to force
 download mode by hand.
