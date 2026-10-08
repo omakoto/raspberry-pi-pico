@@ -9,7 +9,7 @@ CYW43439) to the ESP32-S3. Two boards are supported with one pinout:
 
 The firmware connects up to 8 BLE keyboards, mice and trackpads (HID over GATT) and merges them into one
 composite USB HID device (keyboard + mouse, VIAL raw HID, optional CDC console), with VIAL keymapping
-over 8 layers, per-device layers, an SSD1306 OLED and a pairing button.
+over 8 layers, per-device layers, an SSD1306 or SH1106 OLED and a pairing button.
 
 Status: all phases (§13.3) implemented and verified on a DevKitC-1 (ESP32-S3 N8R8): USB, VIAL (vial.rocks), NVS, console, watchdog recovery, flashing over both ports, OLED, button, LED, and pairing, reconnecting and input with a Keychron Nape Pro. Not yet verified: several devices at once (R1) and the XIAO itself.
 
@@ -124,7 +124,7 @@ esp32/bt-hid-multiplexer/
 │   ├── log_ring.*            ported (.noinit RAM, spinlock) (§7.5)
 │   ├── dual_console.*        ported: UART0 + CDC I/O task, command table (§7.1)
 │   ├── ui_task.*             OLED task (§7.3)
-│   ├── ssd1306.*, font_*.h   ported to i2c_master
+│   ├── oled.*, font_*.h      ported to i2c_master; SSD1306 and SH1106
 │   └── button_handler.*      ported
 └── test/
     ├── run-host-test.sh      same tests as the Pico (multiplexer, keymap, bindings, log ring),
@@ -231,7 +231,7 @@ Everything in §10 must survive the port unchanged.
 | **`bt_app`** (BTstack run loop) | 0 | 19 | 8 KB | **all application state**: BTstack, `BleHidHost`, `Multiplexer`, `VirtualMatrix`, `DeviceBindings`, `VialServer`, `StorageManager` writes, button logic | Runs `btstack_init(); btstack_main(); btstack_run_loop_execute();` and never returns. It is on the same core as the controller, so VHCI hand-offs stay core-local. |
 | TinyUSB (`esp_tinyusb`) | 1 | 20 | 4 KB | `tud_task()` | Set through `tinyusb_config_t.task`. Its priority is above the UI and console tasks so that endpoint completions are handled at once. |
 | `console` | 1 | 3 | 4 KB | UART0 driver, CDC FIFO, log ring drain, line editing | Wakes every 5 ms or on UART RX. |
-| `ui` | 1 | 2 | 4 KB | I2C bus, SSD1306 frame buffer | Renders from the snapshot. A blocking 1 KB I2C transfer here stalls nothing else. |
+| `ui` | 1 | 2 | 4 KB | I2C bus, OLED frame buffer | Renders from the snapshot. A blocking 1 KB I2C transfer here stalls nothing else. |
 | `app_main` | 0 | 1 | | | Initialises, creates the tasks and returns. |
 
 ### 5.2 The rule
@@ -430,9 +430,10 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 - Input is one button on `GPIO4` (XIAO `D3`) to GND, with the internal pull-up. The on-board BOOT button is not used, so pressing it never interferes with pairing (§2.1).
 - The 8 s factory reset does the same as on the Pico: it clears bonds and resets the keymap, but keeps the per-device layer bindings. Only the `reset` console command clears the bindings too. This is a deliberate decision to stay at parity (Q4).
 
-### 7.3 OLED (`ssd1306.cpp`, `ui_task.cpp`)
+### 7.3 OLED (`oled.cpp`, `ui_task.cpp`)
 
-- **Bus.** The new `driver/i2c_master.h`: `i2c_new_master_bus` on I2C0 (SDA 5, SCL 6, internal pull-ups, glitch filter 7), then `i2c_master_bus_add_device` at 0x3C and 400 kHz. 1 MHz is selectable in `config.h`; most SSD1306 modules handle it.
+- **Bus.** The new `driver/i2c_master.h`: `i2c_new_master_bus` on I2C0 (SDA 5, SCL 6, internal pull-ups, glitch filter 7), then `i2c_master_bus_add_device` at 0x3C and 400 kHz. 1 MHz is selectable in `config.h`; most SSD1306 modules handle it, but the SH1106 is only specified to 400 kHz.
+- **Controller.** `OLED_CONTROLLER` in `config.h` selects SSD1306 or SH1106 at compile time; they cannot be told apart over I2C. `show()` writes page by page in page addressing mode, the only mode the SH1106 has, starting at column 2 on the SH1106 (its RAM is 132 columns wide and 128-pixel panels show columns 2..129). The init sequences differ only in the panel supply (SSD1306 charge pump `8D 14`, SH1106 DC-DC `AD 8B`) and the SSD1306's explicit page addressing mode.
 - **Transfers.** Blocking `i2c_master_transmit` from the `ui` task. Async I2C is marked experimental in IDF 5.3 and is not needed, because nothing else waits on this task.
 - **Code.** The drawing code, fonts and screen layouts are unchanged: boot splash, status, passkey, pairing, toast.
   - The splash shows `Firmware: v1.0.0`.

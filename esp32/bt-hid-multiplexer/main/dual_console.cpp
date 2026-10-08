@@ -10,6 +10,7 @@
 #include "macros.h"
 #include "virtual_matrix.h"
 #include "device_bindings.h"
+#include "oled.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -485,6 +486,17 @@ void dual_console_handle_command(const char *cmd) {
         handle_devlayer(cmd + 8);
     } else if (strncmp(cmd, "dl", 2) == 0 && (cmd[2] == '\0' || cmd[2] == ' ')) {
         handle_devlayer(cmd + 2);
+    } else if (strcmp(cmd, "i2cscan") == 0) {
+        uint8_t found[16];
+        int n = Oled::scanBus(found, sizeof(found));
+        if (n < 0) {
+            dual_println("OLED I2C bus is not set up.");
+        } else {
+            dual_printf("I2C scan (SDA GPIO%d, SCL GPIO%d, OLED expected at 0x%02X): %d device(s)",
+                        PIN_OLED_SDA, PIN_OLED_SCL, OLED_I2C_ADDR, n);
+            for (int i = 0; i < n; i++) dual_printf(" 0x%02X", found[i]);
+            dual_printf("\r\n");
+        }
     } else if (strcmp(cmd, "resetkeymap") == 0) {
         VirtualMatrix::resetKeymap();
         dual_println("Keymap reset to defaults (bonds untouched).");
@@ -504,6 +516,7 @@ void dual_console_handle_command(const char *cmd) {
         dual_println("  status         - Display connection status, layer, and uptime");
         dual_println("  devices        - List all connected BLE devices and slot details");
         dual_println("  bonds          - Dump bonded peripheral database and cache");
+        dual_println("  i2cscan        - List the addresses that answer on the OLED's I2C bus");
         dual_println("  desc           - Dump stored BLE HID report descriptor");
         dual_println("  mousespeed [..]- Get/set mouse sensitivity: [<percent>] or [<slot> <percent>]");
         dual_println("  notif [slot]   - Re-enable BLE HID notifications on slot(s)");

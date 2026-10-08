@@ -14,7 +14,13 @@
 #define OLED_I2C_ADDR           0x3C
 #define OLED_WIDTH              128
 #define OLED_HEIGHT             64
-#define OLED_BAUDRATE_HZ        400000
+#define OLED_BAUDRATE_HZ        400000  // SH1106 is specified up to 400 kHz; SSD1306 usually takes 1 MHz
+
+// OLED controller: OLED_SSD1306 (most 0.96" modules) or OLED_SH1106 (most 1.3" modules). The two
+// cannot be told apart over I2C, so pick the one on the module.
+#define OLED_SSD1306            1
+#define OLED_SH1106             2
+#define OLED_CONTROLLER         OLED_SH1106
 
 // Push button for BLE pairing (XIAO D3), to GND, internal pull-up
 #define PIN_PAIR_BUTTON         4

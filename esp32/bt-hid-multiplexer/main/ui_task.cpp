@@ -9,7 +9,7 @@
 
 #include "config.h"
 #include "platform.h"
-#include "ssd1306.h"
+#include "oled.h"
 
 #define UI_TASK_CORE      1
 #define UI_TASK_PRIORITY  2
@@ -43,7 +43,7 @@ static void ui_task(void *arg) {
     (void) arg;
     esp_task_wdt_add(nullptr);
 
-    bool display = SSD1306::init();
+    bool display = Oled::init();
     if (!display) {
         // No display to draw on. The task is suspended rather than deleted, because ui_publish() keeps
         // notifying it, which is harmless for a suspended task but not for a deleted one.
@@ -52,7 +52,7 @@ static void ui_task(void *arg) {
     }
     char version[32];
     snprintf(version, sizeof(version), "Firmware: v%s", FIRMWARE_VERSION);
-    SSD1306::renderBootSplash(nullptr, version);
+    Oled::renderBootSplash(nullptr, version);
     const uint32_t splash_end_ms = platform_now_ms() + SPLASH_MS;
 
     UiSnapshot shown = {};
@@ -82,8 +82,8 @@ static void ui_task(void *arg) {
             shown_valid = true;
             shown_toast = has_toast;
             last_draw_ms = now;
-            SSD1306::renderStatus(cur.connected_count, cur.device_name, cur.active_layer, cur.pairing,
-                                  cur.passkey, has_toast ? cur.toast : "", cur.usb_mounted);
+            Oled::renderStatus(cur.connected_count, cur.device_name, cur.active_layer, cur.pairing,
+                               cur.passkey, has_toast ? cur.toast : "", cur.usb_mounted);
         }
     }
 }

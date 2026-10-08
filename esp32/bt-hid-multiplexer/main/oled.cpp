@@ -1,4 +1,4 @@
-#include "ssd1306.h"
+#include "oled.h"
 #include "font_8x16.h"
 #include "font_4x5.h"
 #include "driver/i2c_master.h"
@@ -6,7 +6,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-uint8_t SSD1306::buffer_[OLED_WIDTH * OLED_HEIGHT / 8];
+#if OLED_CONTROLLER != OLED_SSD1306 && OLED_CONTROLLER != OLED_SH1106
+#error "OLED_CONTROLLER must be OLED_SSD1306 or OLED_SH1106"
+#endif
+
+// The SH1106 has 132 columns of RAM and 128-pixel modules wire the panel to columns 2..129.
+#if OLED_CONTROLLER == OLED_SH1106
+static const uint8_t OLED_COL_OFFSET = 2;
+#else
+static const uint8_t OLED_COL_OFFSET = 0;
+#endif
+
+uint8_t Oled::buffer_[OLED_WIDTH * OLED_HEIGHT / 8];
 
 // A transfer that takes longer than this means a stuck bus; it is abandoned instead of blocking the
 // UI task (which the task watchdog watches).
@@ -15,16 +26,16 @@ static const int I2C_TIMEOUT_MS = 100;
 static i2c_master_bus_handle_t s_bus = nullptr;
 static i2c_master_dev_handle_t s_dev = nullptr;
 
-void SSD1306::write(const uint8_t *data, size_t len) {
+void Oled::write(const uint8_t *data, size_t len) {
     if (s_dev) i2c_master_transmit(s_dev, data, len, I2C_TIMEOUT_MS);
 }
 
-void SSD1306::writeCmd(uint8_t cmd) {
+void Oled::writeCmd(uint8_t cmd) {
     uint8_t payload[2] = {0x00, cmd};
     write(payload, 2);
 }
 
-void SSD1306::writeCmdList(const uint8_t *cmds, size_t len) {
+void Oled::writeCmdList(const uint8_t *cmds, size_t len) {
     uint8_t payload[32];
     payload[0] = 0x00;
     while (len > 0) {
@@ -36,8 +47,8 @@ void SSD1306::writeCmdList(const uint8_t *cmds, size_t len) {
     }
 }
 
-bool SSD1306::init() {
-    // I2C0 master with the internal pull-ups (most SSD1306 modules have their own as well).
+bool Oled::init() {
+    // I2C0 master with the internal pull-ups (most OLED modules have their own as well).
     i2c_master_bus_config_t bus_cfg = {};
     bus_cfg.i2c_port = I2C_NUM_0;
     bus_cfg.sda_io_num = (gpio_num_t)PIN_OLED_SDA;
@@ -63,15 +74,22 @@ bool SSD1306::init() {
         return false;
     }
 
-    // Standard 128x64 SSD1306 initialization sequence
+    // 128x64 initialization sequence. The two controllers share most commands; they differ in how
+    // the panel voltage is generated and in the addressing modes. show() uses page addressing, the
+    // only mode the SH1106 has. The SSD1306 keeps its mode across a reset of the ESP32, so it is set
+    // explicitly.
     const uint8_t init_cmds[] = {
         0xAE,        // Display OFF
         0xD5, 0x80,  // Set display clock divide ratio / oscillator frequency
         0xA8, 0x3F,  // Set multiplex ratio (1 to 64)
         0xD3, 0x00,  // Set display offset to 0
         0x40,        // Set display start line to 0
+#if OLED_CONTROLLER == OLED_SH1106
+        0xAD, 0x8B,  // Enable the DC-DC converter
+#else
         0x8D, 0x14,  // Enable charge pump regulator
-        0x20, 0x00,  // Set memory addressing mode to Horizontal
+        0x20, 0x02,  // Set memory addressing mode to Page
+#endif
         0xA1,        // Set segment re-map (COL127 mapped to SEG0)
         0xC8,        // Set COM Output Scan Direction (remap)
         0xDA, 0x12,  // Set COM pins hardware configuration
@@ -89,11 +107,20 @@ bool SSD1306::init() {
     return true;
 }
 
-void SSD1306::clear(bool color) {
+int Oled::scanBus(uint8_t *found, int max) {
+    if (!s_bus) return -1;
+    int count = 0;
+    for (uint8_t addr = 0x08; addr <= 0x77 && count < max; addr++) {
+        if (i2c_master_probe(s_bus, addr, 20) == ESP_OK) found[count++] = addr;
+    }
+    return count;
+}
+
+void Oled::clear(bool color) {
     memset(buffer_, color ? 0xFF : 0x00, sizeof(buffer_));
 }
 
-void SSD1306::pixel(int x, int y, bool color) {
+void Oled::pixel(int x, int y, bool color) {
     if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT) {
         return;
     }
@@ -107,7 +134,7 @@ void SSD1306::pixel(int x, int y, bool color) {
     }
 }
 
-void SSD1306::line(int x0, int y0, int x1, int y1, bool color) {
+void Oled::line(int x0, int y0, int x1, int y1, bool color) {
     int dx = abs(x1 - x0);
     int dy = abs(y1 - y0);
     int sx = (x0 < x1) ? 1 : -1;
@@ -129,7 +156,7 @@ void SSD1306::line(int x0, int y0, int x1, int y1, bool color) {
     }
 }
 
-void SSD1306::rect(int x, int y, int w, int h, bool color, bool fill) {
+void Oled::rect(int x, int y, int w, int h, bool color, bool fill) {
     if (fill) {
         for (int i = 0; i < w; i++) {
             for (int j = 0; j < h; j++) {
@@ -144,7 +171,7 @@ void SSD1306::rect(int x, int y, int w, int h, bool color, bool fill) {
     }
 }
 
-int SSD1306::drawChar(char c, int x, int y, bool color, bool font_large) {
+int Oled::drawChar(char c, int x, int y, bool color, bool font_large) {
     if (font_large) {
         if (c < 0x20 || c > 0x7E) return 0;
         uint16_t offset = (uint16_t)(c - 0x20) * FONT_8X16_BYTES_PER_CHAR;
@@ -204,7 +231,7 @@ int SSD1306::drawChar(char c, int x, int y, bool color, bool font_large) {
     }
 }
 
-void SSD1306::drawString(const char *s, int x, int y, bool color, bool font_large) {
+void Oled::drawString(const char *s, int x, int y, bool color, bool font_large) {
     if (!s) return;
     int curr_x = x;
     while (*s) {
@@ -214,26 +241,26 @@ void SSD1306::drawString(const char *s, int x, int y, bool color, bool font_larg
     }
 }
 
-void SSD1306::show() {
-    // Set column address range 0..127
-    const uint8_t col_cmd[] = {0x21, 0x00, (uint8_t)(OLED_WIDTH - 1)};
-    writeCmdList(col_cmd, sizeof(col_cmd));
+void Oled::show() {
+    // One page (8 pixel rows) at a time in page addressing mode, the mode both controllers support.
+    // Each page is a command transfer that sets the page and start column, then a data transfer
+    // prefixed with the data indicator 0x40 (Co=0, D/C#=1).
+    uint8_t chunk_payload[OLED_WIDTH + 1];
+    chunk_payload[0] = 0x40;
 
-    // Set page address range 0..7
-    const uint8_t page_cmd[] = {0x22, 0x00, (uint8_t)((OLED_HEIGHT / 8) - 1)};
-    writeCmdList(page_cmd, sizeof(page_cmd));
-
-    // Send 1024-byte buffer in 128-byte chunks prefixed with data indicator 0x40
-    uint8_t chunk_payload[129];
-    chunk_payload[0] = 0x40; // Co=0, D/C#=1 (Data)
-
-    for (size_t i = 0; i < sizeof(buffer_); i += 128) {
-        memcpy(&chunk_payload[1], &buffer_[i], 128);
-        write(chunk_payload, 129);
+    for (int page = 0; page < OLED_HEIGHT / 8; page++) {
+        const uint8_t addr_cmd[] = {
+            (uint8_t)(0xB0 | page),                   // Set page address
+            (uint8_t)(0x00 | (OLED_COL_OFFSET & 0x0F)), // Set lower column address
+            (uint8_t)(0x10 | (OLED_COL_OFFSET >> 4)),   // Set higher column address
+        };
+        writeCmdList(addr_cmd, sizeof(addr_cmd));
+        memcpy(&chunk_payload[1], &buffer_[page * OLED_WIDTH], OLED_WIDTH);
+        write(chunk_payload, sizeof(chunk_payload));
     }
 }
 
-void SSD1306::renderStatus(uint8_t connected_count, const char *dev_name, int active_layer,
+void Oled::renderStatus(uint8_t connected_count, const char *dev_name, int active_layer,
                            bool pairing_active, uint32_t passkey, const char *toast_msg, bool usb_mounted) {
     bool ble_connected = connected_count > 0;
     clear(false);
@@ -293,7 +320,7 @@ void SSD1306::renderStatus(uint8_t connected_count, const char *dev_name, int ac
     show();
 }
 
-void SSD1306::renderBootSplash(const char *board_desc, const char *version_desc) {
+void Oled::renderBootSplash(const char *board_desc, const char *version_desc) {
     clear(false);
 
     // Header banner with inverted text

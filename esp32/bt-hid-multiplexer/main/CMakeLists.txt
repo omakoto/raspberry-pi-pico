@@ -19,7 +19,7 @@ idf_component_register(
         "vial_definition.cpp"
         "ble_hid_host.cpp"
         "dual_console.cpp"
-        "ssd1306.cpp"
+        "oled.cpp"
         "button_handler.cpp"
         "ui_task.cpp"
     INCLUDE_DIRS

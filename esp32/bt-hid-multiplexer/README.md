@@ -34,8 +34,9 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
   that VIAL can remap, e.g. in the pad's per-device layer. With Num Lock off, the host reads
   Keypad `1`-`9`/`0` as navigation keys. See [manual/xppen-ack05.md](manual/xppen-ack05.md).
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
-- **SSD1306 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
-  the 6-digit passkey when a keyboard needs one. Optional: the firmware runs without a display.
+- **SSD1306 or SH1106 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
+  the 6-digit passkey when a keyboard needs one. Optional: the firmware runs without a display. Set
+  `OLED_CONTROLLER` in `main/config.h` to the module's controller (default: SH1106).
 - **Pairing button.**
 - **Serial console** on UART0 (and optionally on the USB serial port) with diagnostics.
 - **Hang recovery:** a task watchdog reboots a hung board in 5 s and the previous run's log survives.
@@ -59,9 +60,9 @@ into the computer that should receive the keyboard and mouse input.
 
 | Component | Signal | GPIO | XIAO pin | DevKitC header | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| SSD1306 OLED | SDA | `GPIO5` | `D4` | Row B, silk `5` | I2C, 400 kHz |
-| SSD1306 OLED | SCL | `GPIO6` | `D5` | Row B, silk `6` | |
-| SSD1306 OLED | VCC / GND | `3V3` / `GND` | `3V3` / `GND` | `3V3` / `G` | |
+| OLED | SDA | `GPIO5` | `D4` | Row B, silk `5` | I2C, 400 kHz |
+| OLED | SCL | `GPIO6` | `D5` | Row B, silk `6` | |
+| OLED | VCC / GND | `3V3` / `GND` | `3V3` / `GND` | `3V3` / `G` | |
 | Push button | to GND | `GPIO4` | `D3` | Row B, silk `4` | Active LOW, internal pull-up |
 | USB serial enable | jumper to GND | `GPIO7` | `D8` | Row B, silk `7` | Read once at boot, see below |
 | Console UART0 | TX / RX | `GPIO43` / `GPIO44` | `D6` / `D7` | (on-board bridge) | 115200 8N1 |
@@ -123,6 +124,7 @@ Commands:
   ACL data such as SMP and ATT, without advertising reports), per-report dump
   (the latter two switch themselves off after 15 s)
 - `disconnect <slot>`, `unbond <idx>`, `clearbonds`
+- `i2cscan`: list the addresses that answer on the OLED's I2C bus (for a display that stays blank)
 - `resetkeymap`: reset the VIAL keymap, keeping the bonds
 - `reset`: factory reset (bonds, keymap, per-device bindings and macros)
 - `lastlog`: the previous run's log; `hangtest`: hang on purpose to test the watchdog
