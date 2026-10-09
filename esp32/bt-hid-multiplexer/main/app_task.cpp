@@ -291,6 +291,7 @@ static void on_ui_publish(btstack_timer_source_t *ts) {
             snprintf(snap.toast, sizeof(snap.toast), "%s", s_toast_msg);
         }
         snap.usb_mounted = usb_hid_mounted();
+        snap.input_count = DeviceBindings::activityCount();
         ui_publish(snap);
     }
     btstack_run_loop_set_timer(ts, UI_PUBLISH_MS);

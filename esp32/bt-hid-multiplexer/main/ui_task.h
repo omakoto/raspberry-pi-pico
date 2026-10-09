@@ -15,6 +15,8 @@ struct UiSnapshot {
     uint32_t passkey;
     char toast[32];  // empty when there is none; bt_app drops it when it expires
     bool usb_mounted;
+    // Changes on every input. Not shown: it only keeps the display on (see ui_task.cpp).
+    uint32_t input_count;
 };
 
 // Starts the UI task (OLED with its boot splash).

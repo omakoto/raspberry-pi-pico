@@ -45,6 +45,8 @@ public:
     // Remember which device produced input last, so that it can be bound without naming it.
     static void noteActivity(uint8_t dev_idx);
     static uint8_t lastActiveDevice();
+    // Counts noteActivity() calls (wrapping), so that a change shows that there was input.
+    static uint32_t activityCount();
 
     // Layer must be 1..NUM_LAYERS-1. Returns false if the device is not connected, the layer is
     // invalid or the table is full.

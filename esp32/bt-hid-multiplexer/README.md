@@ -35,8 +35,8 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
   Keypad `1`-`9`/`0` as navigation keys. See [manual/xppen-ack05.md](manual/xppen-ack05.md).
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
 - **SSD1306 or SH1106 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
-  the 6-digit passkey when a keyboard needs one. It goes dark a minute after the screen last changed and
-  comes back on with the next change. Optional: the firmware runs without a display. Set
+  the 6-digit passkey when a keyboard needs one. It goes dark a minute after the last change or input and
+  comes back on with the next one. Optional: the firmware runs without a display. Set
   `OLED_CONTROLLER` in `main/config.h` to the module's controller (default: SH1106).
 - **Pairing button.**
 - **Serial console** on UART0 (and optionally on the USB serial port) with diagnostics.

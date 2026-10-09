@@ -23,8 +23,8 @@
 // The display is redrawn on every change; this full redraw is only a safety net against a glitched
 // display.
 #define REFRESH_MS         10000
-// The panel is turned off this long after the screen last changed (against burn-in), and back on
-// with the next change. It is checked on the UI_POLL_MS wake-ups.
+// The panel is turned off this long after the screen last changed or the last input (against
+// burn-in), and back on with the next change or input. It is checked on the UI_POLL_MS wake-ups.
 #define SCREEN_TIMEOUT_MS  60000
 
 static TaskHandle_t s_task = nullptr;
@@ -80,27 +80,31 @@ static void ui_task(void *arg) {
         if (!valid) continue;
 
         if (now < splash_end_ms) continue;
+        // Input keeps the display on and wakes it up, but alone does not redraw it while it is on,
+        // which a moving mouse would otherwise do on every snapshot.
+        bool input = shown_valid && cur.input_count != shown.input_count;
+        shown.input_count = cur.input_count;
         bool changed = !shown_valid || memcmp(&cur, &shown, sizeof(cur)) != 0;
-        if (changed) {
+        if (changed || input) {
             last_change_ms = now;
-        } else if (screen_off) {
-            continue;
-        } else if (now - last_change_ms >= SCREEN_TIMEOUT_MS) {
-            Oled::setDisplayOn(false);
-            screen_off = true;
+        }
+        bool redraw = screen_off ? (changed || input) : (changed || now - last_draw_ms >= REFRESH_MS);
+        if (!redraw) {
+            if (!screen_off && now - last_change_ms >= SCREEN_TIMEOUT_MS) {
+                Oled::setDisplayOn(false);
+                screen_off = true;
+            }
             continue;
         }
-        if (changed || now - last_draw_ms >= REFRESH_MS) {
-            shown = cur;
-            shown_valid = true;
-            last_draw_ms = now;
-            Oled::renderStatus(cur.connected_count, cur.device_name, cur.active_layer, cur.pairing,
-                               cur.passkey, cur.toast, cur.usb_mounted);
-            // Turned on after the redraw, so that the old image does not flash up first.
-            if (screen_off) {
-                Oled::setDisplayOn(true);
-                screen_off = false;
-            }
+        shown = cur;
+        shown_valid = true;
+        last_draw_ms = now;
+        Oled::renderStatus(cur.connected_count, cur.device_name, cur.active_layer, cur.pairing,
+                           cur.passkey, cur.toast, cur.usb_mounted);
+        // Turned on after the redraw, so that the old image does not flash up first.
+        if (screen_off) {
+            Oled::setDisplayOn(true);
+            screen_off = false;
         }
     }
 }

@@ -589,6 +589,18 @@ int main() {
     CHECK(lastKbd().report_id == REPORT_ID_KEYBOARD);
     CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0x01 && lastMouse().dx == 0 && lastMouse().wheel == 0);
 
+    // Every input counts as activity (which keeps the OLED on), but an empty mouse report does not.
+    reset();
+    uint32_t activity = DeviceBindings::activityCount();
+    Multiplexer::handleMouseReport(0, 0, 1, 0, 0, 0);
+    CHECK(DeviceBindings::activityCount() == activity + 1);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(DeviceBindings::activityCount() == activity + 1);
+    uint8_t key_b[1] = {0x05};
+    Multiplexer::handleKeyboardReport(1, 0, key_b, 1);
+    CHECK(DeviceBindings::activityCount() == activity + 2);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+
     // Media and browser keys go out in the consumer report, Power/Sleep/Wake in the system report,
     // each after the step's keyboard report and only when it changed.
     reset();

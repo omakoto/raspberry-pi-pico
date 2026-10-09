@@ -7,6 +7,7 @@ static DeviceBindingEntry s_entries[MAX_DEVICE_BINDINGS];
 static DeviceBindings::AddressProvider s_provider = nullptr;
 static DeviceBindings::PairedLookup s_paired = nullptr;
 static uint8_t s_last_active = DeviceBindings::NO_DEVICE;
+static uint32_t s_activity_count = 0;
 
 // Resolved layer per device index; only valid where s_cache_valid is set, because the address of a
 // device that has not finished connecting cannot be looked up yet.
@@ -118,6 +119,11 @@ void DeviceBindings::deviceChanged(uint8_t dev_idx) {
 
 void DeviceBindings::noteActivity(uint8_t dev_idx) {
     if (dev_idx < MAX_KEYBOARDS) s_last_active = dev_idx;
+    s_activity_count++;
+}
+
+uint32_t DeviceBindings::activityCount() {
+    return s_activity_count;
 }
 
 uint8_t DeviceBindings::lastActiveDevice() {
