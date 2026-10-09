@@ -358,7 +358,7 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 | Interface | Function | Endpoints |
 |---|---|---|
 | 0, 1 | CDC ACM | notification `0x81`, OUT `0x02`, IN `0x82` |
-| 2 | HID keyboard (report ID 1, boot-compatible 8 B) + mouse (report ID 2: buttons, x, y, wheel, pan), polled every 1 ms | OUT `0x03`, IN `0x83` |
+| 2 | HID keyboard (report ID 1, boot-compatible 8 B) + mouse (report ID 2: buttons, x, y, wheel, pan) + consumer control (report ID 3: one 16-bit usage) + system control (report ID 4: power down / sleep / wake), polled every 1 ms | OUT `0x03`, IN `0x83` |
 | 3 | HID VIAL raw (`0xFF60`/`0x61`, 32 B in and 32 B out, no report ID), polled every 1 ms | OUT `0x04`, IN `0x84` |
 
 **Without CDC.** Interfaces 0 and 1 are HID, with the same endpoints.

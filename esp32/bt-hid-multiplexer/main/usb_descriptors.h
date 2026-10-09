@@ -10,7 +10,9 @@ extern "C" {
 
 enum {
     REPORT_ID_KEYBOARD = 1,
-    REPORT_ID_MOUSE    = 2
+    REPORT_ID_MOUSE    = 2,
+    REPORT_ID_CONSUMER = 3,  // 16-bit consumer page usage (media and browser keys)
+    REPORT_ID_SYSTEM   = 4   // 1 = power down, 2 = sleep, 3 = wake up
 };
 
 enum {

@@ -102,12 +102,15 @@
 // and has no USB report here.
 #define KC_SPECIAL_FIRST_       0x00A5
 
-// QMK keycodes for the consumer volume keys, sent as the equivalent HID keyboard-page usages
-// (Mute 0x7F, Volume Up 0x80, Volume Down 0x81), which the host also understands as volume keys
-// and which need no separate consumer report.
+// QMK system keys (Power, Sleep, Wake), sent in the system control report, and the media and
+// application keys (Mute .. Brightness Down), sent in the consumer control report.
+#define KC_PWR_                 0x00A5
+#define KC_WAKE_                0x00A7
 #define KC_MUTE_                0x00A8
 #define KC_VOLU_                0x00A9
 #define KC_VOLD_                0x00AA
+#define KC_WBAK_                0x00B6  // browser back
+#define KC_BRID_                0x00BE
 
 // VIAL macros: keycodes M0..M(MACRO_COUNT-1) (QK_MACRO in the VIAL protocol 3 numbering), stored
 // as VIA's NUL-separated macro buffer of MACRO_BUFFER_SIZE bytes.

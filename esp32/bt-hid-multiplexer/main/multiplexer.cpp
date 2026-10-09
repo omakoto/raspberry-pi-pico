@@ -40,6 +40,44 @@ uint8_t Multiplexer::macro_held_count_ = 0;
 uint8_t Multiplexer::host_leds_ = 0;
 uint8_t Multiplexer::last_synced_leds_ = 0xFF;
 bool Multiplexer::kbd_dirty_ = false;
+uint8_t Multiplexer::step_pending_ = 0;
+uint8_t Multiplexer::step_keyboard_[8];
+uint16_t Multiplexer::step_consumer_ = 0;
+uint8_t Multiplexer::step_system_ = 0;
+uint16_t Multiplexer::sent_consumer_ = 0;
+uint8_t Multiplexer::sent_system_ = 0;
+bool Multiplexer::consumer_resend_ = false;
+bool Multiplexer::system_resend_ = false;
+
+// Consumer page usages of the QMK keycodes from KC_MUTE_ (0xA8) to KC_BRID_ (0xBE), as QMK's
+// KEYCODE2CONSUMER.
+static const uint16_t CONSUMER_USAGES[] = {
+    0x00E2,  // KC_MUTE   Mute
+    0x00E9,  // KC_VOLU   Volume Increment
+    0x00EA,  // KC_VOLD   Volume Decrement
+    0x00B5,  // KC_MNXT   Scan Next Track
+    0x00B6,  // KC_MPRV   Scan Previous Track
+    0x00B7,  // KC_MSTP   Stop
+    0x00CD,  // KC_MPLY   Play/Pause
+    0x0183,  // KC_MSEL   AL Consumer Control Configuration (media player)
+    0x00B8,  // KC_EJCT   Eject
+    0x018A,  // KC_MAIL   AL Email Reader
+    0x0192,  // KC_CALC   AL Calculator
+    0x0194,  // KC_MYCM   AL Local Machine Browser
+    0x0221,  // KC_WSCH   AC Search
+    0x0223,  // KC_WHOM   AC Home
+    0x0224,  // KC_WBAK   AC Back
+    0x0225,  // KC_WFWD   AC Forward
+    0x0226,  // KC_WSTP   AC Stop
+    0x0227,  // KC_WREF   AC Refresh
+    0x022A,  // KC_WFAV   AC Bookmarks
+    0x00B3,  // KC_MFFD   Fast Forward
+    0x00B4,  // KC_MRWD   Rewind
+    0x006F,  // KC_BRIU   Display Brightness Increment
+    0x0070,  // KC_BRID   Display Brightness Decrement
+};
+static_assert(sizeof(CONSUMER_USAGES) / sizeof(CONSUMER_USAGES[0]) == KC_BRID_ - KC_MUTE_ + 1,
+              "one usage per keycode");
 
 void Multiplexer::init() {
     memset(keyboards_, 0, sizeof(keyboards_));
@@ -68,6 +106,11 @@ void Multiplexer::init() {
     host_leds_ = 0;
     last_synced_leds_ = 0xFF;
     kbd_dirty_ = false;
+    step_pending_ = 0;
+    sent_consumer_ = 0;
+    sent_system_ = 0;
+    consumer_resend_ = false;
+    system_resend_ = false;
 }
 
 void Multiplexer::handleKeyboardReport(uint8_t dev_idx, uint8_t modifiers, const uint8_t *keys, uint8_t key_count) {
@@ -164,10 +207,15 @@ void Multiplexer::addAction(OutputState &out, uint16_t action) {
         return;
     }
 
-    // Consumer volume keys are sent as the keyboard-page volume usages.
-    if (action == KC_MUTE_) action = 0x7F;
-    else if (action == KC_VOLU_) action = 0x80;
-    else if (action == KC_VOLD_) action = 0x81;
+    // Media and system keys: the reports hold one of each, so the first one held wins.
+    if (action >= KC_MUTE_ && action <= KC_BRID_) {
+        if (out.consumer == 0) out.consumer = CONSUMER_USAGES[action - KC_MUTE_];
+        return;
+    }
+    if (action >= KC_PWR_ && action <= KC_WAKE_) {
+        if (out.system == 0) out.system = (uint8_t)(action - KC_PWR_ + 1);
+        return;
+    }
 
     uint8_t mods = 0;
     if (IS_MODS_KEYCODE(action)) {
@@ -232,17 +280,28 @@ void Multiplexer::flushKeyboard() {
     if (!tud_hid_n_ready(0)) {
         return;
     }
-    // A running macro moves on once the previous step's reports have gone out.
-    if (macro_pos_ && tap_active_ == 0 && tap_count_ == 0 && !tap_pressed_sent_) {
-        runMacroStep();
+    while (true) {
+        if (step_pending_ == 0) {
+            // A running macro moves on once the previous step's reports have gone out.
+            if (macro_pos_ && tap_active_ == 0 && tap_count_ == 0 && !tap_pressed_sent_) {
+                runMacroStep();
+            }
+            if (!kbd_dirty_) {
+                return;
+            }
+            startStep();
+        } else if (step_pending_ & STEP_KEYBOARD) {
+            takeStepState();
+        }
+        if (sendStepReport()) {
+            return;
+        }
     }
-    if (!kbd_dirty_) {
-        return;
-    }
+}
 
-    // A tapped key needs a report with it down and then a report with it up, even when the same key
-    // is tapped again right away.
-    uint16_t releasing_tap = tap_pressed_sent_ ? tap_active_ : 0;
+void Multiplexer::startStep() {
+    // A tapped key needs a step with it down and then a step with it up, even when the same key is
+    // tapped again right away.
     if (tap_pressed_sent_) {
         tap_active_ = 0;
         tap_pressed_sent_ = false;
@@ -251,33 +310,67 @@ void Multiplexer::flushKeyboard() {
         tap_head_ = (tap_head_ + 1) % TAP_QUEUE_SIZE;
         tap_count_--;
     }
+    takeStepState();
 
+    // The next step (a tap's release, the next tap) starts once this one's reports are out.
+    tap_pressed_sent_ = (tap_active_ != 0);
+    kbd_dirty_ = (tap_active_ != 0) || (tap_count_ > 0);
+}
+
+void Multiplexer::takeStepState() {
     OutputState out;
     collectOutputs(out);
+    step_keyboard_[0] = out.mods;
+    step_keyboard_[1] = 0x00; // Reserved
+    memcpy(&step_keyboard_[2], out.keys, 6);
+    step_consumer_ = out.consumer;
+    step_system_ = out.system;
 
-    uint8_t report[8];
-    report[0] = out.mods;
-    report[1] = 0x00; // Reserved
-    memcpy(&report[2], out.keys, 6);
+    step_pending_ = STEP_KEYBOARD;
+    if (step_consumer_ != sent_consumer_ || consumer_resend_) step_pending_ |= STEP_CONSUMER;
+    if (step_system_ != sent_system_ || system_resend_) step_pending_ |= STEP_SYSTEM;
+}
 
-    // In the boot protocol (BIOS / UEFI firmware) the host expects these 8 bytes alone; a report
-    // ID in front would be read as the modifier byte, i.e. Left Ctrl held.
-    uint8_t report_id = tud_hid_n_get_protocol(0) == HID_PROTOCOL_BOOT ? 0 : REPORT_ID_KEYBOARD;
-    if (!tud_hid_n_report(0, report_id, report, sizeof(report))) {
-        // Not sent: stay dirty, and keep a tap's release pending, so that this report goes out on
-        // the next flush. Dropping it could leave a key held on the host.
-        if (releasing_tap != 0) {
-            tap_active_ = releasing_tap;
-            tap_pressed_sent_ = true;
+bool Multiplexer::sendStepReport() {
+    // In the boot protocol (BIOS / UEFI firmware) the host expects keyboard reports only, as the 8
+    // bytes alone; a report ID in front would be read as the modifier byte, i.e. Left Ctrl held. The
+    // consumer and system state is sent again when the host switches to the report protocol.
+    bool boot = tud_hid_n_get_protocol(0) == HID_PROTOCOL_BOOT;
+    // A report that cannot be queued stays pending and is sent on a later flush: dropping it could
+    // leave a key held on the host.
+    if (step_pending_ & STEP_KEYBOARD) {
+        if (tud_hid_n_report(0, boot ? 0 : REPORT_ID_KEYBOARD, step_keyboard_, sizeof(step_keyboard_))) {
+            step_pending_ &= (uint8_t)~STEP_KEYBOARD;
         }
-        kbd_dirty_ = true;
-        return;
+        return true;
     }
-    if (tap_active_ != 0) {
-        tap_pressed_sent_ = true;
+    if (step_pending_ & STEP_CONSUMER) {
+        if (!boot) {
+            if (tud_hid_n_report(0, REPORT_ID_CONSUMER, &step_consumer_, sizeof(step_consumer_))) {
+                sent_consumer_ = step_consumer_;
+                consumer_resend_ = false;
+                step_pending_ &= (uint8_t)~STEP_CONSUMER;
+            }
+            return true;
+        }
+        sent_consumer_ = step_consumer_;
+        consumer_resend_ = false;
+        step_pending_ &= (uint8_t)~STEP_CONSUMER;
     }
-    // Stay dirty until the pending release / the remaining taps have gone out.
-    kbd_dirty_ = (tap_active_ != 0) || (tap_count_ > 0);
+    if (step_pending_ & STEP_SYSTEM) {
+        if (!boot) {
+            if (tud_hid_n_report(0, REPORT_ID_SYSTEM, &step_system_, sizeof(step_system_))) {
+                sent_system_ = step_system_;
+                system_resend_ = false;
+                step_pending_ &= (uint8_t)~STEP_SYSTEM;
+            }
+            return true;
+        }
+        sent_system_ = step_system_;
+        system_resend_ = false;
+        step_pending_ &= (uint8_t)~STEP_SYSTEM;
+    }
+    return false;
 }
 
 void Multiplexer::enqueueTap(uint16_t action) {
@@ -555,6 +648,8 @@ void Multiplexer::pollMouseKeys() {
 
 void Multiplexer::resendState() {
     kbd_dirty_ = true;
+    consumer_resend_ = true;
+    system_resend_ = true;
     mouse_resend_ = true;
 }
 

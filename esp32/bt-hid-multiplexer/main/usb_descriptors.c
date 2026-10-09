@@ -57,10 +57,13 @@ const tusb_desc_device_t *usb_device_descriptor(void) {
     return g_usb_serial_enabled ? &desc_device : &desc_device_hid_only;
 }
 
-// HID 0 Report Descriptor: Composite Keyboard + Mouse
+// HID 0 Report Descriptor: Composite Keyboard + Mouse + Consumer Control + System Control. They share
+// one interface because the ESP32-S3 has no IN endpoint left for another one.
 uint8_t const desc_hid_kbd_mouse_report[] = {
-    TUD_HID_REPORT_DESC_KEYBOARD( HID_REPORT_ID(REPORT_ID_KEYBOARD) ),
-    TUD_HID_REPORT_DESC_MOUSE   ( HID_REPORT_ID(REPORT_ID_MOUSE) )
+    TUD_HID_REPORT_DESC_KEYBOARD      ( HID_REPORT_ID(REPORT_ID_KEYBOARD) ),
+    TUD_HID_REPORT_DESC_MOUSE         ( HID_REPORT_ID(REPORT_ID_MOUSE) ),
+    TUD_HID_REPORT_DESC_CONSUMER      ( HID_REPORT_ID(REPORT_ID_CONSUMER) ),
+    TUD_HID_REPORT_DESC_SYSTEM_CONTROL( HID_REPORT_ID(REPORT_ID_SYSTEM) )
 };
 
 // HID 1 Report Descriptor: Vendor RawHID (VIAL WebHID Usage Page 0xFF60, Usage 0x0061)

@@ -269,8 +269,10 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
   own layer comes just before layer 0.
 - **Keycodes that work:** basic keys, modifiers, modifier-wrapped keys such as `LSFT(KC_A)`,
   `MO`/`TG`/`TO`/`DF` layer keys (in the numbering of the VIAL protocol version the firmware reports),
-  `KC_NO`, `KC_TRNS`, mouse buttons 1–5, the mouse wheel/cursor keycodes, `KC_ACL0`–`KC_ACL2`, and
-  macros `M0`–`M15`.
+  `KC_NO`, `KC_TRNS`, mouse buttons 1–5, the mouse wheel/cursor keycodes, `KC_ACL0`–`KC_ACL2`,
+  media and browser keys (volume, play/pause, next/previous track, browser back/forward/refresh/home,
+  calculator, mail, brightness and so on; one at a time), Power/Sleep/Wake, and macros `M0`–`M15`.
+  Media, browser and system keys do nothing in the BIOS / boot menu, which only reads keyboard keys.
 - **Mouse keys:** a key mapped to a cursor or wheel keycode works as in QMK (accelerated mode, QMK's
   default settings): it moves or scrolls once when pressed, and after 100 ms keeps going while held,
   faster the longer it is held (the cursor reaches full speed after about half a second, the wheel
@@ -284,7 +286,7 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
   tap, press and release keys (including modifier-wrapped ones) and wait. One macro plays at a time;
   keys a macro leaves pressed are released when it ends. Macros are saved half a second after the
   last edit; the `reset` console command clears them.
-- **Not supported:** media/consumer and system keys (no consumer report), tap dance,
+- **Not supported:** tap dance,
   mod-tap/layer-tap, combos; the 6-key rollover limit applies.
 - **Mouse:** the bottom row of the Vial key map is the mouse: buttons 1–8 on the left (6–8 default to
   F13–F15), movement directions on the right (cursor up/down/left/right, wheel up/down/left/right).

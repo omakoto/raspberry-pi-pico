@@ -13,6 +13,8 @@
 
 std::vector<SentKeyboard> g_sent_keyboard;
 std::vector<SentMouse> g_sent_mouse;
+std::vector<uint16_t> g_sent_consumer;
+std::vector<uint8_t> g_sent_system;
 int g_usb_fail_count = 0;
 bool g_usb_ready = true;
 uint8_t g_usb_protocol = HID_PROTOCOL_REPORT;
@@ -102,6 +104,8 @@ static int g_failures = 0;
 static void reset() {
     g_sent_keyboard.clear();
     g_sent_mouse.clear();
+    g_sent_consumer.clear();
+    g_sent_system.clear();
     g_usb_fail_count = 0;
     g_usb_ready = true;
     g_usb_protocol = HID_PROTOCOL_REPORT;
@@ -326,8 +330,8 @@ int main() {
     Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
 
     // Mouse movement mapped to a key taps it once per wheel notch worth of movement (press, release,
-    // press, release...), and the wheel taps once per notch. Volume keys go out as the keyboard
-    // page volume usages.
+    // press, release...), and the wheel taps once per notch. Volume keys go out as consumer
+    // usages, each step with a keyboard report.
     reset();
     set(0, VKEY_MOTION_UP, KC_VOLU_);
     set(0, VKEY_MOTION_DOWN, KC_VOLD_);
@@ -335,19 +339,17 @@ int main() {
     g_sent_keyboard.clear();
     Multiplexer::handleMouseReport(0, 0, 0, -50, 0, 0);  // 50 counts = 2 taps, 2 counts left
     for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
-    CHECK(g_sent_keyboard.size() == 4);
-    if (g_sent_keyboard.size() == 4) {
-        CHECK(g_sent_keyboard[0].keys[0] == 0x80 && g_sent_keyboard[1].keys[0] == 0);
-        CHECK(g_sent_keyboard[2].keys[0] == 0x80 && g_sent_keyboard[3].keys[0] == 0);
-    }
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0xE9, 0, 0xE9, 0}));
+    CHECK(g_sent_keyboard.size() == 4 && lastKbd().keys[0] == 0);
     CHECK(g_sent_mouse.empty() || (lastMouse().dy == 0 && lastMouse().wheel == 0));
     g_sent_keyboard.clear();
+    g_sent_consumer.clear();
     Multiplexer::handleMouseReport(0, 0, 0, 22, 0, 0);   // down: remainder is reset, 22 < 24
     for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
-    CHECK(g_sent_keyboard.empty());
+    CHECK(g_sent_keyboard.empty() && g_sent_consumer.empty());
     Multiplexer::handleMouseReport(0, 0, 0, 2, 0, 0);    // 24 in total -> volume down
     for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
-    CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x81);
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0xEA, 0}));
     g_sent_keyboard.clear();
     Multiplexer::handleMouseReport(0, 0, 0, 0, 1, 0);    // one wheel notch up -> one tap of A
     for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
@@ -378,9 +380,11 @@ int main() {
     CHECK(lastKbd().keys[0] == 0);
     set(0, VKEY_MOUSE_BTN_BASE + 6, KC_VOLD_);
     Multiplexer::handleMouseReport(0, 0x40, 0, 0, 0, 0);
-    CHECK(lastKbd().keys[0] == 0x81);
+    pump();
+    CHECK(!g_sent_consumer.empty() && g_sent_consumer.back() == 0xEA);
     Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
-    CHECK(lastKbd().keys[0] == 0);
+    pump();
+    CHECK(g_sent_consumer.back() == 0 && lastKbd().keys[0] == 0);
 
     // Per-device layers: device 1 is bound to layer 3, where the wheel is volume; device 0 keeps its
     // wheel. Entries left transparent on the device layer use the base layer.
@@ -402,7 +406,7 @@ int main() {
     g_sent_mouse.clear();
     Multiplexer::handleMouseReport(1, 0, 4, 0, 1, 0);  // device 1: wheel is volume, motion passes
     for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
-    CHECK(g_sent_keyboard.size() == 2 && g_sent_keyboard[0].keys[0] == 0x80);
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0xE9, 0}));
     CHECK(!g_sent_mouse.empty() && lastMouse().dx == 4 && lastMouse().wheel == 0);
 
     // A layer key held on the device outranks the device layer; the device layer outranks the base layer.
@@ -536,6 +540,7 @@ int main() {
     CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0 && lastMouse().dx == 3);
     Multiplexer::flushMouse();
     CHECK(g_sent_mouse.size() == 1);
+    pump();  // the keyboard step of the button release, as the USB completions do on the device
     // And for the release half of a tap (wheel up mapped to LShift).
     set(0, VKEY_WHEEL_UP, 0xE1);
     g_sent_keyboard.clear();
@@ -583,6 +588,55 @@ int main() {
     Multiplexer::flushMouse();
     CHECK(lastKbd().report_id == REPORT_ID_KEYBOARD);
     CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0x01 && lastMouse().dx == 0 && lastMouse().wheel == 0);
+
+    // Media and browser keys go out in the consumer report, Power/Sleep/Wake in the system report,
+    // each after the step's keyboard report and only when it changed.
+    reset();
+    set(0, 0x3A, KC_WBAK_);           // F1 -> browser back
+    set(0, 0x3B, KC_WBAK_ + 1);       // F2 -> browser forward
+    set(0, 0x3C, KC_BRID_);           // F3 -> brightness down
+    set(0, 0x3D, KC_PWR_ + 1);        // F4 -> sleep
+    uint8_t f1k[1] = {0x3A};
+    Multiplexer::handleKeyboardReport(0, 0, f1k, 1);
+    pump();
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0x224}) && g_sent_system.empty());
+    CHECK(g_sent_keyboard.size() == 1 && lastKbd().keys[0] == 0);
+    uint8_t f1f2[2] = {0x3A, 0x3B};   // a second media key: the report holds the first one
+    Multiplexer::handleKeyboardReport(0, 0, f1f2, 2);
+    pump();
+    CHECK(g_sent_consumer.size() == 1);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    pump();
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0x224, 0}));
+    uint8_t f3f4[2] = {0x3C, 0x3D};
+    Multiplexer::handleKeyboardReport(0, 0, f3f4, 2);
+    pump();
+    CHECK(g_sent_consumer.back() == 0x70 && (g_sent_system == std::vector<uint8_t>{2}));
+    // resendState() sends them again although they did not change.
+    Multiplexer::resendState();
+    pump();
+    CHECK(g_sent_consumer.size() == 4 && g_sent_consumer.back() == 0x70);
+    CHECK(g_sent_system.size() == 2 && g_sent_system.back() == 2);
+    // A consumer report that cannot be queued goes out on a later flush.
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);   // the keyboard report goes out
+    g_usb_fail_count = 1;
+    Multiplexer::flushKeyboard();                          // the consumer report fails
+    CHECK(g_sent_consumer.back() == 0x70);
+    pump();
+    CHECK(g_sent_consumer.back() == 0 && g_sent_system.back() == 0);
+    // In the boot protocol they are not sent at all; they are when the host switches back.
+    g_usb_protocol = HID_PROTOCOL_BOOT;
+    g_sent_consumer.clear();
+    g_sent_system.clear();
+    Multiplexer::handleKeyboardReport(0, 0, f3f4, 2);
+    pump();
+    CHECK(g_sent_consumer.empty() && g_sent_system.empty() && lastKbd().report_id == 0);
+    g_usb_protocol = HID_PROTOCOL_REPORT;
+    Multiplexer::resendState();
+    pump();
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0x70}) && (g_sent_system == std::vector<uint8_t>{2}));
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    pump();
 
     // Mouse keys, as QMK's accelerated mode: a press moves 8 counts at once; 100 ms later the
     // movement repeats every 16 ms, ramping up (2, 5, ...) to 80 counts per step after 30 repeats.

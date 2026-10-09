@@ -3,11 +3,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <vector>
+#include "usb_descriptors.h"
 
 struct SentKeyboard { uint8_t report_id; uint8_t mods; uint8_t keys[6]; };
 struct SentMouse { uint8_t buttons; int8_t dx, dy, wheel, pan; };
 extern std::vector<SentKeyboard> g_sent_keyboard;
 extern std::vector<SentMouse> g_sent_mouse;
+extern std::vector<uint16_t> g_sent_consumer;
+extern std::vector<uint8_t> g_sent_system;
 // While positive, report calls fail (return false without sending), counting it down.
 extern int g_usb_fail_count;
 // While false, the HID interface is busy and nothing can be sent.
@@ -23,6 +26,14 @@ inline bool tud_hid_n_ready(uint8_t) { return g_usb_ready; }
 inline bool tud_hid_n_report(uint8_t, uint8_t report_id, const void *report, uint16_t) {
     if (g_usb_fail_count > 0) { g_usb_fail_count--; return false; }
     const uint8_t *r = (const uint8_t *)report;
+    if (report_id == REPORT_ID_CONSUMER) {
+        g_sent_consumer.push_back((uint16_t)(r[0] | (r[1] << 8)));
+        return true;
+    }
+    if (report_id == REPORT_ID_SYSTEM) {
+        g_sent_system.push_back(r[0]);
+        return true;
+    }
     SentKeyboard k;
     k.report_id = report_id;
     k.mods = r[0];

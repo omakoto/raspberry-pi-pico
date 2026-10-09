@@ -123,6 +123,29 @@ private:
     static uint8_t last_synced_leds_;
     static bool kbd_dirty_;
 
+    // The keyboard, consumer and system state goes out in steps. A step is the state at one point
+    // (e.g. a tap's press, then its release), sent as a keyboard report, followed by a consumer or a
+    // system report if that part differs from what was sent last. One report goes out per flush (the
+    // endpoint is busy until the host has read it), and the next step starts once all of a step's
+    // reports are out.
+    enum : uint8_t { STEP_KEYBOARD = 1, STEP_CONSUMER = 2, STEP_SYSTEM = 4 };
+    static uint8_t step_pending_;       // STEP_* reports of the current step not yet sent
+    static uint8_t step_keyboard_[8];
+    static uint16_t step_consumer_;
+    static uint8_t step_system_;
+    static uint16_t sent_consumer_;
+    static uint8_t sent_system_;
+    static bool consumer_resend_;       // send the consumer / system state with the next step
+    static bool system_resend_;
+    // Starts the next step: moves the tap queue on and takes the current state.
+    static void startStep();
+    // Takes the current state as the step's. Also used to update a step none of whose reports has
+    // gone out yet, so that a report that could not be queued goes out with the latest state.
+    static void takeStepState();
+    // Sends the next report of the current step. Returns false if the step ended without sending
+    // anything.
+    static bool sendStepReport();
+
     // Everything the currently held keys, modifiers and mouse buttons of all devices translate to.
     struct OutputState {
         uint8_t mods;
@@ -130,6 +153,8 @@ private:
         uint8_t key_count;
         uint8_t mouse_buttons;
         uint16_t mouse_keys;  // MK_* bits
+        uint16_t consumer;    // consumer page usage of the first media key held, or 0
+        uint8_t system;       // system control value of the first system key held, or 0
     };
     static void collectOutputs(OutputState &out);
     static void addAction(OutputState &out, uint16_t action);
