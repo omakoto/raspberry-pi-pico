@@ -23,6 +23,9 @@ public:
     // Push the local 1024-byte framebuffer to the display controller over I2C
     static void show();
 
+    // Turns the panel off (dark, the image kept in the controller) or back on.
+    static void setDisplayOn(bool on);
+
     // High-level UI status screen
     // dev_name: the device used last (or connected last); connected_count == 0 shows the
     // DISCONNECTED screen.

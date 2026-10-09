@@ -22,6 +22,9 @@
 // The display is redrawn on every change; this full redraw is only a safety net against a glitched
 // display.
 #define REFRESH_MS         10000
+// The panel is turned off this long after the screen last changed (against burn-in), and back on
+// with the next change. It is checked on the UI_POLL_MS wake-ups, which run anyway.
+#define SCREEN_TIMEOUT_MS  60000
 
 static TaskHandle_t s_task = nullptr;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -59,6 +62,8 @@ static void ui_task(void *arg) {
     bool shown_valid = false;
     bool shown_toast = false;
     uint32_t last_draw_ms = 0;
+    uint32_t last_change_ms = 0;
+    bool screen_off = false;
 
     while (true) {
         esp_task_wdt_reset();
@@ -77,6 +82,15 @@ static void ui_task(void *arg) {
         if (now < splash_end_ms) continue;
         bool has_toast = cur.toast[0] != '\0' && (int32_t)(cur.toast_expiry_ms - now) > 0;
         bool changed = !shown_valid || memcmp(&cur, &shown, sizeof(cur)) != 0 || has_toast != shown_toast;
+        if (changed) {
+            last_change_ms = now;
+        } else if (screen_off) {
+            continue;
+        } else if (now - last_change_ms >= SCREEN_TIMEOUT_MS) {
+            Oled::setDisplayOn(false);
+            screen_off = true;
+            continue;
+        }
         if (changed || now - last_draw_ms >= REFRESH_MS) {
             shown = cur;
             shown_valid = true;
@@ -84,6 +98,11 @@ static void ui_task(void *arg) {
             last_draw_ms = now;
             Oled::renderStatus(cur.connected_count, cur.device_name, cur.active_layer, cur.pairing,
                                cur.passkey, has_toast ? cur.toast : "", cur.usb_mounted);
+            // Turned on after the redraw, so that the old image does not flash up first.
+            if (screen_off) {
+                Oled::setDisplayOn(true);
+                screen_off = false;
+            }
         }
     }
 }

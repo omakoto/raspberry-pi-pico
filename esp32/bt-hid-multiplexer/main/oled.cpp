@@ -241,6 +241,10 @@ void Oled::drawString(const char *s, int x, int y, bool color, bool font_large) 
     }
 }
 
+void Oled::setDisplayOn(bool on) {
+    writeCmd(on ? 0xAF : 0xAE);
+}
+
 void Oled::show() {
     // One page (8 pixel rows) at a time in page addressing mode, the mode both controllers support.
     // Each page is a command transfer that sets the page and start column, then a data transfer
