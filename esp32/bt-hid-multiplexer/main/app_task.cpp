@@ -289,7 +289,6 @@ static void on_ui_publish(btstack_timer_source_t *ts) {
         snap.passkey = BleHidHost::getActivePasskey();
         if ((int32_t)(s_toast_expiry_ms - platform_now_ms()) > 0) {
             snprintf(snap.toast, sizeof(snap.toast), "%s", s_toast_msg);
-            snap.toast_expiry_ms = s_toast_expiry_ms;
         }
         snap.usb_mounted = usb_hid_mounted();
         ui_publish(snap);

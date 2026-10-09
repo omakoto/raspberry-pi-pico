@@ -15,15 +15,16 @@
 #define UI_TASK_PRIORITY  2
 #define UI_TASK_STACK     4096
 
-// The task wakes up at least this often (to take expired toasts off the display).
-#define UI_POLL_MS         100
+// The task wakes up at least this often even when nothing changes: for the end of the boot splash,
+// the safety-net redraw, the screen timeout, and the task watchdog (5 s).
+#define UI_POLL_MS         1000
 // How long the boot splash stays up.
 #define SPLASH_MS          2000
 // The display is redrawn on every change; this full redraw is only a safety net against a glitched
 // display.
 #define REFRESH_MS         10000
 // The panel is turned off this long after the screen last changed (against burn-in), and back on
-// with the next change. It is checked on the UI_POLL_MS wake-ups, which run anyway.
+// with the next change. It is checked on the UI_POLL_MS wake-ups.
 #define SCREEN_TIMEOUT_MS  60000
 
 static TaskHandle_t s_task = nullptr;
@@ -60,14 +61,13 @@ static void ui_task(void *arg) {
 
     UiSnapshot shown = {};
     bool shown_valid = false;
-    bool shown_toast = false;
     uint32_t last_draw_ms = 0;
     uint32_t last_change_ms = 0;
     bool screen_off = false;
 
     while (true) {
         esp_task_wdt_reset();
-        // Wake up on a new snapshot, or now and then for the toast expiry.
+        // Wake up on a new snapshot, or after UI_POLL_MS.
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(UI_POLL_MS));
         uint32_t now = platform_now_ms();
 
@@ -80,8 +80,7 @@ static void ui_task(void *arg) {
         if (!valid) continue;
 
         if (now < splash_end_ms) continue;
-        bool has_toast = cur.toast[0] != '\0' && (int32_t)(cur.toast_expiry_ms - now) > 0;
-        bool changed = !shown_valid || memcmp(&cur, &shown, sizeof(cur)) != 0 || has_toast != shown_toast;
+        bool changed = !shown_valid || memcmp(&cur, &shown, sizeof(cur)) != 0;
         if (changed) {
             last_change_ms = now;
         } else if (screen_off) {
@@ -94,10 +93,9 @@ static void ui_task(void *arg) {
         if (changed || now - last_draw_ms >= REFRESH_MS) {
             shown = cur;
             shown_valid = true;
-            shown_toast = has_toast;
             last_draw_ms = now;
             Oled::renderStatus(cur.connected_count, cur.device_name, cur.active_layer, cur.pairing,
-                               cur.passkey, has_toast ? cur.toast : "", cur.usb_mounted);
+                               cur.passkey, cur.toast, cur.usb_mounted);
             // Turned on after the redraw, so that the old image does not flash up first.
             if (screen_off) {
                 Oled::setDisplayOn(true);

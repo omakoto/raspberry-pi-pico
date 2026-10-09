@@ -13,8 +13,7 @@ struct UiSnapshot {
     int active_layer;
     bool pairing;
     uint32_t passkey;
-    char toast[32];
-    uint32_t toast_expiry_ms;
+    char toast[32];  // empty when there is none; bt_app drops it when it expires
     bool usb_mounted;
 };
 

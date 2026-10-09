@@ -283,8 +283,7 @@ struct UiSnapshot {            // written by bt_app only
     int8_t   active_layer;     // VirtualMatrix::getEffectiveLayer(DeviceBindings::lastActiveDevice())
     bool     pairing;
     uint32_t passkey;
-    char     toast[32];
-    uint32_t toast_expiry_ms;
+    char     toast[32];        // empty once it expires
     bool     usb_mounted;
     uint32_t seq;              // incremented on every publish
 };
@@ -438,8 +437,8 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 - **Code.** The drawing code, fonts and screen layouts are unchanged: boot splash, status, passkey, pairing, toast.
   - The splash shows `Firmware: v1.0.0`.
   - The status screen adds a small USB state marker when the device is not mounted. The README already promises "USB connection health".
-- **Redraw policy.** Redraw on snapshot change or every 10 s, as on the Pico. Toast expiry is checked by the `ui` task itself.
-- **Screen timeout.** One minute after the screen last changed, the panel is turned off (command `AE`, which keeps the image in the controller), against burn-in. The next change redraws the screen and turns it back on (`AF`). The `ui` task checks it on its 100 ms wake-ups, and skips the 10 s safety-net redraw while the panel is off.
+- **Redraw policy.** Redraw on snapshot change or every 10 s, as on the Pico. An expired toast is dropped from the snapshot by `bt_app`, which is a change like any other.
+- **Screen timeout.** One minute after the screen last changed, the panel is turned off (command `AE`, which keeps the image in the controller), against burn-in. The next change redraws the screen and turns it back on (`AF`). The `ui` task checks it on its 1 s wake-ups, and skips the 10 s safety-net redraw while the panel is off.
 - **Missing display.** If the OLED does not ACK at init, log it once and keep running without a display. This is the same as the Pico, which tolerated a missing display.
 
 ### 7.4 Pairing LED (dropped)
