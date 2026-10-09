@@ -238,7 +238,10 @@ void Multiplexer::flushKeyboard() {
     report[1] = 0x00; // Reserved
     memcpy(&report[2], out.keys, 6);
 
-    if (!tud_hid_n_report(0, REPORT_ID_KEYBOARD, report, sizeof(report))) {
+    // In the boot protocol (BIOS / UEFI firmware) the host expects these 8 bytes alone; a report
+    // ID in front would be read as the modifier byte, i.e. Left Ctrl held.
+    uint8_t report_id = tud_hid_n_get_protocol(0) == HID_PROTOCOL_BOOT ? 0 : REPORT_ID_KEYBOARD;
+    if (!tud_hid_n_report(0, report_id, report, sizeof(report))) {
         // Not sent: stay dirty, and keep a tap's release pending, so that this report goes out on
         // the next flush. Dropping it could leave a key held on the host.
         if (releasing_tap != 0) {
@@ -372,6 +375,17 @@ void Multiplexer::flushMouse() {
 
     if (accum_dx_ == 0 && accum_dy_ == 0 && accum_wheel_ == 0 && accum_pan_ == 0 &&
         merged_buttons == merged_mouse_buttons_ && !mouse_resend_) {
+        return;
+    }
+
+    if (tud_hid_n_get_protocol(0) == HID_PROTOCOL_BOOT) {
+        // A boot keyboard interface carries keyboard reports only; the host would read a mouse
+        // report as one with keys and modifiers down. The movement is dropped rather than kept, so
+        // that it does not jump the cursor once the host switches to the report protocol (which
+        // sends the current buttons again).
+        accum_dx_ = accum_dy_ = accum_wheel_ = accum_pan_ = 0;
+        merged_mouse_buttons_ = merged_buttons;
+        mouse_resend_ = false;
         return;
     }
 

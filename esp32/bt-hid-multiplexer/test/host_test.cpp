@@ -9,11 +9,13 @@
 #include "storage.h"
 #include "device_bindings.h"
 #include "macros.h"
+#include "usb_descriptors.h"
 
 std::vector<SentKeyboard> g_sent_keyboard;
 std::vector<SentMouse> g_sent_mouse;
 int g_usb_fail_count = 0;
 bool g_usb_ready = true;
+uint8_t g_usb_protocol = HID_PROTOCOL_REPORT;
 uint32_t g_now_ms = 0;
 
 // Fake flash. Loading finds nothing (a first boot) unless g_flash_loadable is set, which simulates a
@@ -102,6 +104,7 @@ static void reset() {
     g_sent_mouse.clear();
     g_usb_fail_count = 0;
     g_usb_ready = true;
+    g_usb_protocol = HID_PROTOCOL_REPORT;
     g_flash_loadable = false;
     g_keymap_needs_save = false;
     g_bindings_need_save = false;
@@ -543,6 +546,31 @@ int main() {
     Multiplexer::flushKeyboard();
     Multiplexer::flushMouse();
     CHECK(g_sent_keyboard.size() == 1 && g_sent_mouse.size() == 1);
+
+    // In the boot protocol (BIOS / UEFI) keyboard reports go out without a report ID and mouse
+    // reports not at all; mouse movement made meanwhile is dropped, not sent later.
+    reset();
+    Multiplexer::handleKeyboardReport(0, 0x02, key_a, 1);
+    CHECK(lastKbd().report_id == REPORT_ID_KEYBOARD);
+    g_usb_protocol = HID_PROTOCOL_BOOT;
+    g_sent_keyboard.clear();
+    g_sent_mouse.clear();
+    Multiplexer::resendState();
+    Multiplexer::flushKeyboard();
+    Multiplexer::flushMouse();
+    CHECK(g_sent_keyboard.size() == 1 && lastKbd().report_id == 0);
+    CHECK(lastKbd().mods == 0x02 && lastKbd().keys[0] == 0x04);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    CHECK(g_sent_keyboard.size() == 2 && lastKbd().report_id == 0 && lastKbd().mods == 0);
+    Multiplexer::handleMouseReport(0, 0x01, 50, 0, 1, 0);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    CHECK(g_sent_mouse.empty());
+    g_usb_protocol = HID_PROTOCOL_REPORT;  // the OS takes over; the host asks for the state again
+    Multiplexer::resendState();
+    Multiplexer::flushKeyboard();
+    Multiplexer::flushMouse();
+    CHECK(lastKbd().report_id == REPORT_ID_KEYBOARD);
+    CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0x01 && lastMouse().dx == 0 && lastMouse().wheel == 0);
 
     // Binding by address (from VIAL) works for devices that are not connected, and a connected device
     // with that address picks it up.

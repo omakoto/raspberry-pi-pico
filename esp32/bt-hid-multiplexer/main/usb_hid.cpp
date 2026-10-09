@@ -142,10 +142,15 @@ extern "C" void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_r
                                       uint8_t const *buffer, uint16_t bufsize) {
     (void) report_type;
     if (instance == 0) {
-        // Keyboard LED output report. A SET_REPORT control request arrives with its report ID
-        // stripped; data on the interrupt OUT endpoint (which Linux uses when there is one) arrives
-        // with report_id 0 and the report ID still in the first byte.
-        if (report_id == REPORT_ID_KEYBOARD && bufsize >= 1) {
+        // Keyboard LED output report. In the boot protocol it is the LED byte alone, without a
+        // report ID. Otherwise a SET_REPORT control request arrives with its report ID stripped;
+        // data on the interrupt OUT endpoint (which Linux uses when there is one) arrives with
+        // report_id 0 and the report ID still in the first byte.
+        if (tud_hid_n_get_protocol(0) == HID_PROTOCOL_BOOT) {
+            if (bufsize >= 1) {
+                app_post_host_leds(buffer[0]);
+            }
+        } else if (report_id == REPORT_ID_KEYBOARD && bufsize >= 1) {
             app_post_host_leds(buffer[0]);
         } else if (report_id == 0 && bufsize >= 2 && buffer[0] == REPORT_ID_KEYBOARD) {
             app_post_host_leds(buffer[1]);
@@ -177,6 +182,17 @@ extern "C" void tud_hid_report_failed_cb(uint8_t instance, hid_report_type_t rep
         app_post_usb_resend();
     } else {
         app_post_usb_ready();
+    }
+}
+
+// BIOS / UEFI firmware switches the keyboard interface to the boot protocol, and the OS switches it
+// back. Reports are formatted for the protocol in use when they are sent, so the current state is
+// sent again in the new format: a report already queued in the old one would otherwise leave the
+// host with a wrong idea of which keys and modifiers are held.
+extern "C" void tud_hid_set_protocol_cb(uint8_t instance, uint8_t protocol) {
+    (void) protocol;
+    if (instance == 0) {
+        app_post_usb_resend();
     }
 }
 
