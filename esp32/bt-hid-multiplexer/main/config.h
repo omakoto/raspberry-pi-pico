@@ -96,6 +96,8 @@
 #define KC_WH_D_                0x00FA
 #define KC_WH_L_                0x00FB
 #define KC_WH_R_                0x00FC
+#define KC_ACL0_                0x00FD  // mouse key speed: slow/medium/fast while held (QMK KC_ACL0..2)
+#define KC_ACL2_                0x00FF
 // QMK system/consumer/mouse range (0xA5-0xFF, minus the modifiers) that is not a HID keyboard usage
 // and has no USB report here.
 #define KC_SPECIAL_FIRST_       0x00A5

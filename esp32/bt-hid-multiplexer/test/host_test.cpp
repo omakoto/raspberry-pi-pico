@@ -128,6 +128,18 @@ static void pump() {
     for (int i = 0; i < 200; i++) Multiplexer::flushKeyboard();
 }
 
+// The cursor movement and wheel notches of all mouse reports sent so far.
+static int sent_dx() { int s = 0; for (auto &m : g_sent_mouse) s += m.dx; return s; }
+static int sent_dy() { int s = 0; for (auto &m : g_sent_mouse) s += m.dy; return s; }
+static int sent_wheel() { int s = 0; for (auto &m : g_sent_mouse) s += m.wheel; return s; }
+// Advances the clock by ms in the 10 ms steps of the bt_app poll timer.
+static void run_for(uint32_t ms) {
+    for (uint32_t t = 0; t < ms; t += 10) {
+        g_now_ms += 10;
+        Multiplexer::poll();
+    }
+}
+
 // Writes the macro buffer in 28-byte pieces, as VIAL does.
 static void set_macros(const uint8_t *data, uint16_t len) {
     for (uint16_t off = 0; off < len; off += 28) {
@@ -572,6 +584,152 @@ int main() {
     CHECK(lastKbd().report_id == REPORT_ID_KEYBOARD);
     CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0x01 && lastMouse().dx == 0 && lastMouse().wheel == 0);
 
+    // Mouse keys, as QMK's accelerated mode: a press moves 8 counts at once; 100 ms later the
+    // movement repeats every 16 ms, ramping up (2, 5, ...) to 80 counts per step after 30 repeats.
+    reset();
+    g_now_ms = 10000;
+    set(0, 0x4F, KC_MS_R_);  // Right arrow -> cursor right
+    uint8_t right[1] = {0x4F};
+    Multiplexer::handleKeyboardReport(0, 0, right, 1);
+    CHECK(sent_dx() == 8 && sent_dy() == 0);
+    g_now_ms += 90;
+    Multiplexer::poll();
+    CHECK(sent_dx() == 8);
+    g_now_ms += 10;
+    Multiplexer::poll();
+    CHECK(sent_dx() == 8 + 2);
+    g_now_ms += 16;
+    Multiplexer::poll();
+    CHECK(sent_dx() == 8 + 2 + 5);
+    run_for(1000);
+    CHECK(lastMouse().dx == 80 || lastMouse().dx == 127);  // two steps may share a report
+    int full_speed = sent_dx();
+    run_for(160);                                           // 10 steps at 16 ms, polled every 10 ms
+    CHECK(sent_dx() - full_speed == 800);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    g_sent_mouse.clear();
+    run_for(200);
+    CHECK(g_sent_mouse.empty());
+    // Pressed again, it starts over from the slow speed.
+    Multiplexer::handleKeyboardReport(0, 0, right, 1);
+    run_for(100);
+    CHECK(sent_dx() == 8 + 2);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // Diagonal movement at full speed: 80 * 181/256 per axis.
+    reset();
+    set(0, 0x4F, KC_MS_R_);
+    set(0, 0x51, KC_MS_D_);  // Down arrow -> cursor down
+    uint8_t right_down[2] = {0x4F, 0x51};
+    Multiplexer::handleKeyboardReport(0, 0, right_down, 2);
+    run_for(1000);
+    g_sent_mouse.clear();
+    run_for(160);
+    CHECK(sent_dx() == 10 * 56 && sent_dy() == 10 * 56);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // After a stall (the poll held up for a second), only a few steps are caught up on.
+    reset();
+    set(0, 0x4F, KC_MS_R_);
+    set(0, 0x50, KC_WH_L_);  // Left arrow -> wheel left
+    uint8_t right_wheel_left[2] = {0x4F, 0x50};
+    Multiplexer::handleKeyboardReport(0, 0, right_wheel_left, 2);
+    g_now_ms += 100;
+    Multiplexer::poll();
+    g_sent_mouse.clear();
+    g_now_ms += 1000;
+    Multiplexer::poll();
+    int pan_steps = 0;
+    for (auto &m : g_sent_mouse) pan_steps -= m.pan;
+    CHECK(sent_dx() == 5 + 8 + 10 + 13 && pan_steps == 4);  // repeats 2..5
+    g_sent_mouse.clear();
+    g_now_ms += 16;
+    Multiplexer::poll();
+    CHECK(sent_dx() > 0);  // and it goes on at the normal rate
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // Diagonal scrolling: one notch per axis per step even at the start (a step is never 0).
+    reset();
+    set(0, 0x52, KC_WH_U_);
+    set(0, 0x4F, KC_WH_R_);  // Right arrow -> wheel right
+    uint8_t up_right[2] = {0x52, 0x4F};
+    Multiplexer::handleKeyboardReport(0, 0, up_right, 2);
+    run_for(100);
+    int pan = 0;
+    for (auto &m : g_sent_mouse) pan += m.pan;
+    CHECK(sent_wheel() == 2 && pan == 2);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // ACL0/ACL1/ACL2 held: a fixed quarter / half / full speed from the first step on.
+    reset();
+    set(0, 0x4F, KC_MS_R_);
+    for (int a = 0; a < 3; a++) {
+        set(0, 0x04, KC_ACL0_ + a);  // A -> ACLa
+        uint8_t acl_right[2] = {0x04, 0x4F};
+        g_sent_mouse.clear();
+        Multiplexer::handleKeyboardReport(0, 0, acl_right, 2);
+        int unit = 80 >> (2 - a);
+        CHECK(sent_dx() == unit);
+        run_for(100);
+        CHECK(sent_dx() == 2 * unit);
+        Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    }
+
+    // Wheel keys: a notch at once; 100 ms later one every 80 ms, ramping up to 8 per step after 40
+    // repeats (ACL2: 8 from the start).
+    reset();
+    set(0, 0x52, KC_WH_U_);  // Up arrow -> wheel up
+    set(0, 0x04, KC_ACL2_);
+    uint8_t up[1] = {0x52};
+    Multiplexer::handleKeyboardReport(0, 0, up, 1);
+    CHECK(sent_wheel() == 1 && sent_dx() == 0);
+    run_for(100);
+    CHECK(sent_wheel() == 2);
+    run_for(80);
+    CHECK(sent_wheel() == 3);
+    run_for(4000);
+    g_sent_mouse.clear();
+    run_for(800);
+    CHECK(sent_wheel() == 10 * 8);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    g_sent_mouse.clear();
+    uint8_t acl_up[2] = {0x04, 0x52};
+    Multiplexer::handleKeyboardReport(0, 0, acl_up, 2);
+    CHECK(sent_wheel() == 8);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    // Wheel keys mapped from a modifier-wrapped keycode do nothing (and send no key).
+    set(0, 0x52, 0x0200 | KC_WH_U_);
+    g_sent_mouse.clear();
+    Multiplexer::handleKeyboardReport(0, 0, up, 1);
+    CHECK(g_sent_mouse.empty());
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // A key mapped to a mouse button that is pressed and released while the endpoint is busy still
+    // clicks: the press goes out first, then the release.
+    reset();
+    set(0, 0x2C, KC_BTN1_);  // Space -> button 1
+    g_usb_ready = false;
+    Multiplexer::handleKeyboardReport(0, 0, space, 1);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    CHECK(g_sent_mouse.empty());
+    g_usb_ready = true;
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0x01);
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 2 && lastMouse().buttons == 0);
+    Multiplexer::flushMouse();
+    CHECK(g_sent_mouse.size() == 2);
+    // A keyboard that disconnects releases the mouse buttons and mouse keys it held.
+    set(0, 0x4F, KC_MS_R_);
+    uint8_t space_right[2] = {0x2C, 0x4F};
+    Multiplexer::handleKeyboardReport(0, 0, space_right, 2);
+    CHECK(lastMouse().buttons == 0x01);
+    Multiplexer::purgeKeyboard(0);
+    CHECK(lastMouse().buttons == 0);
+    g_sent_mouse.clear();
+    run_for(200);
+    CHECK(g_sent_mouse.empty());
+
     // Binding by address (from VIAL) works for devices that are not connected, and a connected device
     // with that address picks it up.
     reset();
@@ -766,8 +924,8 @@ int main() {
     CHECK(lastKbd().keys[0] == 0x05 && lastKbd().keys[1] == 0);
     Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
 
-    // Two keys mapped to the same keycode send it once; a key mapped to cursor movement sends
-    // nothing (mouse keys are only for mouse motion).
+    // Two keys mapped to the same keycode send it once; a key mapped to cursor movement moves the
+    // cursor and sends no key.
     set(0, 0x05, 0x04);  // B -> A
     Multiplexer::handleKeyboardReport(0, 0, kab, 2);
     CHECK(lastKbd().keys[0] == 0x04 && lastKbd().keys[1] == 0);
@@ -777,7 +935,7 @@ int main() {
     g_sent_mouse.clear();
     Multiplexer::handleKeyboardReport(0, 0, kc_c, 1);
     CHECK(lastKbd().mods == 0 && lastKbd().keys[0] == 0);
-    CHECK(g_sent_mouse.empty());
+    CHECK(g_sent_mouse.size() == 1 && lastMouse().dy == -8);
     Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
 
     // A report holds at most 6 keys: a device's 7th key, and keys of other devices beyond 6, are

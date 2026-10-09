@@ -25,7 +25,8 @@ public:
     // that a release it missed cannot leave a key or button held on the host.
     static void resendState();
 
-    // Continues a macro that is waiting out a delay; call every few ms.
+    // Continues a macro that is waiting out a delay and repeats the held mouse keys; call every
+    // ~10 ms.
     static void poll();
     static bool macroRunning();
 
@@ -73,6 +74,34 @@ private:
     static void enqueueTap(uint16_t action);
     static uint8_t merged_mouse_buttons_;
     static bool mouse_resend_;
+    // The mouse buttons held as of the last flushMouse(), and the ones pressed since the last mouse
+    // report was sent. A press is reported even when the button was released again before the
+    // report could go out (the endpoint is busy for a frame after every report), so that a quick
+    // click is not lost.
+    static uint8_t held_mouse_buttons_;
+    static uint8_t unsent_button_presses_;
+
+    // Mouse keys (keys mapped to KC_MS_*, KC_WH_* and KC_ACL*), as QMK's accelerated mode: a press
+    // moves once at once, and after a delay the movement repeats, faster the longer it is held.
+    enum : uint16_t {
+        MK_UP = 1 << 0, MK_DOWN = 1 << 1, MK_LEFT = 1 << 2, MK_RIGHT = 1 << 3,
+        MK_WH_UP = 1 << 4, MK_WH_DOWN = 1 << 5, MK_WH_LEFT = 1 << 6, MK_WH_RIGHT = 1 << 7,
+        MK_ACL0 = 1 << 8, MK_ACL1 = 1 << 9, MK_ACL2 = 1 << 10,
+        MK_MOVE_MASK = MK_UP | MK_DOWN | MK_LEFT | MK_RIGHT,
+        MK_WHEEL_MASK = MK_WH_UP | MK_WH_DOWN | MK_WH_LEFT | MK_WH_RIGHT,
+    };
+    static uint16_t mk_held_;          // MK_* bits of the mouse keys held
+    static uint8_t mk_repeat_;         // movement repeats so far (QMK's mousekey_repeat)
+    static uint8_t mk_wheel_repeat_;
+    static uint32_t mk_move_due_ms_;   // when the next movement repeat is due
+    static uint32_t mk_wheel_due_ms_;
+    // Picks up mouse keys and buttons that were pressed or released since the last call.
+    static void updateMouseKeys();
+    // Repeats the held mouse keys whose time has come.
+    static void pollMouseKeys();
+    // Adds one step of movement / scrolling in the directions dirs (MK_* bits).
+    static void stepMouseKeyMove(uint16_t dirs, bool repeat);
+    static void stepMouseKeyWheel(uint16_t dirs, bool repeat);
 
     // Macro playback (VIAL macros M0..): a macro's steps run one at a time, each followed by a
     // keyboard report, so the host sees every press and release. Taps go through the tap queue;
@@ -100,6 +129,7 @@ private:
         uint8_t keys[6];
         uint8_t key_count;
         uint8_t mouse_buttons;
+        uint16_t mouse_keys;  // MK_* bits
     };
     static void collectOutputs(OutputState &out);
     static void addAction(OutputState &out, uint16_t action);

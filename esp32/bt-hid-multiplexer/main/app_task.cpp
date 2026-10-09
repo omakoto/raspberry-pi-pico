@@ -238,7 +238,7 @@ static void on_scan_check(btstack_timer_source_t *ts) {
 }
 
 static void on_button_poll(btstack_timer_source_t *ts) {
-    // Also moves a macro on that is waiting out a delay.
+    // Also moves a macro on that is waiting out a delay, and repeats held mouse keys.
     Multiplexer::poll();
     ButtonEvent btn_ev = ButtonHandler::update();
     if (btn_ev != BUTTON_EVENT_NONE) {

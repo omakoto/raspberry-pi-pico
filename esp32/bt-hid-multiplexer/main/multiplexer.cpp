@@ -24,6 +24,13 @@ bool Multiplexer::tap_pressed_sent_ = false;
 int32_t Multiplexer::tap_remainder_[8];
 uint8_t Multiplexer::merged_mouse_buttons_ = 0;
 bool Multiplexer::mouse_resend_ = false;
+uint8_t Multiplexer::held_mouse_buttons_ = 0;
+uint8_t Multiplexer::unsent_button_presses_ = 0;
+uint16_t Multiplexer::mk_held_ = 0;
+uint8_t Multiplexer::mk_repeat_ = 0;
+uint8_t Multiplexer::mk_wheel_repeat_ = 0;
+uint32_t Multiplexer::mk_move_due_ms_ = 0;
+uint32_t Multiplexer::mk_wheel_due_ms_ = 0;
 const uint8_t *Multiplexer::macro_pos_ = nullptr;
 const uint8_t *Multiplexer::macro_end_ = nullptr;
 uint32_t Multiplexer::macro_wait_until_ms_ = 0;
@@ -50,6 +57,11 @@ void Multiplexer::init() {
     memset(tap_remainder_, 0, sizeof(tap_remainder_));
     merged_mouse_buttons_ = 0;
     mouse_resend_ = false;
+    held_mouse_buttons_ = 0;
+    unsent_button_presses_ = 0;
+    mk_held_ = 0;
+    mk_repeat_ = 0;
+    mk_wheel_repeat_ = 0;
     macro_pos_ = nullptr;
     macro_end_ = nullptr;
     macro_held_count_ = 0;
@@ -131,6 +143,8 @@ void Multiplexer::purgeKeyboard(uint8_t dev_idx) {
     memset(&keyboards_[dev_idx], 0, sizeof(KeyboardDeviceState));
     kbd_dirty_ = true;
     flushKeyboard();
+    // Its keys may have been mapped to mouse buttons or mouse keys.
+    flushMouse();
 }
 
 // Adds what one held virtual key was translated to into the USB report state.
@@ -139,6 +153,14 @@ void Multiplexer::addAction(OutputState &out, uint16_t action) {
 
     if (action >= KC_BTN1_ && action <= KC_BTN5_) {
         out.mouse_buttons |= (uint8_t)(1 << (action - KC_BTN1_));
+        return;
+    }
+    if (action >= KC_MS_U_ && action <= KC_MS_R_) {
+        out.mouse_keys |= (uint16_t)(MK_UP << (action - KC_MS_U_));
+        return;
+    }
+    if (action >= KC_WH_U_ && action <= KC_ACL2_) {
+        out.mouse_keys |= (uint16_t)(MK_WH_UP << (action - KC_WH_U_));
         return;
     }
 
@@ -158,7 +180,7 @@ void Multiplexer::addAction(OutputState &out, uint16_t action) {
         mods |= (uint8_t)(1 << (kc - VKEY_MODIFIER_BASE));
         kc = 0;
     } else if (kc >= KC_SPECIAL_FIRST_) {
-        return;  // Consumer/system/mouse-movement keycodes have no report here.
+        return;  // Consumer/system keycodes (and modifier-wrapped mouse keys) have no report here.
     }
     out.mods |= mods;
 
@@ -365,13 +387,12 @@ void Multiplexer::purgeMouse(uint8_t dev_idx) {
 }
 
 void Multiplexer::flushMouse() {
+    updateMouseKeys();
     if (!tud_hid_n_ready(0)) {
         return;
     }
 
-    OutputState out;
-    collectOutputs(out);
-    uint8_t merged_buttons = out.mouse_buttons;
+    uint8_t merged_buttons = held_mouse_buttons_ | unsent_button_presses_;
 
     if (accum_dx_ == 0 && accum_dy_ == 0 && accum_wheel_ == 0 && accum_pan_ == 0 &&
         merged_buttons == merged_mouse_buttons_ && !mouse_resend_) {
@@ -384,7 +405,8 @@ void Multiplexer::flushMouse() {
         // that it does not jump the cursor once the host switches to the report protocol (which
         // sends the current buttons again).
         accum_dx_ = accum_dy_ = accum_wheel_ = accum_pan_ = 0;
-        merged_mouse_buttons_ = merged_buttons;
+        merged_mouse_buttons_ = held_mouse_buttons_;
+        unsent_button_presses_ = 0;
         mouse_resend_ = false;
         return;
     }
@@ -405,8 +427,130 @@ void Multiplexer::flushMouse() {
     accum_dy_ -= report_dy;
     accum_wheel_ -= report_wheel;
     accum_pan_ -= report_pan;
+    // A button that was pressed and already released has been reported as pressed; the next flush
+    // (after this report completes) sees the difference and reports the release.
     merged_mouse_buttons_ = merged_buttons;
+    unsent_button_presses_ = 0;
     mouse_resend_ = false;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Mouse keys
+// ---------------------------------------------------------------------------------------------
+
+// QMK's mouse key defaults (accelerated mode). The delays are QMK's MOUSEKEY_DELAY and
+// MOUSEKEY_WHEEL_DELAY (10, in units of 10 ms).
+static const uint32_t MK_DELAY_MS = 100;           // from a press to the first repeat
+static const uint32_t MK_INTERVAL_MS = 16;         // between repeats
+static const int32_t MK_MOVE_DELTA = 8;            // counts per step at the start
+static const int32_t MK_MAX_SPEED = 10;            // ... and up to this many times that
+static const int32_t MK_TIME_TO_MAX = 30;          // repeats until the full speed
+static const uint32_t MK_WHEEL_DELAY_MS = 100;
+static const uint32_t MK_WHEEL_INTERVAL_MS = 80;
+static const int32_t MK_WHEEL_DELTA = 1;
+static const int32_t MK_WHEEL_MAX_SPEED = 8;
+static const int32_t MK_WHEEL_TIME_TO_MAX = 40;
+static const int32_t MK_UNIT_MAX = 127;            // MOUSEKEY_MOVE_MAX / MOUSEKEY_WHEEL_MAX
+// More repeats than this in one poll (the task was held up) are not caught up on.
+static const int MK_MAX_CATCH_UP = 4;
+
+// The size of one step, as QMK's move_unit() / wheel_unit(): a held ACL0/ACL1/ACL2 sets a fixed
+// quarter / half / full speed; otherwise the speed ramps up with the repeats.
+static int32_t mouse_key_unit(uint16_t accel_bits, uint8_t repeat, int32_t delta, int32_t max_speed,
+                              int32_t time_to_max) {
+    int32_t unit;
+    if (accel_bits & 1) {
+        unit = delta * max_speed / 4;
+    } else if (accel_bits & 2) {
+        unit = delta * max_speed / 2;
+    } else if (accel_bits & 4) {
+        unit = delta * max_speed;
+    } else if (repeat == 0) {
+        unit = delta;
+    } else if (repeat >= time_to_max) {
+        unit = delta * max_speed;
+    } else {
+        unit = delta * max_speed * repeat / time_to_max;
+    }
+    return unit > MK_UNIT_MAX ? MK_UNIT_MAX : (unit == 0 ? 1 : unit);
+}
+
+void Multiplexer::stepMouseKeyMove(uint16_t dirs, bool repeat) {
+    int32_t unit = mouse_key_unit((uint16_t)(mk_held_ >> 8), mk_repeat_, MK_MOVE_DELTA, MK_MAX_SPEED,
+                                  MK_TIME_TO_MAX);
+    int32_t x = ((dirs & MK_RIGHT) ? 1 : 0) - ((dirs & MK_LEFT) ? 1 : 0);
+    int32_t y = ((dirs & MK_DOWN) ? 1 : 0) - ((dirs & MK_UP) ? 1 : 0);
+    if (repeat && x != 0 && y != 0) {
+        // Diagonal: the same speed as along an axis (QMK's times_inv_sqrt2).
+        unit = unit * 181 / 256;
+        if (unit == 0) unit = 1;
+    }
+    accum_dx_ += x * unit;
+    accum_dy_ += y * unit;
+}
+
+void Multiplexer::stepMouseKeyWheel(uint16_t dirs, bool repeat) {
+    int32_t unit = mouse_key_unit((uint16_t)(mk_held_ >> 8), mk_wheel_repeat_, MK_WHEEL_DELTA,
+                                  MK_WHEEL_MAX_SPEED, MK_WHEEL_TIME_TO_MAX);
+    int32_t h = ((dirs & MK_WH_RIGHT) ? 1 : 0) - ((dirs & MK_WH_LEFT) ? 1 : 0);
+    int32_t v = ((dirs & MK_WH_UP) ? 1 : 0) - ((dirs & MK_WH_DOWN) ? 1 : 0);
+    if (repeat && h != 0 && v != 0) {
+        unit = unit * 181 / 256;
+        if (unit == 0) unit = 1;
+    }
+    accum_pan_ += h * unit;
+    accum_wheel_ += v * unit;
+}
+
+void Multiplexer::updateMouseKeys() {
+    OutputState out;
+    collectOutputs(out);
+    unsent_button_presses_ |= (uint8_t)(out.mouse_buttons & ~held_mouse_buttons_);
+    held_mouse_buttons_ = out.mouse_buttons;
+
+    uint16_t pressed = out.mouse_keys & ~mk_held_;
+    mk_held_ = out.mouse_keys;
+    uint32_t now = platform_now_ms();
+    // A press moves / scrolls once at once, in the direction just pressed.
+    if (pressed & MK_MOVE_MASK) {
+        stepMouseKeyMove(pressed, false);
+        mk_move_due_ms_ = now + (mk_repeat_ ? MK_INTERVAL_MS : MK_DELAY_MS);
+    }
+    if (pressed & MK_WHEEL_MASK) {
+        stepMouseKeyWheel(pressed, false);
+        mk_wheel_due_ms_ = now + (mk_wheel_repeat_ ? MK_WHEEL_INTERVAL_MS : MK_WHEEL_DELAY_MS);
+    }
+    if (!(mk_held_ & MK_MOVE_MASK)) mk_repeat_ = 0;
+    if (!(mk_held_ & MK_WHEEL_MASK)) mk_wheel_repeat_ = 0;
+}
+
+void Multiplexer::pollMouseKeys() {
+    if (!(mk_held_ & (MK_MOVE_MASK | MK_WHEEL_MASK))) return;
+    uint32_t now = platform_now_ms();
+    bool moved = false;
+    // The due times advance by whole intervals, so that the repeat rate is kept on average although
+    // the poll runs every ~10 ms rather than every interval.
+    for (int i = 0; (mk_held_ & MK_MOVE_MASK) && (int32_t)(now - mk_move_due_ms_) >= 0; i++) {
+        if (i == MK_MAX_CATCH_UP) {
+            mk_move_due_ms_ = now + MK_INTERVAL_MS;
+            break;
+        }
+        if (mk_repeat_ != UINT8_MAX) mk_repeat_++;
+        stepMouseKeyMove(mk_held_, true);
+        mk_move_due_ms_ += MK_INTERVAL_MS;
+        moved = true;
+    }
+    for (int i = 0; (mk_held_ & MK_WHEEL_MASK) && (int32_t)(now - mk_wheel_due_ms_) >= 0; i++) {
+        if (i == MK_MAX_CATCH_UP) {
+            mk_wheel_due_ms_ = now + MK_WHEEL_INTERVAL_MS;
+            break;
+        }
+        if (mk_wheel_repeat_ != UINT8_MAX) mk_wheel_repeat_++;
+        stepMouseKeyWheel(mk_held_, true);
+        mk_wheel_due_ms_ += MK_WHEEL_INTERVAL_MS;
+        moved = true;
+    }
+    if (moved) flushMouse();
 }
 
 void Multiplexer::resendState() {
@@ -587,4 +731,5 @@ void Multiplexer::poll() {
     if (macro_pos_) {
         flushKeyboard();
     }
+    pollMouseKeys();
 }

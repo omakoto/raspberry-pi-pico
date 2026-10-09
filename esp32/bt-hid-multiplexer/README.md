@@ -269,7 +269,13 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
   own layer comes just before layer 0.
 - **Keycodes that work:** basic keys, modifiers, modifier-wrapped keys such as `LSFT(KC_A)`,
   `MO`/`TG`/`TO`/`DF` layer keys (in the numbering of the VIAL protocol version the firmware reports),
-  `KC_NO`, `KC_TRNS`, mouse buttons 1–5, the mouse wheel/cursor keycodes, and macros `M0`–`M15`.
+  `KC_NO`, `KC_TRNS`, mouse buttons 1–5, the mouse wheel/cursor keycodes, `KC_ACL0`–`KC_ACL2`, and
+  macros `M0`–`M15`.
+- **Mouse keys:** a key mapped to a cursor or wheel keycode works as in QMK (accelerated mode, QMK's
+  default settings): it moves or scrolls once when pressed, and after 100 ms keeps going while held,
+  faster the longer it is held (the cursor reaches full speed after about half a second, the wheel
+  after about 3 s). Holding a key mapped to `KC_ACL0`, `KC_ACL1` or `KC_ACL2` sets a fixed slow,
+  medium or fast speed instead while it is held.
 - **Layer keys and per-device layers:** a layer key only switches layers for its own group of devices.
   All unbound devices are one group; the devices bound to the same layer are another. So a layer key
   on a bound device does not change what any other device does, except devices bound to the same layer.

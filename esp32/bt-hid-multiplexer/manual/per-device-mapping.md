@@ -85,6 +85,7 @@ Scroll the bound device's vertical wheel: each notch taps Volume Up or Down. Scr
 - **Another mouse action**, for example wheel → cursor movement, or swapping axes.
 - **A keyboard key**, a modifier or a modified key such as `LSFT(KC_A)`. A key on a *wheel or movement* position is **tapped once per wheel notch** (for movement, once per 24 counts of motion, see `MOUSE_COUNTS_PER_WHEEL_NOTCH` in `main/config.h`).
 - **Volume keys:** `KC_MUTE`, `KC_VOLU`, `KC_VOLD`.
+- **Mouse keys** on a key or button: cursor (`KC_MS_U` and so on) or wheel (`KC_WH_U` and so on) moves or scrolls while held, speeding up like QMK's mouse keys; hold a key mapped to `KC_ACL0`/`KC_ACL1`/`KC_ACL2` for a fixed slow/medium/fast speed. See the [README](../README.md).
 - **A layer key** (`MO(1)`, `TG(1)`, `TO(1)` and so on) on one of the device's buttons. While the layer is selected, it is looked up first, then the device's layer, then layer 0. This makes "hold a button and the wheel does something else" possible for just this device. A layer key on a bound device only applies to the devices bound to the same layer. It does not change the layer of other devices, and layer keys on unbound devices do not change the layer of bound devices.
 - **A macro** (`M0`–`M15`, edited in VIAL's **Macros** tab) on a key or button. Macros on wheel or movement positions do nothing.
 - `KC_NO` to disable an input.
