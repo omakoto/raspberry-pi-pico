@@ -271,7 +271,7 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
   `MO`/`TG`/`TO`/`DF` layer keys (in the numbering of the VIAL protocol version the firmware reports),
   `KC_NO`, `KC_TRNS`, mouse buttons 1–5, the mouse wheel/cursor keycodes, `KC_ACL0`–`KC_ACL2`,
   media and browser keys (volume, play/pause, next/previous track, browser back/forward/refresh/home,
-  calculator, mail, brightness and so on; one at a time), Power/Sleep/Wake, and macros `M0`–`M15`.
+  calculator, mail, brightness and so on; one at a time), Power/Sleep/Wake, and macros `M0`–`M63`.
   Media, browser and system keys do nothing in the BIOS / boot menu, which only reads keyboard keys.
 - **Mouse keys:** a key mapped to a cursor or wheel keycode works as in QMK (accelerated mode, QMK's
   default settings): it moves or scrolls once when pressed, and after 100 ms keeps going while held,
@@ -281,7 +281,7 @@ other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage pa
 - **Layer keys and per-device layers:** a layer key only switches layers for its own group of devices.
   All unbound devices are one group; the devices bound to the same layer are another. So a layer key
   on a bound device does not change what any other device does, except devices bound to the same layer.
-- **Macros:** edit them in VIAL's **Macros** tab (16 macros, 1024 bytes in total) and put `M0`…`M15`
+- **Macros:** edit them in VIAL's **Macros** tab (64 macros, 4096 bytes in total) and put `M0`…`M63`
   on a key or mouse button. A macro can type text (ASCII, US layout; other characters are skipped),
   tap, press and release keys (including modifier-wrapped ones) and wait. One macro plays at a time;
   keys a macro leaves pressed are released when it ends. Macros are saved half a second after the

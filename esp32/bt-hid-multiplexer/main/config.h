@@ -114,8 +114,9 @@
 
 // VIAL macros: keycodes M0..M(MACRO_COUNT-1) (QK_MACRO in the VIAL protocol 3 numbering), stored
 // as VIA's NUL-separated macro buffer of MACRO_BUFFER_SIZE bytes.
-#define MACRO_COUNT             16
-#define MACRO_BUFFER_SIZE       1024
+// VIAL numbers M0..M255 from KC_MACRO_FIRST_, so up to 256 would fit the keycodes.
+#define MACRO_COUNT             64
+#define MACRO_BUFFER_SIZE       4096
 #define KC_MACRO_FIRST_         0x5F12
 #define IS_MACRO_KEYCODE(k)     ((k) >= KC_MACRO_FIRST_ && (k) < KC_MACRO_FIRST_ + MACRO_COUNT)
 

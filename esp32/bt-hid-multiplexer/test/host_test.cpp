@@ -1117,6 +1117,19 @@ int main() {
         set_macros(macros, sizeof(macros));
     }
     {
+        // The last macro, M63, plays when all macros before it are empty; there is no M64.
+        static uint8_t last[MACRO_COUNT + 1];
+        memset(last, 0, sizeof(last));
+        last[MACRO_COUNT - 1] = 'z';
+        uint8_t saved[MACRO_BUFFER_SIZE];
+        memcpy(saved, MacroStore::buffer(), sizeof(saved));
+        set_macros(last, sizeof(last));
+        std::vector<SentKeyboard> typed = typed_keys(play_macro(MACRO_COUNT - 1));
+        CHECK(MACRO_COUNT == 64 && typed.size() == 1 && typed[0].keys[0] == 0x1D);
+        CHECK(!IS_MACRO_KEYCODE(KC_MACRO_FIRST_ + MACRO_COUNT));
+        set_macros(saved, sizeof(saved));
+    }
+    {
         // Keys a macro leaves down are released when it ends, so that they cannot get stuck.
         std::vector<SentKeyboard> r = play_macro(0);
         bool held = false;

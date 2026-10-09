@@ -34,7 +34,8 @@ public:
     // should be written back in the current one.
     static bool loadBindings(DeviceBindingEntry entries[MAX_DEVICE_BINDINGS], bool &needs_save);
     static void saveBindings(const DeviceBindingEntry entries[MAX_DEVICE_BINDINGS]);
-    // The VIAL macro buffer (MACRO_BUFFER_SIZE bytes).
+    // The VIAL macro buffer (MACRO_BUFFER_SIZE bytes). A smaller stored buffer is loaded padded with
+    // zeros.
     static bool loadMacros(uint8_t *buffer);
     static void saveMacros(const uint8_t *buffer);
 };
