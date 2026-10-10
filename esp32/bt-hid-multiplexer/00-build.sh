@@ -29,6 +29,7 @@ Environment:
 Examples:
   ./00-build.sh                       # build (the image runs on the XIAO and the DevKitC)
   ./00-build.sh -D USB_SERIAL_ALWAYS=ON
+  ./00-build.sh -D USB_ID_MICROSOFT=OFF # use Espressif's USB ID (303a:4004), not Microsoft's
   ./00-build.sh -c                    # clean build
 EOF
 }

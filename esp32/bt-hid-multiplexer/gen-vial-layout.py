@@ -133,10 +133,13 @@ def main() -> None:
 
     # The firmware inserts '"labels":[...],' (the device dropdowns) where this placeholder is.
     placeholder = "@@LABELS@@"
+    vid_placeholder = "@@VID@@"
+    pid_placeholder = "@@PID@@"
     definition = {
         "name": "ESP32-S3 BLE HID Multiplexer",
-        "vendorId": "0x303A",
-        "productId": "0x4004",
+        # USB IDs come from main/config.h (USB_VID_STR, USB_PID_STR), since a build option selects them.
+        "vendorId": vid_placeholder,
+        "productId": pid_placeholder,
         "lighting": "none",
         "matrix": {"rows": 16, "cols": 16},
         "layouts": {"labels": placeholder, "keymap": to_kle(build_keys())},
@@ -145,7 +148,7 @@ def main() -> None:
     marker = f'"labels":"{placeholder}",'
     prefix, suffix = text.split(marker)
     if args.print:
-        print(prefix + suffix)
+        print((prefix + suffix).replace(vid_placeholder, "0x045E").replace(pid_placeholder, "0x4004"))
         return
 
     def c_string(value: str) -> str:
@@ -153,6 +156,14 @@ def main() -> None:
         chunks = [value[i:i + 80] for i in range(0, len(value), 80)]
         escaped = [chunk.replace("\\", "\\\\").replace('"', '\\"') for chunk in chunks]
         return "\n".join(f'    "{chunk}"' for chunk in escaped)
+
+    # The ID placeholders become the config.h string macros, joined by C string literal
+    # concatenation.
+    before_vid, rest = prefix.split(vid_placeholder)
+    before_pid, after_pid = rest.split(pid_placeholder)
+    prefix_c = "\n".join(
+        [c_string(before_vid), "    USB_VID_STR", c_string(before_pid), "    USB_PID_STR", c_string(after_pid)]
+    )
 
     header = f"""#ifndef VIAL_LAYOUT_H_
 #define VIAL_LAYOUT_H_
@@ -162,8 +173,10 @@ def main() -> None:
 // The VIAL keyboard definition (JSON) around the "labels" member of "layouts", which the firmware
 // fills in at runtime: VIAL_DEF_PREFIX + "\\"labels\\":[...]," + VIAL_DEF_SUFFIX.
 
+#include "config.h"
+
 static const char VIAL_DEF_PREFIX[] =
-{c_string(prefix)};
+{prefix_c};
 
 static const char VIAL_DEF_SUFFIX[] =
 {c_string(suffix)};

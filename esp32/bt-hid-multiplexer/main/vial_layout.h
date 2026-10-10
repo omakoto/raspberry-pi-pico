@@ -6,9 +6,14 @@
 // The VIAL keyboard definition (JSON) around the "labels" member of "layouts", which the firmware
 // fills in at runtime: VIAL_DEF_PREFIX + "\"labels\":[...]," + VIAL_DEF_SUFFIX.
 
+#include "config.h"
+
 static const char VIAL_DEF_PREFIX[] =
-    "{\"name\":\"ESP32-S3 BLE HID Multiplexer\",\"vendorId\":\"0x303A\",\"productId\":\"0x4004\","
-    "\"lighting\":\"none\",\"matrix\":{\"rows\":16,\"cols\":16},\"layouts\":{";
+    "{\"name\":\"ESP32-S3 BLE HID Multiplexer\",\"vendorId\":\""
+    USB_VID_STR
+    "\",\"productId\":\""
+    USB_PID_STR
+    "\",\"lighting\":\"none\",\"matrix\":{\"rows\":16,\"cols\":16},\"layouts\":{";
 
 static const char VIAL_DEF_SUFFIX[] =
     "\"keymap\":[[\"2,9\",{\"x\":1},\"3,10\",\"3,11\",\"3,12\",\"3,13\",{\"x\":0.5},\"3,14\",\"3,15\",\"4,"

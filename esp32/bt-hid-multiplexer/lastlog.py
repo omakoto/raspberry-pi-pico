@@ -33,7 +33,9 @@ def find_raw_hid() -> Optional[str]:
     """
     for d in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         try:
-            if "0003:0000303A:00004004" not in open(d + "/device/uevent").read():
+            # Espressif's or, with USB_ID_MICROSOFT, Microsoft's vendor ID.
+            uevent = open(d + "/device/uevent").read()
+            if "0003:0000303A:00004004" not in uevent and "0003:0000045E:00004004" not in uevent:
                 continue
             if open(d + "/device/report_descriptor", "rb").read().startswith(bytes([0x06, 0x60, 0xFF])):
                 return "/dev/" + os.path.basename(d)

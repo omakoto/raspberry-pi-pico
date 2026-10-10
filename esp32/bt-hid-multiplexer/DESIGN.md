@@ -337,7 +337,7 @@ Same structure as the Pico (`usb_descriptors.c`), with new identity strings.
 **Device.**
 - `bcdUSB 0x0200`.
 - Class: MISC/IAD with CDC, 0/0/0 without CDC.
-- VID `0x303A` (Espressif).
+- VID `0x045E` (Microsoft) by default, or `0x303A` (Espressif) when built with `-D USB_ID_MICROSOFT=OFF`. `045E:4004` is not a known Microsoft product, so no OS driver quirks or vendor software bind to it. The udev rule for it matches the PID too, so real Microsoft devices keep their default permissions.
 - PID: `USB_PID` in `config.h`, `0x4004` (esp_tinyusb's generic "HID" PID; decided, Q1). It is shared with other TinyUSB HID gadgets, so the scripts identify the device by VID/PID **and** the product string or the `06 60 FF` report descriptor prefix, never by VID/PID alone.
 - `bcdDevice 0x0100`.
 
@@ -498,7 +498,7 @@ The OLED shows pairing mode instead.
   - **Protocol version and keycodes.** The VIAL protocol version stays 3. The keycode numbering in `config.h` depends on it.
   - **`0x0B` bootloader jump.** It sets the flag; `bt_app` sends the reply, then calls `platform_reboot_to_download_mode()` once the reply is out.
 - **Layout.** `gen-vial-layout.py` gets the new name, VID and PID, and regenerates `vial_layout.h`.
-- **`lastlog.py` / `01-install.sh`.** They find the hidraw node by `0003:0000303A:<PID>` plus the `06 60 FF` report-descriptor prefix.
+- **`lastlog.py` / `01-install.sh`.** They find the hidraw node by `0003:0000045E:<PID>` or `0003:0000303A:<PID>` plus the `06 60 FF` report-descriptor prefix.
 - **Linux permissions.** `~/cbin/setup/config-hidraw-permission` currently covers VID `2e8a` but not `303a`, so vial.rocks and `lastlog.py` would hang on "Connecting..." without root.
   - VID `303a` has been added to that script and its test (F1, done). The rule takes effect after the script is run again.
 
@@ -662,7 +662,7 @@ Exact Kconfig names are checked against `~/esp-idf` (v5.3) when the file is writ
 - **Additions:**
   - Supports `-h`/`--help` (getopt).
   - Checks `BTSTACK_ROOT`, defaulting to `~/pico-sdk/lib/btstack`.
-  - `-D NAME=VALUE` passes CMake definitions, e.g. `-D USB_SERIAL_ALWAYS=ON|OFF`.
+  - `-D NAME=VALUE` passes CMake definitions, e.g. `-D USB_SERIAL_ALWAYS=ON|OFF` or `-D USB_ID_MICROSOFT=ON|OFF`.
 
 - **First build only:** runs `idf.py set-target esp32s3` if `sdkconfig` is missing.
 
@@ -674,7 +674,7 @@ both boards:
 1. **Native USB port.** Use the ROM USB-Serial-JTAG download port (`303a:1001`,
    `/dev/serial/by-id/*Espressif*USB_JTAG*`) if it is already there; otherwise ask the running firmware
    to enter download mode, then wait up to 6 s for it:
-   1. **VIA `0x0B` over hidraw.** Find the node by `303A:<PID>` plus the `06 60 FF` descriptor prefix. Works without CDC.
+   1. **VIA `0x0B` over hidraw.** Find the node by `045E:<PID>` or `303A:<PID>` plus the `06 60 FF` descriptor prefix. Works without CDC.
    2. **CDC console.** If the CDC console is present: `bootloader\r\n`.
 2. **UART bridge (fallback).** If that does not work and a CP210x or CH34x port is present (the
    DevKitC's `UART` port), flash through it: the esptool DTR/RTS auto-reset needs no firmware

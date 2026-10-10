@@ -90,7 +90,9 @@ request_download_mode() {
 import glob, os
 for d in sorted(glob.glob('/sys/class/hidraw/hidraw*')):
     try:
-        if '0003:0000303A:00004004' not in open(d + '/device/uevent').read():
+        # Espressif's or, with USB_ID_MICROSOFT, Microsoft's vendor ID.
+        uevent = open(d + '/device/uevent').read()
+        if '0003:0000303A:00004004' not in uevent and '0003:0000045E:00004004' not in uevent:
             continue
         desc = open(d + '/device/report_descriptor', 'rb').read()
         if not desc.startswith(bytes([0x06, 0x60, 0xFF])):  # vendor usage page 0xFF60 (VIAL)

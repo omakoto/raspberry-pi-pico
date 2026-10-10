@@ -246,7 +246,7 @@ connects but some of its reports stay silent, check `log on` output for `GATT cl
 ## Keymapping with VIAL
 
 1. On Linux, run `~/cbin/setup/config-hidraw-permission` once so Chrome may open the board's VIAL hidraw
-   node (it covers Espressif's USB vendor ID `303a`). Re-plug the board afterwards.
+   node (it covers the board's USB ID `045e:4004`, and Espressif's vendor ID `303a`). Re-plug the board afterwards.
 2. Open **[https://vial.rocks/](https://vial.rocks/)** in Chrome or another Chromium-based browser, click
    **Start** and select **ESP32-S3 BLE HID Multiplexer**.
 3. Remap keys across 8 layers. Changes take effect at once and are saved half a second after the last
@@ -258,8 +258,12 @@ connects but some of its reports stay silent, check `log on` output for `GATT cl
    builds the VIAL keyboard definition at runtime for this (`main/vial_definition.cpp`), so reload
    vial.rocks after pairing.
 
-The device uses Espressif's vendor ID with esp_tinyusb's generic HID product ID (`303a:4004`), which
-other TinyUSB gadgets share; the scripts find it by its VIAL interface (usage page `0xFF60`).
+The device appears as a Microsoft device, `045e:4004`: Microsoft's vendor ID with esp_tinyusb's
+generic HID product ID. No Microsoft product uses this ID, so no driver quirks or vendor software
+attach to it. To use Espressif's vendor ID instead (`303a:4004`), build with
+`./00-build.sh -D USB_ID_MICROSOFT=OFF` (`-D USB_ID_MICROSOFT=ON` to go back). The product ID is
+shared with other TinyUSB gadgets, so the scripts find the board by its VIAL interface (usage page
+`0xFF60`) as well.
 
 ### Layers and what is supported
 

@@ -4,6 +4,10 @@ cmake_minimum_required(VERSION 3.16)
 # PIN_USB_SERIAL_ENABLE.
 option(USB_SERIAL_ALWAYS "Always enable the USB serial port" OFF)
 
+# Microsoft's USB vendor ID by default; -DUSB_ID_MICROSOFT=OFF uses Espressif's (see USB_VID in
+# main/config.h).
+option(USB_ID_MICROSOFT "Use Microsoft's USB vendor ID" ON)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # TinyUSB arms the HID OUT endpoint for CFG_TUD_HID_EP_BUFSIZE bytes and a transfer only completes at
@@ -15,9 +19,12 @@ idf_build_set_property(COMPILE_DEFINITIONS "CFG_TUD_HID_EP_BUFSIZE=32" APPEND)
 
 project(bt-hid-multiplexer)
 
-# The USB serial option only matters to this firmware's own code; defining it for main alone keeps
-# switching it from rebuilding all of ESP-IDF.
+# The USB serial and USB ID options only matter to this firmware's own code; defining them for main
+# alone keeps switching them from rebuilding all of ESP-IDF.
 idf_component_get_property(main_lib main COMPONENT_LIB)
 if(USB_SERIAL_ALWAYS)
     target_compile_definitions(${main_lib} PRIVATE USB_SERIAL_ALWAYS=1)
+endif()
+if(USB_ID_MICROSOFT)
+    target_compile_definitions(${main_lib} PRIVATE USB_ID_MICROSOFT=1)
 endif()

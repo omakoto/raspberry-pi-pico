@@ -35,11 +35,21 @@
 #define PIN_UART_RX             44
 #define UART_BAUDRATE           115200
 
-// USB identity. 0x303A is Espressif's vendor ID; 0x4004 is esp_tinyusb's generic HID product ID,
-// which other TinyUSB gadgets share, so tools identify this device by its VIAL interface (usage page
-// 0xFF60) or its product string as well.
+// USB identity. By default (USB_ID_MICROSOFT, set by CMakeLists.txt) the device uses Microsoft's
+// vendor ID, so hosts see a Microsoft device. 045E:4004 is not a known Microsoft product, so no OS
+// driver quirks or vendor software bind to it. ./00-build.sh -D USB_ID_MICROSOFT=OFF uses
+// Espressif's vendor ID 0x303A instead. 0x4004 is esp_tinyusb's generic HID product ID, which other
+// TinyUSB gadgets share, so tools identify this device by its VIAL interface (usage page 0xFF60) or
+// its product string as well.
+#ifdef USB_ID_MICROSOFT
+#define USB_VID                 0x045E
+#define USB_VID_STR             "0x045E"
+#else
 #define USB_VID                 0x303A
+#define USB_VID_STR             "0x303A"
+#endif
 #define USB_PID                 0x4004
+#define USB_PID_STR             "0x4004"
 
 // Multi-device limits
 #define MAX_BLE_DEVICES         8
