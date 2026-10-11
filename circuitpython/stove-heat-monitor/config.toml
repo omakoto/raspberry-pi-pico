@@ -21,7 +21,7 @@ pushover_url="https://api.pushover.net/1/messages.json"
 
 # Thermal Detection Settings
 # Temperature threshold in Celsius to consider the stove actively hot
-threshold_c=35.0
+threshold_c=40
 
 # Temperature drop below threshold (in Celsius) required to consider stove cooled down
 hysteresis_c=30.0
