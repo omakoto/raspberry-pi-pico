@@ -691,7 +691,7 @@ def main() -> None:
     notify_on_cooldown: bool = bool(config.get("notify_on_cooldown", True))
 
     # Timing and display
-    monitoring_interval_s: float = float(config.get("monitoring_interval_s", 2.0))
+    monitoring_interval_s: float = float(config.get("monitoring_interval_s", 30.0))
     dump_matrix: bool = bool(config.get("dump_matrix", True))
     color_matrix: bool = bool(config.get("color_matrix", True))
 

@@ -26,10 +26,6 @@ threshold_c=35.0
 # Temperature drop below threshold (in Celsius) required to consider stove cooled down
 hysteresis_c=30.0
 
-# Time in minutes that temperature must remain above threshold before triggering alert.
-# Helps avoid alerts during normal intentional cooking.
-alert_delay_minutes=0.2
-
 # Repeat alert interval in minutes if stove continues to remain hot after initial alert
 alert_repeat_minutes=5.0
 
@@ -37,7 +33,7 @@ alert_repeat_minutes=5.0
 notify_on_cooldown=true
 
 # Monitoring loop interval in seconds (MLX90640 frame capture + check rate)
-monitoring_interval_s=2.0
+monitoring_interval_s=10.0
 
 # Serial Output & Visualization
 # Output the complete 32x24 temperature matrix to UART / USB serial

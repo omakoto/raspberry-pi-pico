@@ -75,7 +75,7 @@ color_matrix = true
 | `alert_delay_minutes`| `float` | `15.0` | Minutes continuously hot before alerting |
 | `alert_repeat_minutes`| `float`| `15.0` | Repeat interval in minutes while remaining hot |
 | `notify_on_cooldown`| `bool` | `true` | Send notification when stove cools down |
-| `monitoring_interval_s`| `float`| `2.0` | Seconds between thermal reads |
+| `monitoring_interval_s`| `float`| `30.0` | Seconds between thermal reads |
 | `dump_matrix` | `bool` | `true` | Stream 32×24 matrix to UART serial |
 | `color_matrix` | `bool` | `true` | Use ANSI colors in matrix dump |
 | `http_port` | `int` | `80` | Port of the HTTP frame server (see [Web View](#web-view)) |
