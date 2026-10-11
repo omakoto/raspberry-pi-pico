@@ -92,6 +92,34 @@ class TestStoveHeatMonitor(unittest.TestCase):
         self.assertIsNone(parse(b"POST / HTTP/1.1\r\n\r\n"))
         self.assertIsNone(parse(b""))
 
+    def test_three_digit_temps_keep_columns_aligned(self) -> None:
+        cell = stove_heat_monitor.format_temp_cell
+        self.assertEqual(cell(5.0), (" 5", False))
+        self.assertEqual(cell(99.4), ("99", False))
+        self.assertEqual(cell(99.6), ("10", True))
+        self.assertEqual(cell(123.0), ("12", True))
+        self.assertEqual(cell(999.0), ("99", True))
+
+        frame = [25.0] * 768
+        frame[0] = 123.0
+        frame[1] = 85.0
+        text = stove_heat_monitor.format_matrix(frame, 60.0, False)
+        # Plain text can't mark truncation, so it shows full digits and widens every cell instead
+        self.assertIn("00 | 123  85  25", text)
+        self.assertIn("01 |  25  25", text)
+        rows = [line for line in text.split("\n") if " | " in line]
+        self.assertEqual({len(r) for r in rows}, {len(rows[1])})
+        colored = stove_heat_monitor.format_matrix(frame, 60.0, True)
+        self.assertIn("00 | 123  85  25", stove_heat_monitor.FrameServer.build_text(
+            types.SimpleNamespace(status="st", frame=frame, threshold_c=60.0)))
+        self.assertIn("\033[97;41m\033[1;4m12\033[0m", colored)
+        self.assertIn("\033[97;41m85\033[0m", colored)
+
+        html = stove_heat_monitor.format_matrix_html(frame, 60.0, "st", 2)
+        self.assertIn('<span class="h t">12</span>', html)
+        self.assertIn('<span class="h">85</span>', html)
+        self.assertIn(".t{font-weight:bold;text-decoration:underline}", html)
+
     def test_poll_idle_and_normal_connections(self) -> None:
         import io
         from contextlib import redirect_stdout

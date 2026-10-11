@@ -10,7 +10,7 @@ The monitor helps prevent fire hazards and energy waste by detecting when a stov
 
 - **Pushover Push Notifications**: Sends immediate mobile alerts when a burner is left on unattended, plus optional cooldown notices when the stove turns off.
 - **Configurable HTTP/HTTPS Endpoint**: Works out of the box with official Pushover HTTPS API, and can easily point to a local LAN HTTP proxy or webhook relay.
-- **32×24 Matrix Thermal Visualizer**: Streams the full temperature matrix over default USB serial (`print()`), colorized with ANSI codes to spot hot zones in the terminal.
+- **32×24 Matrix Thermal Visualizer**: Streams the full temperature matrix over default USB serial (`print()`), colorized with ANSI codes to spot hot zones in the terminal. Each reading is two characters wide; readings of 100°C or more show only their first two digits, in bold + underline. The plain-text views (`/index.txt`, and serial with `color_matrix = false`) can't show styling, so they print full digits and widen every cell to three characters while any such reading is in the frame.
 - **Robust Multi-AP Wi-Fi**: Reuses the network configuration engine from `nsbackend-pico`, automatically scanning visible SSIDs and falling back between primary and secondary access points.
 - **Non-Destructive Overrides**: Keep defaults in `config.toml` and maintain your private Wi-Fi passwords and API keys in `config-override.toml`.
 

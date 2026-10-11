@@ -460,7 +460,20 @@ def create_i2c_bus(scl_gpio: int | None, sda_gpio: int | None, frequency: int) -
     return get_i2c(scl=scl_gpio, sda=sda_gpio)
 
 
-# Formats the 32x24 thermal matrix as text, optionally with ANSI temperature color codes
+# Returns a reading as a 2-character cell for the matrix views, plus whether it was truncated.
+# Every cell is two characters wide so the columns stay aligned. A 3-digit reading (>= 100°C)
+# keeps only its first two digits, and the caller marks it bold + underlined so it can't be
+# mistaken for a 2-digit one.
+def format_temp_cell(val: float) -> tuple[str, bool]:
+    int_val: int = int(round(val))
+    if int_val >= 100:
+        return str(int_val)[:2], True
+    return f"{int_val:2d}", False
+
+
+# Formats the 32x24 thermal matrix as text, optionally with ANSI temperature color codes.
+# Without colors there is no way to mark a truncated reading, so plain text shows every reading in
+# full instead, with all cells padded to the widest reading in the frame to keep columns aligned.
 def format_matrix(frame: list[float], threshold_c: float, colorize: bool) -> str:
     # ANSI color definitions
     # Blue: < 30°C
@@ -472,12 +485,17 @@ def format_matrix(frame: list[float], threshold_c: float, colorize: bool) -> str
     color_green: str = "\033[92m" if colorize else ""
     color_yellow: str = "\033[93m" if colorize else ""
     color_hot: str = "\033[97;41m" if colorize else ""  # White on Red background
+    style_truncated: str = "\033[1;4m"  # Bold + underline
 
     lines: list[str] = [
         "=" * 100,
         "      MLX90640 Thermal Image (32 columns x 24 rows) [°C]",
         "-" * 100,
     ]
+
+    plain_width: int = 2
+    if not colorize:
+        plain_width = max(2, max(len(str(int(round(v)))) for v in frame))
 
     for row in range(24):
         row_str_parts: list[str] = [f"{row:02d} | "]
@@ -496,9 +514,14 @@ def format_matrix(frame: list[float], threshold_c: float, colorize: bool) -> str
                 else:
                     color = color_blue
 
-            # Format as 2-digit rounded integer with leading space
-            int_val: int = int(round(val))
-            row_str_parts.append(f"{color}{int_val:2d}{color_reset} ")
+            if colorize:
+                cell, truncated = format_temp_cell(val)
+                if truncated:
+                    color += style_truncated
+            else:
+                cell = str(int(round(val)))
+                cell = " " * (plain_width - len(cell)) + cell
+            row_str_parts.append(f"{color}{cell}{color_reset} ")
 
         lines.append("".join(row_str_parts))
     lines.append("=" * 100)
@@ -522,7 +545,10 @@ def format_matrix_html(frame: list[float], threshold_c: float, status: str, refr
                 cls = "g"
             else:
                 cls = "b"
-            cells.append(f'<span class="{cls}">{int(round(val)):2d}</span> ')
+            cell, truncated = format_temp_cell(val)
+            if truncated:
+                cls += " t"
+            cells.append(f'<span class="{cls}">{cell}</span> ')
         rows.append("".join(cells))
     # Literals are joined with explicit "+" and the CSS is kept apart from any f-string: CircuitPython
     # treats adjacent string literals as one f-string if any of them has the f prefix, which would
@@ -534,6 +560,7 @@ def format_matrix_html(frame: list[float], threshold_c: float, status: str, refr
     head += "body{background:#111;color:#ddd;margin:8px}"
     head += "pre{font-family:ui-monospace,Menlo,Consolas,'DejaVu Sans Mono',monospace;font-size:14px;line-height:1.25}"
     head += ".b{color:#6cf}.g{color:#6d6}.y{color:#fd4}.h{color:#fff;background:#c22}"
+    head += ".t{font-weight:bold;text-decoration:underline}"
     head += "</style></head><body><pre>"
     title: str = "      MLX90640 Thermal Image (32 columns x 24 rows) [°C]"
     return head + status + "\n\n" + title + "\n" + "\n".join(rows) + "</pre></body></html>"
