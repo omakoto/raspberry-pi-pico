@@ -6,6 +6,7 @@
 #include "bond_table.h"
 #include "hid_descriptor.h"
 #include "chord_mode.h"
+#include "ptp_gesture.h"
 #include "config.h"
 #include "btstack.h"
 #include "btstack_tlv.h"
@@ -28,6 +29,8 @@ enum BleMouseFormat : uint8_t {
     MOUSE_FORMAT_16BIT,          // 16-bit relative dx, dy (ProtoArc trackpad)
     MOUSE_FORMAT_LOGITECH_12BIT  // 16-bit buttons, 12-bit packed dx, dy (Logitech Lift / MX)
 };
+
+static_assert(PTP_GESTURE_COUNT == VKEY_GESTURE_COUNT, "one virtual key per touchpad gesture");
 
 struct BleSlot {
     hci_con_handle_t con_handle;
@@ -67,6 +70,13 @@ struct BleSlot {
     uint8_t media_keys[4];           // virtual keys (QMK keycodes) of the media keys held
     uint16_t consumer_usages[4];     // the usages of the last consumer control report
     uint8_t consumer_count;
+    // A precision touchpad: its finger reports go through the gesture engine.
+    bool has_ptp;
+    HidPtpLayout ptp_layout;
+    PtpGestureState ptp_state;
+    uint8_t ptp_buttons;             // the mouse buttons the gesture engine holds
+    uint8_t ptp_mouse_buttons;       // the buttons of the touchpad's own mouse report
+    bool ptp_button_seen;            // the finger reports carry the pad's button (so the mouse report's are ignored)
     uint16_t mouse_speed_percent;    // mouse sensitivity scaling (default 100)
     int32_t scale_rem_x;             // fractional count accumulator for X
     int32_t scale_rem_y;             // fractional count accumulator for Y
@@ -1229,12 +1239,14 @@ void BleHidHost::dumpBonds() {
 }
 
 // Reads the report descriptor of the slot's HID service, false if BTstack does not have it (yet).
-static bool parse_descriptor(const BleSlot *slot, HidDescriptorInfo *info) {
+static bool parse_descriptor(const BleSlot *slot, HidDescriptorInfo *info, HidPtpLayout *ptp = nullptr,
+                             bool *has_ptp = nullptr) {
     if (slot->hids_cid == 0) return false;
     const uint8_t *desc = hids_client_descriptor_storage_get_descriptor_data(slot->hids_cid, 0);
     uint16_t desc_len = hids_client_descriptor_storage_get_descriptor_len(slot->hids_cid, 0);
     if (!desc || desc_len == 0) return false;
     hid_descriptor_parse(desc, desc_len, info);
+    if (ptp && has_ptp) *has_ptp = hid_ptp_parse(desc, desc_len, ptp);
     return true;
 }
 
@@ -1259,7 +1271,7 @@ static void resolve_led_report(BleSlot *slot) {
 static void resolve_input_reports(BleSlot *slot) {
     if (!slot) return;
     HidDescriptorInfo info;
-    if (!parse_descriptor(slot, &info)) {
+    if (!parse_descriptor(slot, &info, &slot->ptp_layout, &slot->has_ptp)) {
         if (strstr(slot->name, "LIFT") || strstr(slot->name, "Logi") || strstr(slot->name, "MX ")) {
             slot->mouse_format = MOUSE_FORMAT_LOGITECH_12BIT;
             slot->mouse_report_id = 2;
@@ -1281,16 +1293,20 @@ static void resolve_input_reports(BleSlot *slot) {
                info.mouse_absolute ? "absolute" : "relative");
     }
 
-    // A precision touchpad may be left in touchpad mode (by the last host it was paired with, or by
-    // default), where it sends only multi-touch contacts, which are not translated to mouse input.
-    // Mouse mode asks it to send its mouse report instead. Not every touchpad honors it: the ProtoArc
-    // T1 Plus accepts the write and keeps sending contacts.
+    // A precision touchpad whose finger reports can be read is put in touchpad mode, as Windows does,
+    // and its gestures are done here (ptp_gesture.cpp). One whose finger reports cannot be read is
+    // asked for its mouse report instead (mouse mode), which not every touchpad honors.
+    if (slot->has_ptp) {
+        printf("[BLE Host] Slot %u '%s': precision touchpad (ID %u, %u fingers per report, %.1f x %.1f units/mm)\n",
+               slot->dev_idx, slot->name, slot->ptp_layout.report_id, slot->ptp_layout.contact_slots,
+               slot->ptp_layout.x_per_mm, slot->ptp_layout.y_per_mm);
+    }
     if (info.has_input_mode) {
-        uint8_t mouse_mode = 0;
+        uint8_t mode = slot->has_ptp ? 3 : 0;
         uint8_t status = hids_client_send_write_report(slot->hids_cid, info.input_mode_report_id,
-                                                       HID_REPORT_TYPE_FEATURE, &mouse_mode, 1);
-        printf("[BLE Host] Slot %u '%s': precision touchpad, setting Input Mode (ID %u) to mouse: status 0x%02X\n",
-               slot->dev_idx, slot->name, info.input_mode_report_id, status);
+                                                       HID_REPORT_TYPE_FEATURE, &mode, 1);
+        printf("[BLE Host] Slot %u '%s': setting Input Mode (ID %u) to %s: status 0x%02X\n", slot->dev_idx,
+               slot->name, info.input_mode_report_id, slot->has_ptp ? "touchpad" : "mouse", status);
     }
 
     slot->has_consumer_layout = info.has_consumer;
@@ -1658,7 +1674,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             bool log_this_report = s_log_reports && report_log_allowed();
             if (log_this_report) {
                 printf("[BLE Host] REPORT slot %u ('%s'): id=%u len=%u [", dev_idx, slot->name, report_id, data_len);
-                for (uint16_t i = 0; i < data_len && i < 8; i++) {
+                for (uint16_t i = 0; i < data_len && i < 24; i++) {
                     printf(" %02X", data[i]);
                 }
                 printf(" ]\n");
@@ -1671,17 +1687,55 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             // neither the usual ID nor the usual layout. The guesses by ID and length only fill in
             // for what the descriptor did not say: without a known mouse, ID 2 is assumed to be the
             // mouse, as before.
-            bool is_consumer_report = slot->has_consumer_layout && report_id == slot->consumer_layout.report_id &&
+            bool is_ptp_report = slot->has_ptp && report_id == slot->ptp_layout.report_id;
+            bool is_consumer_report = !is_ptp_report && slot->has_consumer_layout &&
+                                      report_id == slot->consumer_layout.report_id &&
                                       !(slot->has_mouse_report && report_id == slot->mouse_report_id) &&
                                       !(slot->has_keyboard_layout && report_id == slot->keyboard_layout.report_id);
-            bool is_mouse_report = !is_consumer_report && (slot->has_mouse_report ? (report_id == slot->mouse_report_id)
-                                                                                  : (report_id == 2));
-            bool is_keyboard_report = !is_mouse_report && !is_consumer_report && slot->has_keyboard_layout &&
+            bool is_mouse_report = !is_ptp_report && !is_consumer_report &&
+                                   (slot->has_mouse_report ? (report_id == slot->mouse_report_id) : (report_id == 2));
+            bool is_keyboard_report = !is_ptp_report && !is_mouse_report && !is_consumer_report &&
+                                      slot->has_keyboard_layout &&
                                       report_id == slot->keyboard_layout.report_id;
-            bool guess_keyboard = !slot->has_keyboard_layout;
-            bool guess_mouse = !slot->has_mouse_report;
+            bool guess_keyboard = !slot->has_keyboard_layout && !is_ptp_report;
+            bool guess_mouse = !slot->has_mouse_report && !is_ptp_report;
 
-            if (is_consumer_report) {
+            if (is_ptp_report) {
+                HidPtpContact contacts[HID_PTP_MAX_CONTACTS];
+                uint8_t contact_count;
+                bool button;
+                if (hid_ptp_report_decode(slot->ptp_layout, data, data_len, contacts, &contact_count, &button)) {
+                    if (button) slot->ptp_button_seen = true;
+                    PtpGestureOutput g;
+                    ptp_gesture_report(&slot->ptp_state, slot->ptp_layout, contacts, contact_count, button,
+                                       platform_now_ms(), &g);
+                    slot->ptp_buttons = g.buttons;
+                    uint8_t buttons = g.buttons | (slot->ptp_button_seen ? 0 : slot->ptp_mouse_buttons);
+                    int16_t dx = g.dx, dy = g.dy;
+                    scale_mouse_delta(slot, dx, dy);
+                    Multiplexer::handleMouseReport(dev_idx, buttons | g.clicks, dx, dy, 0, 0);
+                    if (g.clicks) Multiplexer::handleMouseReport(dev_idx, buttons, 0, 0, 0, 0);
+                    for (uint8_t i = 0; i < PTP_GESTURE_COUNT; i++) {
+                        if (g.gestures[i]) Multiplexer::handleGesture(dev_idx, VKEY_GESTURE_BASE + i, g.gestures[i]);
+                    }
+                    if (log_this_report && g.clicks) {
+                        printf("[BLE Host] Touchpad slot %u: tap, buttons 0x%02X\n", dev_idx, g.clicks);
+                    }
+                    if (log_this_report) {
+                        for (uint8_t i = 0; i < PTP_GESTURE_COUNT; i++) {
+                            if (g.gestures[i]) printf("[BLE Host] Touchpad slot %u: gesture %u x%u\n", dev_idx, i, g.gestures[i]);
+                        }
+                    }
+                } else if (report_log_allowed()) {
+                    printf("[BLE Host] Short touchpad report for slot %u (id %u, data_len %u)\n", dev_idx, report_id, data_len);
+                }
+            } else if (is_mouse_report && slot->has_ptp) {
+                // A touchpad's own mouse report: its movement is also in the finger reports, but some
+                // pads (the PERIPAD-706) may report the pad's button only here.
+                slot->ptp_mouse_buttons = (data_len >= 1) ? (uint8_t)(data[0] & 0x1F) : 0;
+                uint8_t buttons = slot->ptp_buttons | (slot->ptp_button_seen ? 0 : slot->ptp_mouse_buttons);
+                Multiplexer::handleMouseReport(dev_idx, buttons, 0, 0, 0, 0);
+            } else if (is_consumer_report) {
                 // Media keys (a dial's volume, play/pause...) are pressed as the virtual keys of their
                 // QMK keycodes, so they go out as the same usages unless they are remapped. A device's
                 // profile may turn some into keys, or into mouse wheel notches, which happen once when

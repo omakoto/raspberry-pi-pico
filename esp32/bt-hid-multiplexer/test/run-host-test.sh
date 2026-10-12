@@ -2,11 +2,11 @@
 #
 # Builds and runs test/host_test.cpp, which exercises the virtual matrix and multiplexer on the host
 # with USB and flash stubbed out, plus the log ring, the runtime VIAL definition, the bonded device
-# table, the stored bindings format, the HID report descriptor parser and chord mode. Run it every
-# time touching main/multiplexer.cpp, main/macros.cpp, main/virtual_matrix.cpp,
+# table, the stored bindings format, the HID report descriptor parser, chord mode and the touchpad
+# gestures. Run it every time touching main/multiplexer.cpp, main/macros.cpp, main/virtual_matrix.cpp,
 # main/device_bindings.cpp, main/log_ring.cpp, main/vial_definition.cpp, main/bond_table.cpp,
-# main/bindings_format.cpp, main/hid_descriptor.cpp, main/chord_mode.cpp, main/storage.h,
-# main/config.h or gen-vial-layout.py.
+# main/bindings_format.cpp, main/hid_descriptor.cpp, main/chord_mode.cpp, main/ptp_gesture.cpp,
+# main/storage.h, main/config.h or gen-vial-layout.py.
 #
 # With --coverage it also reports how much of each main/ source the tests run.
 
@@ -94,6 +94,9 @@ build hid_descriptor_test hid_descriptor_test.cpp ../main/hid_descriptor.cpp
 
 build chord_mode_test chord_mode_test.cpp ../main/chord_mode.cpp
 "$out/chord_mode_test/chord_mode_test"
+
+build ptp_gesture_test ptp_gesture_test.cpp ../main/ptp_gesture.cpp
+"$out/ptp_gesture_test/ptp_gesture_test"
 
 build vial_definition_test vial_definition_test.cpp ../main/vial_definition.cpp
 "$out/vial_definition_test/vial_definition_test" "$out/definition.xz" "$out/largest.xz"

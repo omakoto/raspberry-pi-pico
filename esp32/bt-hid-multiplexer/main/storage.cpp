@@ -1,6 +1,7 @@
 #include "storage.h"
 #include "bindings_format.h"
 #include "log_ring.h"
+#include "virtual_matrix.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -64,7 +65,8 @@ bool StorageManager::loadKeymap(uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_
     KeymapHeader hdr;
     size_t len = sizeof(hdr);
     if (nvs_get_blob(s_nvs, "km_hdr", &hdr, &len) != ESP_OK || len != sizeof(hdr) ||
-        hdr.magic != FLASH_KEYMAP_MAGIC || hdr.version != FLASH_KEYMAP_VERSION || hdr.layers != NUM_LAYERS) {
+        hdr.magic != FLASH_KEYMAP_MAGIC || (hdr.version != FLASH_KEYMAP_VERSION && hdr.version != 5) ||
+        hdr.layers != NUM_LAYERS) {
         return false;
     }
     for (int l = 0; l < NUM_LAYERS; l++) {
@@ -74,6 +76,15 @@ bool StorageManager::loadKeymap(uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_
         if (nvs_get_blob(s_nvs, key, keymap[l], &len) != ESP_OK || len != LAYER_BYTES) {
             return false;
         }
+    }
+    if (hdr.version == 5) {
+        // Version 5 had no touchpad gestures, and its gesture keys could not be edited.
+        for (int v = VKEY_GESTURE_BASE; v < VKEY_GESTURE_BASE + VKEY_GESTURE_COUNT; v++) {
+            keymap[0][v / MATRIX_COLS][v % MATRIX_COLS] = VirtualMatrix::defaultKeycode((uint8_t)v);
+        }
+        needs_save = true;  // the whole keymap is written again, with the new version
+        s_stored_valid = false;
+        return true;
     }
     memcpy(s_stored, keymap, sizeof(s_stored));
     s_stored_valid = true;

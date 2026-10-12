@@ -16,6 +16,11 @@ public:
     // there is none. It is also the virtual key a device's media key is pressed as: layer 0 maps it to
     // itself, so it goes out as the same usage unless it is remapped.
     static uint8_t keycodeForConsumerUsage(uint16_t usage);
+
+    // A touchpad gesture (VKEY_GESTURE_BASE + PtpGesture) happened `count` times: whatever its virtual
+    // key is mapped to happens once per count, as a wheel notch, a key tap or a wheel notch's worth of
+    // cursor movement.
+    static void handleGesture(uint8_t dev_idx, uint8_t vkey, uint8_t count);
     static void purgeKeyboard(uint8_t dev_idx);
 
     // Ingest events from BLE mice
@@ -75,7 +80,7 @@ private:
     static uint16_t tap_active_;      // keycode currently held down by a tap, or 0
     static bool tap_pressed_sent_;    // the report with tap_active_ down has been sent
     // Motion counts accumulated towards the next tap, per motion virtual key.
-    static int32_t tap_remainder_[8];
+    static int32_t tap_remainder_[16];  // per motion or gesture virtual key
     static void enqueueTap(uint16_t action);
     static uint8_t merged_mouse_buttons_;
     static bool mouse_resend_;

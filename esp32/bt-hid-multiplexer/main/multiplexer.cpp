@@ -21,7 +21,7 @@ uint8_t Multiplexer::tap_head_ = 0;
 uint8_t Multiplexer::tap_count_ = 0;
 uint16_t Multiplexer::tap_active_ = 0;
 bool Multiplexer::tap_pressed_sent_ = false;
-int32_t Multiplexer::tap_remainder_[8];
+int32_t Multiplexer::tap_remainder_[16];
 uint8_t Multiplexer::merged_mouse_buttons_ = 0;
 bool Multiplexer::mouse_resend_ = false;
 uint8_t Multiplexer::held_mouse_buttons_ = 0;
@@ -466,6 +466,14 @@ void Multiplexer::handleMouseReport(uint8_t dev_idx, uint8_t buttons, int16_t dx
         // A button may have been remapped to a key or modifier.
         kbd_dirty_ = true;
     }
+    flushKeyboard();
+    flushMouse();
+}
+
+void Multiplexer::handleGesture(uint8_t dev_idx, uint8_t vkey, uint8_t count) {
+    if (dev_idx >= MAX_MICE || count == 0 || vkey < VKEY_GESTURE_BASE) return;
+    DeviceBindings::noteActivity(dev_idx);
+    routeMotion(dev_idx, count, vkey, vkey, true);
     flushKeyboard();
     flushMouse();
 }

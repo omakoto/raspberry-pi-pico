@@ -7,8 +7,9 @@ JSON strings written here, and wraps the result in an .xz container.
 
 The matrix is 16x16 and a key's matrix position is its virtual key (row * 16 + col), which for
 keyboard keys is the HID usage (see "Virtual Matrix configuration" in main/config.h). The mouse
-buttons and motion directions are virtual keys 0xE8-0xEF and 0xF0-0xF7, and the media keys that
-devices send in consumer control reports are the virtual keys of their QMK keycodes, 0xA8-0xBE.
+buttons and motion directions are virtual keys 0xE8-0xEF and 0xF0-0xF7, the touchpad gestures 0xF8-0xFF,
+and the media keys that devices send in consumer control reports are the virtual keys of their QMK
+keycodes, 0xA8-0xBE.
 
 Usage:
     ./gen-vial-layout.py            # rewrites main/vial_layout.h
@@ -95,8 +96,11 @@ def build_keys() -> List[Key]:
     run(list(range(0xE8, 0xF0)), 0, 9.75)
     run(list(range(0xF0, 0xF8)), 9, 9.75)
 
+    # Touchpad gestures: two fingers up/down/left/right, then three fingers up/down/left/right.
+    run(list(range(0xF8, 0x100)), 0, 11.25)
+
     # Media keys from devices (Mute .. Brightness Down, see CONSUMER_USAGES in main/multiplexer.cpp).
-    run(list(range(0xA8, 0xBF)), 0, 11.25)
+    run(list(range(0xA8, 0xBF)), 0, 12.75)
     return keys
 
 

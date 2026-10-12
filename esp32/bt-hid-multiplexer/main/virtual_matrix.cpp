@@ -201,6 +201,35 @@ void VirtualMatrix::flushPendingSave() {
     StorageManager::saveKeymap(keymap_);
 }
 
+uint16_t VirtualMatrix::defaultKeycode(uint8_t vkey) {
+    // The mouse virtual keys map to the QMK mouse keycodes that reproduce the physical behaviour.
+    if (vkey < 4) return KC_NO_;  // usages 1-3 are not real keys
+    if (vkey >= VKEY_MOUSE_BTN_BASE && vkey < VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT) {
+        return KC_BTN1_ + (vkey - VKEY_MOUSE_BTN_BASE);
+    }
+    if (vkey >= VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT && vkey < VKEY_MOTION_BASE) {
+        // Mouse buttons 6-8 cannot be sent to the host (no VIAL keycode, 5-button USB mouse), so
+        // they default to the otherwise unused F13-F15.
+        return KC_F13_ + (vkey - VKEY_MOUSE_BTN_BASE - MOUSE_OUTPUT_BTN_COUNT);
+    }
+    if (vkey >= VKEY_MOTION_BASE && vkey < VKEY_GESTURE_BASE) {
+        static const uint16_t motion_kc[8] = {
+            KC_MS_U_, KC_MS_D_, KC_MS_L_, KC_MS_R_, KC_WH_U_, KC_WH_D_, KC_WH_L_, KC_WH_R_,
+        };
+        return motion_kc[vkey - VKEY_MOTION_BASE];
+    }
+    if (vkey >= VKEY_GESTURE_BASE) {
+        // Two fingers scroll the "natural" way (the content follows the fingers, so fingers moving up
+        // scroll down) and swipe left for Back, right for Forward; three-finger swipes are the arrows.
+        static const uint16_t gesture_kc[VKEY_GESTURE_COUNT] = {
+            KC_WH_D_, KC_WH_U_, KC_WBAK_, KC_WFWD_,
+            0x0052, 0x0051, 0x0050, 0x004F,  // Up, Down, Left, Right
+        };
+        return gesture_kc[vkey - VKEY_GESTURE_BASE];
+    }
+    return vkey;
+}
+
 void VirtualMatrix::resetKeymap() {
     // Upper layers are fully transparent.
     for (uint8_t l = 1; l < NUM_LAYERS; l++) {
@@ -210,23 +239,8 @@ void VirtualMatrix::resetKeymap() {
             }
         }
     }
-    // Layer 0 is a 1:1 passthrough of the HID usage, except for the mouse virtual keys, which map
-    // to the QMK mouse keycodes that reproduce the physical behaviour.
     for (int vkey = 0; vkey < 256; vkey++) {
-        uint16_t kc = (vkey < 4) ? KC_NO_ : (uint16_t)vkey;  // usages 1-3 are not real keys
-        if (vkey >= VKEY_MOUSE_BTN_BASE && vkey < VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT) {
-            kc = KC_BTN1_ + (vkey - VKEY_MOUSE_BTN_BASE);
-        } else if (vkey >= VKEY_MOUSE_BTN_BASE + MOUSE_OUTPUT_BTN_COUNT && vkey < VKEY_MOTION_BASE) {
-            // Mouse buttons 6-8 cannot be sent to the host (no VIAL keycode, 5-button USB mouse), so
-            // they default to the otherwise unused F13-F15.
-            kc = KC_F13_ + (vkey - VKEY_MOUSE_BTN_BASE - MOUSE_OUTPUT_BTN_COUNT);
-        } else if (vkey >= VKEY_MOTION_BASE) {
-            static const uint16_t motion_kc[8] = {
-                KC_MS_U_, KC_MS_D_, KC_MS_L_, KC_MS_R_, KC_WH_U_, KC_WH_D_, KC_WH_L_, KC_WH_R_,
-            };
-            kc = (vkey - VKEY_MOTION_BASE < 8) ? motion_kc[vkey - VKEY_MOTION_BASE] : KC_NO_;
-        }
-        keymap_[0][vkey / MATRIX_COLS][vkey % MATRIX_COLS] = kc;
+        keymap_[0][vkey / MATRIX_COLS][vkey % MATRIX_COLS] = defaultKeycode((uint8_t)vkey);
     }
     save_pending_ = false;
     StorageManager::saveKeymap(keymap_);

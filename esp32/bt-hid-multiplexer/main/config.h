@@ -60,8 +60,8 @@
 //
 // The matrix is indexed by an 8-bit "virtual key" = row * 16 + col, so one cell exists for every
 // possible HID keyboard usage (0x00-0xFF; 0xE0-0xE7 are the modifiers). The otherwise unused
-// usages 0xE8-0xFF are used for mouse buttons and mouse motion directions, which lets VIAL remap
-// mice exactly like keys.
+// usages 0xE8-0xFF are used for mouse buttons, mouse motion directions and touchpad gestures, which
+// lets VIAL remap mice and touchpads exactly like keys.
 #define NUM_LAYERS              8
 #define MATRIX_ROWS             16
 #define MATRIX_COLS             16
@@ -84,6 +84,11 @@
 #define VKEY_WHEEL_DOWN         (VKEY_MOTION_BASE + 5)  // wheel < 0
 #define VKEY_WHEEL_LEFT         (VKEY_MOTION_BASE + 6)  // pan < 0
 #define VKEY_WHEEL_RIGHT        (VKEY_MOTION_BASE + 7)  // pan > 0
+// Virtual keys for precision touchpad gestures, in PtpGesture order (see ptp_gesture.h): two-finger
+// up/down (scrolling) and left/right swipes, then three-finger up/down/left/right swipes. Like the
+// motion directions, they come in up/down and left/right pairs.
+#define VKEY_GESTURE_BASE       0xF8
+#define VKEY_GESTURE_COUNT      8
 
 // Mouse cursor counts that are converted to one wheel notch when a motion direction is remapped to
 // a wheel keycode (and the number of counts one wheel notch becomes in the opposite case).
@@ -120,6 +125,7 @@
 #define KC_VOLU_                0x00A9
 #define KC_VOLD_                0x00AA
 #define KC_WBAK_                0x00B6  // browser back
+#define KC_WFWD_                0x00B7  // browser forward
 #define KC_BRID_                0x00BE
 
 // VIAL macros: keycodes M0..M(MACRO_COUNT-1) (QK_MACRO in the VIAL protocol 3 numbering), stored
@@ -156,8 +162,10 @@
 // Enough for every paired device (MAX_BLE_DEVICES) plus the unpaired ones.
 #define MAX_DEVICE_BINDINGS     (MAX_BLE_DEVICES + MAX_UNPAIRED_BINDINGS)
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
-// Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded.
-#define FLASH_KEYMAP_VERSION    5
+// Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded
+// unless StorageManager::loadKeymap converts it. Version 5 had no touchpad gestures: its gesture keys
+// (never editable then) get their defaults.
+#define FLASH_KEYMAP_VERSION    6
 
 // After a peripheral has negotiated its own LL connection parameters and left them alone for a
 // while, re-request the same interval with slave latency 0 (see ZERO_LATENCY_DELAY_MS and

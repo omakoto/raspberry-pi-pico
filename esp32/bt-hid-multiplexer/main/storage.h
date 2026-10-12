@@ -25,7 +25,7 @@ class StorageManager {
 public:
     static void init();
     // Loads the stored keymap. needs_save is set when the stored data had to be converted and should
-    // be written back in the current format (nothing needs converting at the moment).
+    // be written back in the current format (a version 5 keymap gets the touchpad gesture defaults).
     static bool loadKeymap(uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS], bool &needs_save);
     // Writes only the layers that differ from what is stored.
     static void saveKeymap(const uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_COLS]);

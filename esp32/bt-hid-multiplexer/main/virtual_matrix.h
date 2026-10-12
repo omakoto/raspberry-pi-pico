@@ -30,6 +30,10 @@ public:
     // way a layer key on a bound device does not change what other devices do.
     static uint16_t resolveAction(uint8_t dev_idx, uint8_t raw_keycode);
 
+    // The keycode a virtual key has on layer 0 of a fresh keymap: the key itself (a 1:1 passthrough of
+    // the HID usage), except for the mouse and touchpad virtual keys.
+    static uint16_t defaultKeycode(uint8_t vkey);
+
     // VIAL/VIA keymap access
     static uint16_t getKeycode(uint8_t layer, uint8_t row, uint8_t col);
     static void setKeycode(uint8_t layer, uint8_t row, uint8_t col, uint16_t keycode);

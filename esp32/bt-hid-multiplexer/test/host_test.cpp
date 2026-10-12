@@ -228,6 +228,42 @@ int main() {
     CHECK(lastKbd().keys[0] == 0x04 && g_sent_consumer.empty());
     Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
 
+    // Touchpad gestures by default: two fingers scroll the natural way and swipe for Back/Forward,
+    // three fingers swipe for the arrows. Each count is one notch or one tap.
+    reset();
+    Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 0, 3);  // two fingers up
+    pump();
+    CHECK(sent_wheel() == -3);
+    g_sent_mouse.clear();
+    Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 1, 1);  // two fingers down
+    pump();
+    CHECK(sent_wheel() == 1);
+    Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 2, 1);  // two fingers left
+    pump();
+    Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 3, 1);  // two fingers right
+    pump();
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0x0224, 0, 0x0225, 0}));  // AC Back, AC Forward
+    g_sent_keyboard.clear();
+    for (int g = 0; g < 4; g++) {
+        Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 4 + g, 1);  // three fingers up/down/left/right
+        pump();
+    }
+    std::vector<uint8_t> tapped;
+    for (auto &k : g_sent_keyboard) {
+        if (k.keys[0] != 0) tapped.push_back(k.keys[0]);
+    }
+    CHECK((tapped == std::vector<uint8_t>{0x52, 0x51, 0x50, 0x4F}) && lastKbd().keys[0] == 0);
+    // Remapped like any key: three fingers up -> A, twice.
+    reset();
+    set(0, VKEY_GESTURE_BASE + 4, 0x0004);
+    Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 4, 2);
+    pump();
+    tapped.clear();
+    for (auto &k : g_sent_keyboard) {
+        if (k.keys[0] != 0) tapped.push_back(k.keys[0]);
+    }
+    CHECK((tapped == std::vector<uint8_t>{0x04, 0x04}));
+
     // A mouse button remapped to a key, and a key remapped to a mouse button.
     reset();
     set(0, 0xE8 + 3, 0x0028);  // mouse button 4 -> Enter

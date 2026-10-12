@@ -15,6 +15,7 @@ idf_component_register(
         "bindings_format.cpp"
         "hid_descriptor.cpp"
         "chord_mode.cpp"
+        "ptp_gesture.cpp"
         "vial_server.cpp"
         "vial_definition.cpp"
         "ble_hid_host.cpp"

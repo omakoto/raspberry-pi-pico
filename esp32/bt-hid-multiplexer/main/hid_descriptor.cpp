@@ -239,3 +239,231 @@ int hid_consumer_report_decode(const HidConsumerLayout &layout, const uint8_t *d
     }
     return n;
 }
+
+namespace {
+
+// Reads `size` bits (up to 32) at bit offset `bit` of a little-endian report.
+uint32_t read_bits(const uint8_t *data, uint32_t bit, uint8_t size) {
+    uint32_t v = 0;
+    for (uint8_t i = 0; i < size; i++) {
+        uint32_t b = bit + i;
+        if (data[b / 8] & (1u << (b % 8))) v |= 1u << i;
+    }
+    return v;
+}
+
+// Units per millimetre of an axis with logical range [0, logical_max] covering [0, physical_max] in
+// `unit` (low nibble: the system, 1 = SI linear in cm, 3 = English linear in inches; next nibble: the
+// power of length, which must be 1) times 10^exponent. 0 if the unit is not a length.
+float per_mm(int32_t logical_max, int32_t physical_max, uint32_t unit, int32_t exponent) {
+    if (logical_max <= 0 || physical_max <= 0 || ((unit >> 4) & 0x0F) != 1) return 0;
+    uint32_t system = unit & 0x0F;
+    if (system != 1 && system != 3) return 0;
+    float mm = (float)physical_max * (system == 1 ? 10.0f : 25.4f);
+    for (int32_t e = exponent; e < 0; e++) mm /= 10;
+    for (int32_t e = exponent; e > 0; e--) mm *= 10;
+    return (float)logical_max / mm;
+}
+
+int32_t sign_extend(uint32_t v, uint8_t size) {
+    if (size == 0 || size >= 32) return (int32_t)v;
+    uint32_t sign = 1u << (size - 1);
+    return (int32_t)((v ^ sign) - sign);
+}
+
+}  // namespace
+
+bool hid_ptp_parse(const uint8_t *desc, uint16_t desc_len, HidPtpLayout *out) {
+    memset(out, 0, sizeof(*out));
+    if (!desc) return false;
+
+    struct Globals {
+        uint32_t usage_page;
+        int32_t logical_max, physical_max;
+        uint32_t unit;
+        int32_t unit_exponent;
+        uint32_t report_size, report_count;
+        uint8_t report_id;
+    };
+    Globals g = {};
+    Globals stack[4];
+    uint8_t depth = 0;
+
+    // Local usages of the next main item, with their pages.
+    uint32_t usages[16];
+    uint8_t usage_count = 0;
+    uint32_t usage_min = 0, usage_max = 0;
+    bool have_range = false;
+
+    // Collections: whether each open one is a Touch Pad application or a Finger.
+    enum : uint8_t { COL_OTHER, COL_TOUCHPAD, COL_FINGER };
+    uint8_t collections[8];
+    uint8_t col_depth = 0;
+    bool in_touchpad = false;
+    bool found_report = false;
+    int8_t finger = -1;  // the finger slot being filled
+    bool finger_fields[4];  // tip, id, x, y seen in the current finger
+
+    InputOffsets offsets;
+    float x_per_mm = 0, y_per_mm = 0;
+
+    uint16_t i = 0;
+    while (i < desc_len) {
+        uint8_t b = desc[i++];
+        if (b == 0xFE) {
+            if (i + 2 > desc_len) break;
+            i += 2 + desc[i];
+            continue;
+        }
+        uint8_t tag = (b >> 4) & 0x0F, type = (b >> 2) & 0x03, size = b & 0x03;
+        if (size == 3) size = 4;
+        if (i + size > desc_len) break;
+        uint32_t val = 0;
+        for (uint8_t j = 0; j < size; j++) val |= ((uint32_t)desc[i + j]) << (8 * j);
+        int32_t sval = (size == 0) ? 0 : sign_extend(val, (uint8_t)(size * 8));
+        i += size;
+
+        if (type == TYPE_GLOBAL) {
+            switch (tag) {
+                case GLOBAL_USAGE_PAGE: g.usage_page = val; break;
+                case 2: g.logical_max = (size == 4 || sval >= 0) ? sval : (int32_t)val; break;  // Logical Maximum
+                case 4: g.physical_max = (size == 4 || sval >= 0) ? sval : (int32_t)val; break;  // Physical Maximum
+                case 5: g.unit_exponent = sign_extend(val & 0x0F, 4); break;  // Unit Exponent
+                case 6: g.unit = val; break;  // Unit
+                case GLOBAL_REPORT_SIZE: g.report_size = val; break;
+                case GLOBAL_REPORT_ID: g.report_id = (uint8_t)val; break;
+                case GLOBAL_REPORT_COUNT: g.report_count = val; break;
+                case GLOBAL_PUSH: if (depth < 4) stack[depth++] = g; break;
+                case GLOBAL_POP: if (depth > 0) g = stack[--depth]; break;
+                default: break;
+            }
+            continue;
+        }
+        if (type == TYPE_LOCAL) {
+            uint32_t full = (size == 4) ? val : ((g.usage_page << 16) | val);
+            if (tag == LOCAL_USAGE) {
+                if (usage_count < 16) usages[usage_count++] = full;
+            } else if (tag == LOCAL_USAGE_MINIMUM) {
+                usage_min = full;
+                have_range = true;
+            } else if (tag == 2) {  // Usage Maximum
+                usage_max = full;
+            }
+            continue;
+        }
+        if (type != TYPE_MAIN) continue;
+
+        if (tag == 10) {  // Collection
+            uint32_t usage = usage_count ? usages[0] : 0;
+            uint8_t kind = COL_OTHER;
+            if (usage == 0x000D0005 && val == 1) kind = COL_TOUCHPAD;
+            if (usage == 0x000D0022 && in_touchpad) kind = COL_FINGER;
+            if (col_depth < 8) collections[col_depth] = kind;
+            col_depth++;
+            if (kind == COL_TOUCHPAD && !found_report) in_touchpad = true;
+            if (kind == COL_FINGER) {
+                finger = (out->contact_slots < HID_PTP_MAX_CONTACTS) ? (int8_t)out->contact_slots : -1;
+                memset(finger_fields, 0, sizeof(finger_fields));
+                if (finger >= 0) out->contacts[finger].confidence_bit = -1;
+            }
+        } else if (tag == 12) {  // End Collection
+            if (col_depth > 0) {
+                col_depth--;
+                uint8_t kind = (col_depth < 8) ? collections[col_depth] : (uint8_t)COL_OTHER;
+                if (kind == COL_FINGER && finger >= 0) {
+                    if (finger_fields[0] && finger_fields[1] && finger_fields[2] && finger_fields[3]) {
+                        out->contact_slots++;
+                        found_report = true;
+                    }
+                    finger = -1;
+                } else if (kind == COL_TOUCHPAD && in_touchpad) {
+                    in_touchpad = false;
+                }
+            }
+        } else if (tag == MAIN_INPUT) {
+            int32_t base = offsets.get(g.report_id);
+            bool in_report = in_touchpad && (!found_report || g.report_id == out->report_id) && base >= 0;
+            if (in_report && !(val & FLAG_CONSTANT)) {
+                if (out->contact_slots == 0 && finger >= 0) out->report_id = g.report_id;
+                for (uint32_t k = 0; k < g.report_count; k++) {
+                    uint32_t usage;
+                    if (usage_count > 0) {
+                        usage = usages[(k < usage_count) ? k : usage_count - 1];
+                    } else if (have_range) {
+                        usage = usage_min + k;
+                        if (usage > usage_max && usage_max != 0) usage = usage_max;
+                    } else {
+                        break;
+                    }
+                    uint32_t bit = (uint32_t)base + k * g.report_size;
+                    if (bit > 0xFFFF) break;
+                    uint8_t bits = (uint8_t)g.report_size;
+                    if (finger >= 0) {
+                        HidPtpContactLayout &c = out->contacts[finger];
+                        if (usage == 0x000D0042) { c.tip_bit = (uint16_t)bit; finger_fields[0] = true; }
+                        else if (usage == 0x000D0047) { c.confidence_bit = (int16_t)bit; }
+                        else if (usage == 0x000D0051) { c.id_bit = (uint16_t)bit; c.id_size = bits; finger_fields[1] = true; }
+                        else if (usage == 0x00010030) {
+                            c.x_bit = (uint16_t)bit; c.x_size = bits; finger_fields[2] = true;
+                            x_per_mm = per_mm(g.logical_max, g.physical_max, g.unit, g.unit_exponent);
+                        } else if (usage == 0x00010031) {
+                            c.y_bit = (uint16_t)bit; c.y_size = bits; finger_fields[3] = true;
+                            y_per_mm = per_mm(g.logical_max, g.physical_max, g.unit, g.unit_exponent);
+                        }
+                    } else if (usage == 0x000D0054 && !out->has_contact_count) {
+                        out->has_contact_count = true;
+                        out->contact_count_bit = (uint16_t)bit;
+                        out->contact_count_size = bits;
+                    } else if (usage == 0x00090001 && !out->has_button) {
+                        out->has_button = true;
+                        out->button_bit = (uint16_t)bit;
+                    }
+                }
+            }
+            if (base >= 0) offsets.advance(g.report_id, g.report_size * g.report_count);
+        }
+        usage_count = 0;
+        have_range = false;
+        usage_min = usage_max = 0;
+    }
+
+    if (out->contact_slots == 0) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    out->x_per_mm = x_per_mm;
+    out->y_per_mm = y_per_mm;
+    return true;
+}
+
+bool hid_ptp_report_decode(const HidPtpLayout &layout, const uint8_t *data, uint16_t data_len,
+                           HidPtpContact contacts[HID_PTP_MAX_CONTACTS], uint8_t *contact_count, bool *button) {
+    // The report must hold every field.
+    uint32_t end = 0;
+    auto need = [&end](uint32_t bit, uint32_t size) { if (bit + size > end) end = bit + size; };
+    for (uint8_t f = 0; f < layout.contact_slots; f++) {
+        const HidPtpContactLayout &c = layout.contacts[f];
+        need(c.tip_bit, 1);
+        if (c.confidence_bit >= 0) need((uint32_t)c.confidence_bit, 1);
+        need(c.id_bit, c.id_size);
+        need(c.x_bit, c.x_size);
+        need(c.y_bit, c.y_size);
+    }
+    if (layout.has_contact_count) need(layout.contact_count_bit, layout.contact_count_size);
+    if (layout.has_button) need(layout.button_bit, 1);
+    if ((end + 7) / 8 > data_len) return false;
+
+    for (uint8_t f = 0; f < layout.contact_slots; f++) {
+        const HidPtpContactLayout &c = layout.contacts[f];
+        contacts[f].tip = read_bits(data, c.tip_bit, 1) != 0;
+        contacts[f].confident = c.confidence_bit < 0 || read_bits(data, (uint32_t)c.confidence_bit, 1) != 0;
+        contacts[f].id = (uint8_t)read_bits(data, c.id_bit, c.id_size);
+        contacts[f].x = (int32_t)read_bits(data, c.x_bit, c.x_size);
+        contacts[f].y = (int32_t)read_bits(data, c.y_bit, c.y_size);
+    }
+    *contact_count = layout.has_contact_count
+                         ? (uint8_t)read_bits(data, layout.contact_count_bit, layout.contact_count_size)
+                         : layout.contact_slots;
+    *button = layout.has_button && read_bits(data, layout.button_bit, 1) != 0;
+    return true;
+}

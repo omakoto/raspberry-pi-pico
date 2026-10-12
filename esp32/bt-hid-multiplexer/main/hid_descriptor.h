@@ -57,6 +57,51 @@ struct HidDescriptorInfo {
     HidConsumerLayout consumer;
 };
 
+// A Windows Precision Touchpad's input report: where each finger's fields are, as bit offsets into the
+// report's data (after the report ID byte) and sizes in bits.
+struct HidPtpContactLayout {
+    uint16_t tip_bit;          // Tip Switch: the finger touches the surface
+    int16_t confidence_bit;    // Confidence (0 = palm or other accidental contact), -1 if none
+    uint16_t id_bit;           // Contact Identifier
+    uint8_t id_size;
+    uint16_t x_bit, y_bit;     // absolute X and Y
+    uint8_t x_size, y_size;
+};
+
+#define HID_PTP_MAX_CONTACTS 5
+
+struct HidPtpLayout {
+    uint8_t report_id;
+    uint8_t contact_slots;     // fingers per report
+    HidPtpContactLayout contacts[HID_PTP_MAX_CONTACTS];
+    bool has_contact_count;    // Contact Count: valid fingers in this report (more follow if larger)
+    uint16_t contact_count_bit;
+    uint8_t contact_count_size;
+    bool has_button;           // Button 1: the pad is pressed down (clickpads)
+    uint16_t button_bit;
+    // Logical units per millimetre, from the X/Y logical and physical ranges (0 if unknown).
+    float x_per_mm, y_per_mm;
+};
+
+// One finger of a touchpad report.
+struct HidPtpContact {
+    uint8_t id;
+    bool tip;
+    bool confident;
+    int32_t x, y;
+};
+
+// Finds a precision touchpad's input report (the Touch Pad application collection, Digitizer page
+// 0x05, with at least one Finger collection holding Tip Switch, Contact Identifier, X and Y). Returns
+// false if the descriptor has none.
+bool hid_ptp_parse(const uint8_t *desc, uint16_t desc_len, HidPtpLayout *out);
+
+// Reads a touchpad report laid out as `layout` (`data` without the report ID byte). Returns false if
+// the report is too short. `contacts` gets one entry per finger slot, `*contact_count` the Contact
+// Count (or the number of slots if the report has none) and `*button` the button.
+bool hid_ptp_report_decode(const HidPtpLayout &layout, const uint8_t *data, uint16_t data_len,
+                           HidPtpContact contacts[HID_PTP_MAX_CONTACTS], uint8_t *contact_count, bool *button);
+
 // Reads the descriptor. Fields of what the descriptor does not have are left zero.
 void hid_descriptor_parse(const uint8_t *desc, uint16_t desc_len, HidDescriptorInfo *out);
 
