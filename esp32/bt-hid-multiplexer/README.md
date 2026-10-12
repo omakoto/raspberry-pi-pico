@@ -40,7 +40,7 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
   not mouse movement, so the multiplexer does what a touchpad driver does. One finger moves the
   pointer; a tap is a left click and a two-finger tap a right click; pressing a clickpad down is the
   left button (the right one with two fingers on it). Two fingers moving up/down scroll (the natural
-  way: the content follows the fingers), two fingers swiping left/right are browser Back/Forward,
+  way: the content follows the fingers), two fingers swiping right/left are browser Back/Forward,
   and three-finger swipes are the arrow keys, once per swipe. The gestures are in their own row of
   VIAL's layout and can be remapped like any key.
 - **Media keys from devices:** media keys that a device sends in a consumer control report (a

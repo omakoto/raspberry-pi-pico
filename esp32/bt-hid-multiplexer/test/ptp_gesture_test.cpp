@@ -147,13 +147,13 @@ static void test_scroll() {
 }
 
 static void test_swipes() {
-    // Two fingers left: one Back, however far they go.
+    // Two fingers left: one swipe, however far they go.
     Pad p;
     p.frame({t(0, 80, 50), t(1, 80, 70)});
     for (int i = 1; i <= 40; i++) p.frame({t(0, 80.0f - i, 50), t(1, 80.0f - i, 70)});
     CHECK(p.total.gestures[PTP_GESTURE_2F_LEFT] == 1 && p.gestures() == 1);
     p.lift();
-    // Right: Forward, but only once it has gone PTP_SWIPE_MM.
+    // Right: one swipe, but only once it has gone PTP_SWIPE_MM.
     p.clear();
     p.frame({t(0, 50, 50), t(1, 50, 70)});
     for (int i = 1; i <= 10; i++) p.frame({t(0, 50.0f + i, 50), t(1, 50.0f + i, 70)});
@@ -178,7 +178,7 @@ static void test_swipes() {
         CHECK(p.lift().clicks == 0);
     }
 
-    // Lifting to two fingers after a three-finger swipe starts over: no Back from the same movement.
+    // Lifting to two fingers after a three-finger swipe starts over: no two-finger swipe from the same movement.
     p.clear();
     p.frame({t(0, 50, 50), t(1, 60, 50), t(2, 70, 50)});
     for (int i = 1; i <= 15; i++) p.frame({t(0, 50.0f - i, 50), t(1, 60.0f - i, 50), t(2, 70.0f - i, 50)});

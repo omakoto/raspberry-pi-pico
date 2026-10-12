@@ -220,9 +220,10 @@ uint16_t VirtualMatrix::defaultKeycode(uint8_t vkey) {
     }
     if (vkey >= VKEY_GESTURE_BASE) {
         // Two fingers scroll the "natural" way (the content follows the fingers, so fingers moving up
-        // scroll down) and swipe left for Back, right for Forward; three-finger swipes are the arrows.
+        // scroll down) and swipe the same way, the page following the fingers: right for Back, left for
+        // Forward. Three-finger swipes are the arrows.
         static const uint16_t gesture_kc[VKEY_GESTURE_COUNT] = {
-            KC_WH_D_, KC_WH_U_, KC_WBAK_, KC_WFWD_,
+            KC_WH_D_, KC_WH_U_, KC_WFWD_, KC_WBAK_,
             0x0052, 0x0051, 0x0050, 0x004F,  // Up, Down, Left, Right
         };
         return gesture_kc[vkey - VKEY_GESTURE_BASE];

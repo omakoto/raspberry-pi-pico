@@ -242,7 +242,7 @@ int main() {
     pump();
     Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 3, 1);  // two fingers right
     pump();
-    CHECK((g_sent_consumer == std::vector<uint16_t>{0x0224, 0, 0x0225, 0}));  // AC Back, AC Forward
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0x0225, 0, 0x0224, 0}));  // AC Forward, AC Back
     g_sent_keyboard.clear();
     for (int g = 0; g < 4; g++) {
         Multiplexer::handleGesture(0, VKEY_GESTURE_BASE + 4 + g, 1);  // three fingers up/down/left/right
