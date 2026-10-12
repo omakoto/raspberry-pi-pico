@@ -11,6 +11,11 @@ public:
 
     // Ingest events from BLE keyboards
     static void handleKeyboardReport(uint8_t dev_idx, uint8_t modifiers, const uint8_t *keys, uint8_t key_count);
+
+    // The QMK keycode (KC_MUTE_ .. KC_BRID_) of a consumer page usage that a BLE device sends, or 0 if
+    // there is none. It is also the virtual key a device's media key is pressed as: layer 0 maps it to
+    // itself, so it goes out as the same usage unless it is remapped.
+    static uint8_t keycodeForConsumerUsage(uint16_t usage);
     static void purgeKeyboard(uint8_t dev_idx);
 
     // Ingest events from BLE mice

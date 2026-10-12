@@ -1,5 +1,6 @@
 // Host-side test of main/chord_mode.cpp: the XP-Pen ACK05's shortcuts becoming keypad keys, reports
-// that pass through unchanged, and the dial button that only sends empty reports.
+// that pass through unchanged, the dial button that only sends empty reports, and the Ulanzi Dial's
+// shortcuts that arrive in stages.
 #include <stdio.h>
 #include <string.h>
 #include "chord_mode.h"
@@ -20,14 +21,20 @@ struct Out {
     }
 };
 
-// Sends a report with up to 2 keys at time now_ms.
-static Out send(ChordState *st, uint8_t mods, uint8_t k0 = 0, uint8_t k1 = 0, uint32_t now_ms = 5000,
-                bool allow_idle_button = true) {
+// Sends a report with up to 2 keys at time now_ms through `profile`.
+static Out send_to(const ChordProfile *profile, ChordState *st, uint8_t mods, uint8_t k0 = 0, uint8_t k1 = 0,
+                   uint32_t now_ms = 5000, bool allow_idle_button = true) {
     const uint8_t keys[6] = {k0, k1, 0, 0, 0, 0};
     Out o;
     memset(&o, 0xAA, sizeof(o));
-    chord_translate(*ack05(), st, mods, keys, allow_idle_button, now_ms, &o.mods, o.keys);
+    chord_translate(*profile, st, mods, keys, allow_idle_button, now_ms, &o.mods, o.keys);
     return o;
+}
+
+// Sends a report to the ACK05 profile.
+static Out send(ChordState *st, uint8_t mods, uint8_t k0 = 0, uint8_t k1 = 0, uint32_t now_ms = 5000,
+                bool allow_idle_button = true) {
+    return send_to(ack05(), st, mods, k0, k1, now_ms, allow_idle_button);
 }
 
 static void test_profile_lookup() {
@@ -133,7 +140,7 @@ static void test_redundant_set_loses() {
         {0x01, 0x1D, 0x60},  // Ctrl+Z
         {0x02, 0x00, 0x5C},  // Shift
     };
-    const ChordProfile profile = {"Test", entries, 3, 0x58};
+    const ChordProfile profile = {"Test", entries, 3, 0x58, false, nullptr, 0};
     ChordState st = {};
     const uint8_t ctrl_z[6] = {0x1D, 0, 0, 0, 0, 0};
     Out o;
@@ -187,10 +194,56 @@ static void test_expire() {
     CHECK(!st.button_down);
 }
 
+// The Ulanzi Dial's lower buttons, as captured from the device: Ctrl, Ctrl+key, key, nothing.
+static void test_ulanzi_dial_stages() {
+    const ChordProfile *ulanzi = chord_profile_for("Ulanzi Dial");
+    CHECK(ulanzi != nullptr && ulanzi->staged && ulanzi->idle_button_key == 0);
+    ChordState st = {};
+    const uint8_t keys[] = {0x1C, 0x1D, 0x19, 0x06};  // Y, Z, V, C
+    for (uint8_t i = 0; i < 4; i++) {
+        uint8_t f = (uint8_t)(0x5C + i);  // Keypad 4-7
+        CHECK(send_to(ulanzi, &st, 0x01).is(0));           // Ctrl: nothing yet
+        CHECK(send_to(ulanzi, &st, 0x01, keys[i]).is(0, f));
+        CHECK(send_to(ulanzi, &st, 0x00, keys[i]).is(0, f));  // Ctrl released first: still held
+        CHECK(send_to(ulanzi, &st, 0).is(0));
+        CHECK(send_to(ulanzi, &st, 0).is(0));  // the stray empty reports it sends are no button
+    }
+    CHECK(!st.button_down);
+
+    // While Y (Ctrl+Y) is being released, a bare Z is part of Ctrl+Z, which is not held: it is the
+    // start of that shortcut, so the Y is released.
+    CHECK(send_to(ulanzi, &st, 0x01, 0x1C).is(0, 0x5C));
+    CHECK(send_to(ulanzi, &st, 0x00, 0x1D).is(0));
+    CHECK(send_to(ulanzi, &st, 0x01, 0x1D).is(0, 0x5D));
+    CHECK(send_to(ulanzi, &st, 0).is(0));
+
+    // Reports that are not part of a shortcut still pass through.
+    CHECK(send_to(ulanzi, &st, 0x00, 0x04).is(0, 0x04));
+    CHECK(send_to(ulanzi, &st, 0x02).is(0x02));
+    CHECK(send_to(ulanzi, &st, 0x01, 0x04).is(0x01, 0x04));
+    CHECK(send_to(ulanzi, &st, 0).is(0));
+}
+
+// The Ulanzi Dial's media keys: top buttons are Keypad 1-3, the dial scrolls, its button is Enter.
+static void test_ulanzi_dial_media_keys() {
+    const ChordProfile *ulanzi = chord_profile_for("Ulanzi Dial");
+    const ChordConsumerEntry *e;
+    CHECK((e = chord_consumer_entry(*ulanzi, 0x00B6)) && e->out == 0x59);
+    CHECK((e = chord_consumer_entry(*ulanzi, 0x00CD)) && e->out == 0x5A);
+    CHECK((e = chord_consumer_entry(*ulanzi, 0x00B5)) && e->out == 0x5B);
+    CHECK((e = chord_consumer_entry(*ulanzi, 0x00E9)) && e->out == 0 && e->wheel == 1);
+    CHECK((e = chord_consumer_entry(*ulanzi, 0x00EA)) && e->out == 0 && e->wheel == -1);
+    CHECK((e = chord_consumer_entry(*ulanzi, 0x00E2)) && e->out == 0x58);
+    CHECK(chord_consumer_entry(*ulanzi, 0x00B7) == nullptr);   // other media keys stay media keys
+    CHECK(chord_consumer_entry(*ack05(), 0x00E9) == nullptr);
+}
+
 int main() {
     test_profile_lookup();
     test_ack05_keys();
     test_pass_through();
+    test_ulanzi_dial_stages();
+    test_ulanzi_dial_media_keys();
     test_merged_reports();
     test_redundant_set_loses();
     test_idle_button();

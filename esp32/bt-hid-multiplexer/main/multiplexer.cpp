@@ -79,6 +79,13 @@ static const uint16_t CONSUMER_USAGES[] = {
 static_assert(sizeof(CONSUMER_USAGES) / sizeof(CONSUMER_USAGES[0]) == KC_BRID_ - KC_MUTE_ + 1,
               "one usage per keycode");
 
+uint8_t Multiplexer::keycodeForConsumerUsage(uint16_t usage) {
+    for (uint8_t i = 0; i < sizeof(CONSUMER_USAGES) / sizeof(CONSUMER_USAGES[0]); i++) {
+        if (CONSUMER_USAGES[i] == usage) return (uint8_t)(KC_MUTE_ + i);
+    }
+    return 0;
+}
+
 void Multiplexer::init() {
     memset(keyboards_, 0, sizeof(keyboards_));
     memset(mice_, 0, sizeof(mice_));

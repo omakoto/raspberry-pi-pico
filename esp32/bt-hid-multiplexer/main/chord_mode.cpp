@@ -4,7 +4,8 @@
 // HID modifier bits and keycodes (HID Usage Tables, Keyboard/Keypad page).
 enum : uint8_t { MOD_LCTRL = 0x01, MOD_LSHIFT = 0x02, MOD_LALT = 0x04 };
 enum : uint8_t {
-    KC_N = 0x11, KC_O = 0x12, KC_S = 0x16, KC_Z = 0x1D, KC_SPACE = 0x2C, KC_F5 = 0x3E,
+    KC_C = 0x06, KC_N = 0x11, KC_O = 0x12, KC_S = 0x16, KC_V = 0x19, KC_Y = 0x1C, KC_Z = 0x1D, KC_SPACE = 0x2C,
+    KC_F5 = 0x3E,
     KC_KP_MINUS = 0x56, KC_KP_PLUS = 0x57, KC_KP_ENTER = 0x58,
     KC_KP_1 = 0x59, KC_KP_2, KC_KP_3, KC_KP_4, KC_KP_5, KC_KP_6, KC_KP_7, KC_KP_8, KC_KP_9, KC_KP_0,
 };
@@ -29,13 +30,43 @@ static const ChordEntry ACK05_ENTRIES[] = {
 
 static_assert(sizeof(ACK05_ENTRIES) / sizeof(ACK05_ENTRIES[0]) <= CHORD_MAX_ENTRIES, "too many entries");
 
+// The Ulanzi Dial as a numeric keypad with a wheel: its three top buttons (media keys) are Keypad
+// 1-3, its four lower buttons (shortcuts) Keypad 4-7, the dial (Volume Up/Down) scrolls, and the
+// dial button (Mute) is Keypad Enter.
+static const ChordEntry ULANZI_DIAL_ENTRIES[] = {
+    {MOD_LCTRL, KC_Y, KC_KP_4},
+    {MOD_LCTRL, KC_Z, KC_KP_5},
+    {MOD_LCTRL, KC_V, KC_KP_6},
+    {MOD_LCTRL, KC_C, KC_KP_7},
+};
+
+static const ChordConsumerEntry ULANZI_DIAL_CONSUMER_ENTRIES[] = {
+    {0x00B6, KC_KP_1, 0},  // top button 1: Scan Previous Track
+    {0x00CD, KC_KP_2, 0},  // top button 2: Play/Pause
+    {0x00B5, KC_KP_3, 0},  // top button 3: Scan Next Track
+    {0x00E9, 0, 1},        // dial right: Volume Increment
+    {0x00EA, 0, -1},       // dial left: Volume Decrement
+    {0x00E2, KC_KP_ENTER, 0},  // dial button: Mute
+};
+
 static const ChordProfile PROFILES[] = {
-    {"Shortcut Remote", ACK05_ENTRIES, sizeof(ACK05_ENTRIES) / sizeof(ACK05_ENTRIES[0]), KC_KP_ENTER},
+    {"Shortcut Remote", ACK05_ENTRIES, sizeof(ACK05_ENTRIES) / sizeof(ACK05_ENTRIES[0]), KC_KP_ENTER, false,
+     nullptr, 0},
+    {"Ulanzi Dial", ULANZI_DIAL_ENTRIES, sizeof(ULANZI_DIAL_ENTRIES) / sizeof(ULANZI_DIAL_ENTRIES[0]), 0, true,
+     ULANZI_DIAL_CONSUMER_ENTRIES,
+     sizeof(ULANZI_DIAL_CONSUMER_ENTRIES) / sizeof(ULANZI_DIAL_CONSUMER_ENTRIES[0])},
 };
 
 const ChordProfile *chord_profile_for(const char *device_name) {
     for (const ChordProfile &p : PROFILES) {
         if (strcmp(device_name, p.device_name) == 0) return &p;
+    }
+    return nullptr;
+}
+
+const ChordConsumerEntry *chord_consumer_entry(const ChordProfile &profile, uint16_t usage) {
+    for (uint8_t i = 0; i < profile.consumer_entry_count; i++) {
+        if (profile.consumer_entries[i].usage == usage) return &profile.consumer_entries[i];
     }
     return nullptr;
 }
@@ -109,6 +140,29 @@ static bool decode(const ChordProfile &profile, uint16_t held, uint8_t modifiers
     return found;
 }
 
+// Whether the report is part of shortcut `e`: its modifiers and keys all belong to that shortcut.
+static bool part_of(const ChordEntry &e, uint8_t modifiers, const uint8_t keys[6]) {
+    if ((modifiers & ~e.modifiers) != 0) return false;
+    for (uint8_t k = 0; k < 6; k++) {
+        if (keys[k] != 0 && keys[k] != e.key) return false;
+    }
+    return true;
+}
+
+// For a staged profile: whether the report is part of a shortcut, and if so, whether it is part of
+// one of the shortcuts held (which is then being released).
+static bool find_partial(const ChordProfile &profile, uint16_t held, uint8_t modifiers, const uint8_t keys[6],
+                         bool *of_held) {
+    bool found = false;
+    *of_held = false;
+    for (uint8_t i = 0; i < profile.entry_count; i++) {
+        if (!part_of(profile.entries[i], modifiers, keys)) continue;
+        found = true;
+        if (held & (1u << i)) *of_held = true;
+    }
+    return found;
+}
+
 // The translated report plus the idle button, if it is down and there is room for it.
 static void emit(const ChordProfile &profile, const ChordState &state, uint8_t *out_modifiers, uint8_t out_keys[6]) {
     *out_modifiers = state.out_modifiers;
@@ -131,7 +185,7 @@ void chord_translate(const ChordProfile &profile, ChordState *state, uint8_t mod
 
     if (empty) {
         // After a shortcut this is its release; otherwise it is the idle button's press or release.
-        if (!state->input_held && allow_idle_button) {
+        if (!state->input_held && allow_idle_button && profile.idle_button_key != 0) {
             state->button_down = !state->button_down;
             state->button_down_ms = now_ms;
         }
@@ -140,6 +194,7 @@ void chord_translate(const ChordProfile &profile, ChordState *state, uint8_t mod
         memset(state->out_keys, 0, 6);
     } else {
         uint16_t held;
+        bool of_held = false;
         if (decode(profile, state->held_entries, modifiers, keys, &held)) {
             state->held_entries = held;
             state->out_modifiers = 0;
@@ -147,6 +202,14 @@ void chord_translate(const ChordProfile &profile, ChordState *state, uint8_t mod
             uint8_t n = 0;
             for (uint8_t i = 0; i < profile.entry_count && n < 6; i++) {
                 if (held & (1u << i)) state->out_keys[n++] = profile.entries[i].out;
+            }
+        } else if (profile.staged && find_partial(profile, state->held_entries, modifiers, keys, &of_held)) {
+            // Being released: keep the shortcut held until the empty report. Being pressed: nothing
+            // yet, the whole shortcut follows.
+            if (!of_held) {
+                state->held_entries = 0;
+                state->out_modifiers = 0;
+                memset(state->out_keys, 0, 6);
             }
         } else {
             state->held_entries = 0;

@@ -208,6 +208,26 @@ int main() {
     Multiplexer::handleKeyboardReport(0, 0, caps, 1);
     CHECK(lastKbd().mods == 0x01 && lastKbd().keys[0] == 0);
 
+    // A device's media key is pressed as the virtual key of its QMK keycode, which goes out as the
+    // same consumer usage by default and can be remapped like any key.
+    CHECK(Multiplexer::keycodeForConsumerUsage(0xE9) == KC_VOLU_);
+    CHECK(Multiplexer::keycodeForConsumerUsage(0xCD) == 0xAE);  // KC_MPLY
+    CHECK(Multiplexer::keycodeForConsumerUsage(0x0070) == KC_BRID_);
+    CHECK(Multiplexer::keycodeForConsumerUsage(0x0001) == 0);
+    reset();
+    uint8_t volu[1] = {Multiplexer::keycodeForConsumerUsage(0xE9)};
+    Multiplexer::handleKeyboardReport(0, 0, volu, 1);
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK((g_sent_consumer == std::vector<uint16_t>{0xE9, 0}));
+    reset();
+    set(0, KC_VOLU_, 0x0004);  // Volume Up -> A
+    Multiplexer::handleKeyboardReport(0, 0, volu, 1);
+    for (int i = 0; i < 10; i++) Multiplexer::flushKeyboard();
+    CHECK(lastKbd().keys[0] == 0x04 && g_sent_consumer.empty());
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
     // A mouse button remapped to a key, and a key remapped to a mouse button.
     reset();
     set(0, 0xE8 + 3, 0x0028);  // mouse button 4 -> Enter

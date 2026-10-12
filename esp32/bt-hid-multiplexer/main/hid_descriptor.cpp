@@ -18,7 +18,7 @@ enum : uint8_t {
 // Input/Output item flags.
 enum : uint32_t { FLAG_CONSTANT = 0x01, FLAG_VARIABLE = 0x02, FLAG_RELATIVE = 0x04 };
 
-enum : uint32_t { PAGE_GENERIC_DESKTOP = 0x01, PAGE_KEYBOARD = 0x07, PAGE_LEDS = 0x08, PAGE_DIGITIZER = 0x0D };
+enum : uint32_t { PAGE_GENERIC_DESKTOP = 0x01, PAGE_KEYBOARD = 0x07, PAGE_LEDS = 0x08, PAGE_CONSUMER = 0x0C, PAGE_DIGITIZER = 0x0D };
 enum : uint32_t { USAGE_X = 0x30, USAGE_Y = 0x31, USAGE_LEFT_CONTROL = 0xE0, USAGE_INPUT_MODE = 0x52 };
 
 struct GlobalState {
@@ -179,6 +179,16 @@ void hid_descriptor_parse(const uint8_t *desc, uint16_t desc_len, HidDescriptorI
                     }
                 }
 
+                if (state.usage_page == PAGE_CONSUMER && data_field && !(val & FLAG_VARIABLE) && bit >= 0 &&
+                    bit % 8 == 0 && bit / 8 <= 255 && (state.report_size == 8 || state.report_size == 16) &&
+                    state.report_count > 0 && state.report_count <= 255 && !out->has_consumer) {
+                    out->has_consumer = true;
+                    out->consumer.report_id = state.report_id;
+                    out->consumer.offset = (uint8_t)(bit / 8);
+                    out->consumer.size_bits = (uint8_t)state.report_size;
+                    out->consumer.count = (uint8_t)state.report_count;
+                }
+
                 offsets.advance(state.report_id, state.report_size * state.report_count);
             } else if (tag == MAIN_FEATURE) {
                 if (usage_input_mode && !out->has_input_mode && state.report_id != 0 &&
@@ -215,4 +225,17 @@ bool hid_keyboard_report_decode(const HidKeyboardLayout &layout, const uint8_t *
         if (code != 0) keys[n++] = code;
     }
     return true;
+}
+
+int hid_consumer_report_decode(const HidConsumerLayout &layout, const uint8_t *data, uint16_t data_len,
+                               uint16_t *usages, uint8_t max_usages) {
+    uint8_t bytes = layout.size_bits / 8;
+    if ((uint32_t)layout.offset + (uint32_t)layout.count * bytes > data_len) return -1;
+    int n = 0;
+    for (uint8_t i = 0; i < layout.count && n < max_usages; i++) {
+        const uint8_t *p = data + layout.offset + i * bytes;
+        uint16_t usage = (bytes == 2) ? (uint16_t)(p[0] | (p[1] << 8)) : p[0];
+        if (usage != 0) usages[n++] = usage;
+    }
+    return n;
 }

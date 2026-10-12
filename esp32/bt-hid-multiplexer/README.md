@@ -33,6 +33,13 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
   Enter, and keys 1-10 (top left to bottom right) = Keypad `1`-`9`, `0`. Each is a key of its own
   that VIAL can remap, e.g. in the pad's per-device layer. With Num Lock off, the host reads
   Keypad `1`-`9`/`0` as navigation keys. See [manual/xppen-ack05.md](manual/xppen-ack05.md).
+  The Ulanzi Dial becomes a keypad with a wheel the same way: its three top buttons (media keys) are
+  Keypad `1`-`3`, its four lower buttons (Ctrl+Y, Ctrl+Z, Ctrl+V, Ctrl+C) Keypad `4`-`7`, the dial
+  scrolls the mouse wheel, and the dial button is Keypad Enter.
+- **Media keys from devices:** media keys that a device sends in a consumer control report (a
+  dial's volume, play/pause, next/previous track, ...) pass through, and can be remapped in VIAL like
+  any other key: they are in the bottom row of VIAL's layout. Only the usages the firmware can also
+  send (the media and browser keys listed under "Keycodes that work") are recognized.
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
 - **SSD1306 or SH1106 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
   the 6-digit passkey when a keyboard needs one. It goes dark a minute after the last change or input and

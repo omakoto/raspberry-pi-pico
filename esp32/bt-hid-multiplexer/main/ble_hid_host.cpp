@@ -58,6 +58,15 @@ struct BleSlot {
     HidKeyboardLayout keyboard_layout;
     const ChordProfile *chord_profile;  // non-null if the keyboard reports go through chord mode
     ChordState chord_state;
+    bool has_consumer_layout;        // the report descriptor says where the media keys are
+    HidConsumerLayout consumer_layout;
+    // The keys handed to the multiplexer are the keyboard report's (after chord mode) plus the media
+    // keys, which arrive in reports of their own; each report updates its part only.
+    uint8_t kb_modifiers;
+    uint8_t kb_keys[6];
+    uint8_t media_keys[4];           // virtual keys (QMK keycodes) of the media keys held
+    uint16_t consumer_usages[4];     // the usages of the last consumer control report
+    uint8_t consumer_count;
     uint16_t mouse_speed_percent;    // mouse sensitivity scaling (default 100)
     int32_t scale_rem_x;             // fractional count accumulator for X
     int32_t scale_rem_y;             // fractional count accumulator for Y
@@ -591,6 +600,26 @@ static void reset_slot(BleSlot *slot) {
     slot->con_handle = HCI_CON_HANDLE_INVALID;
     slot->mouse_format = MOUSE_FORMAT_UNKNOWN;
     slot->mouse_speed_percent = s_global_mouse_speed_percent;
+}
+
+// Hands the slot's keyboard keys and media keys, merged, to the multiplexer.
+static void deliver_keys(BleSlot *slot) {
+    uint8_t keys[6];
+    memcpy(keys, slot->kb_keys, 6);
+    for (uint8_t m = 0; m < sizeof(slot->media_keys); m++) {
+        uint8_t key = slot->media_keys[m];
+        if (key == 0 || memchr(keys, key, 6)) continue;
+        uint8_t *free_entry = (uint8_t *)memchr(keys, 0, 6);
+        if (free_entry) *free_entry = key;
+    }
+    Multiplexer::handleKeyboardReport(slot->dev_idx, slot->kb_modifiers, keys, 6);
+}
+
+// Takes a keyboard report's modifiers and 6 keys as the slot's keyboard state.
+static void set_keyboard_keys(BleSlot *slot, uint8_t modifiers, const uint8_t keys[6]) {
+    slot->kb_modifiers = modifiers;
+    memcpy(slot->kb_keys, keys, 6);
+    deliver_keys(slot);
 }
 
 // Disconnect the least-recently-used connected slot to make room for a new connection
@@ -1264,17 +1293,26 @@ static void resolve_input_reports(BleSlot *slot) {
                slot->dev_idx, slot->name, info.input_mode_report_id, status);
     }
 
+    slot->has_consumer_layout = info.has_consumer;
+    if (info.has_consumer) {
+        slot->consumer_layout = info.consumer;
+        printf("[BLE Host] Slot %u '%s': detected Consumer control report (ID %u, %u x %u-bit at %u)\n",
+               slot->dev_idx, slot->name, info.consumer.report_id, info.consumer.count, info.consumer.size_bits,
+               info.consumer.offset);
+    }
+
     slot->has_keyboard_layout = info.has_keyboard;
     if (info.has_keyboard) {
         slot->keyboard_layout = info.keyboard;
         printf("[BLE Host] Slot %u '%s': detected Keyboard report (ID %u, modifiers at %d, %u keys at %u)\n",
                slot->dev_idx, slot->name, info.keyboard.report_id, info.keyboard.modifier_offset,
                info.keyboard.key_count, info.keyboard.keys_offset);
-        slot->chord_profile = chord_profile_for(slot->name);
-        if (slot->chord_profile) {
-            printf("[BLE Host] Slot %u '%s': chord mode (each shortcut is a key of its own)\n",
-                   slot->dev_idx, slot->name);
-        }
+    }
+
+    slot->chord_profile = chord_profile_for(slot->name);
+    if (slot->chord_profile) {
+        printf("[BLE Host] Slot %u '%s': chord mode (each shortcut is a key of its own)\n",
+               slot->dev_idx, slot->name);
     }
 }
 
@@ -1287,7 +1325,7 @@ void BleHidHost::expireChordButtons() {
         if (slot->chord_profile && chord_expire(*slot->chord_profile, &slot->chord_state, now, &modifiers, keys)) {
             printf("[BLE Host] Slot %u '%s': idle button released after %u s without a release report\n",
                    slot->dev_idx, slot->name, CHORD_IDLE_BUTTON_TIMEOUT_MS / 1000);
-            Multiplexer::handleKeyboardReport(slot->dev_idx, modifiers, keys, 6);
+            set_keyboard_keys(slot, modifiers, keys);
         }
     }
 }
@@ -1633,14 +1671,55 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             // neither the usual ID nor the usual layout. The guesses by ID and length only fill in
             // for what the descriptor did not say: without a known mouse, ID 2 is assumed to be the
             // mouse, as before.
-            bool is_mouse_report = slot->has_mouse_report ? (report_id == slot->mouse_report_id)
-                                                          : (report_id == 2);
-            bool is_keyboard_report = !is_mouse_report && slot->has_keyboard_layout &&
+            bool is_consumer_report = slot->has_consumer_layout && report_id == slot->consumer_layout.report_id &&
+                                      !(slot->has_mouse_report && report_id == slot->mouse_report_id) &&
+                                      !(slot->has_keyboard_layout && report_id == slot->keyboard_layout.report_id);
+            bool is_mouse_report = !is_consumer_report && (slot->has_mouse_report ? (report_id == slot->mouse_report_id)
+                                                                                  : (report_id == 2));
+            bool is_keyboard_report = !is_mouse_report && !is_consumer_report && slot->has_keyboard_layout &&
                                       report_id == slot->keyboard_layout.report_id;
             bool guess_keyboard = !slot->has_keyboard_layout;
             bool guess_mouse = !slot->has_mouse_report;
 
-            if (is_keyboard_report) {
+            if (is_consumer_report) {
+                // Media keys (a dial's volume, play/pause...) are pressed as the virtual keys of their
+                // QMK keycodes, so they go out as the same usages unless they are remapped. A device's
+                // profile may turn some into keys, or into mouse wheel notches, which happen once when
+                // the usage appears (a dial sends its usage and then an empty report for each detent).
+                uint16_t usages[sizeof(slot->media_keys)];
+                int n = hid_consumer_report_decode(slot->consumer_layout, data, data_len, usages, sizeof(slot->media_keys));
+                if (n >= 0) {
+                    memset(slot->media_keys, 0, sizeof(slot->media_keys));
+                    uint8_t held = 0;
+                    for (int i = 0; i < n; i++) {
+                        const ChordConsumerEntry *entry =
+                            slot->chord_profile ? chord_consumer_entry(*slot->chord_profile, usages[i]) : nullptr;
+                        uint8_t key = entry ? entry->out : Multiplexer::keycodeForConsumerUsage(usages[i]);
+                        if (entry && entry->out == 0) {
+                            bool was_held = false;
+                            for (uint8_t k = 0; k < slot->consumer_count; k++) {
+                                if (slot->consumer_usages[k] == usages[i]) was_held = true;
+                            }
+                            if (!was_held) Multiplexer::handleMouseReport(dev_idx, 0, 0, 0, entry->wheel, 0);
+                        } else if (key != 0) {
+                            slot->media_keys[held++] = key;
+                        } else if (report_log_allowed()) {
+                            printf("[BLE Host] Slot %u ('%s'): consumer usage 0x%04X has no keycode, ignored\n",
+                                   dev_idx, slot->name, usages[i]);
+                        }
+                    }
+                    if (log_this_report && n > 0) {
+                        printf("[BLE Host] Media key on slot %u ('%s'): usage 0x%04X -> keycode 0x%02X\n",
+                               dev_idx, slot->name, usages[0], slot->media_keys[0]);
+                    }
+                    memcpy(slot->consumer_usages, usages, n * sizeof(usages[0]));
+                    slot->consumer_count = (uint8_t)n;
+                    deliver_keys(slot);
+                } else if (report_log_allowed()) {
+                    printf("[BLE Host] Short consumer control report for slot %u (id %u, data_len %u)\n",
+                           dev_idx, report_id, data_len);
+                }
+            } else if (is_keyboard_report) {
                 uint8_t modifiers;
                 uint8_t keys[6];
                 if (hid_keyboard_report_decode(slot->keyboard_layout, data, data_len, &modifiers, keys)) {
@@ -1657,7 +1736,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                         chord_translate(*slot->chord_profile, &slot->chord_state, modifiers, keys,
                                         allow_idle_button, now, &modifiers, keys);
                     }
-                    Multiplexer::handleKeyboardReport(dev_idx, modifiers, keys, 6);
+                    set_keyboard_keys(slot, modifiers, keys);
                 } else if (report_log_allowed()) {
                     printf("[BLE Host] Short keyboard report for slot %u (id %u, data_len %u)\n",
                            dev_idx, report_id, data_len);
@@ -1665,9 +1744,9 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
             } else if (guess_keyboard && !is_mouse_report &&
                        (report_id == 1 || (report_id == 0 && (data_len == 8 || data_len == 7)))) {
                 if (data_len == 8) {
-                    Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[2], 6);
+                    set_keyboard_keys(slot, data[0], &data[2]);
                 } else if (data_len == 7) {
-                    Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[1], 6);
+                    set_keyboard_keys(slot, data[0], &data[1]);
                 }
                 // Per-keystroke print is diagnostic only ('reports on'): it blocks the BTstack
                 // context on the UART for several ms and adds that directly to key latency.
@@ -1736,7 +1815,7 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                 scale_mouse_delta(slot, dx, dy);
                 Multiplexer::handleMouseReport(dev_idx, buttons, dx, dy, (int8_t)wheel, (int8_t)pan);
             } else if (guess_keyboard && data_len == 8) {
-                Multiplexer::handleKeyboardReport(dev_idx, data[0], &data[2], 6);
+                set_keyboard_keys(slot, data[0], &data[2]);
             } else if (guess_mouse && data_len >= 3 && data_len <= 5) {
                 uint8_t buttons = data[0];
                 int16_t dx = (int8_t)data[1];
