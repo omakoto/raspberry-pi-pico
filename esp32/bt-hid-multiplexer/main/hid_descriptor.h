@@ -35,6 +35,12 @@ struct HidDescriptorInfo {
     // The first keyboard report that has a keycode array (Usage Page 0x07, 8-bit array items).
     bool has_keyboard;
     HidKeyboardLayout keyboard;
+
+    // A Windows Precision Touchpad's Input Mode feature report (Digitizer page, usage 0x52), when it
+    // is an 8-bit field at the start of its report. 0 asks the touchpad to send its mouse report,
+    // 3 to send multi-touch contacts.
+    bool has_input_mode;
+    uint8_t input_mode_report_id;
 };
 
 // Reads the descriptor. Fields of what the descriptor does not have are left zero.

@@ -7,7 +7,7 @@ namespace {
 enum : uint8_t {
     TYPE_MAIN = 0, TYPE_GLOBAL = 1, TYPE_LOCAL = 2,
 
-    MAIN_INPUT = 8, MAIN_OUTPUT = 9,
+    MAIN_INPUT = 8, MAIN_OUTPUT = 9, MAIN_FEATURE = 11,
 
     GLOBAL_USAGE_PAGE = 0, GLOBAL_REPORT_SIZE = 7, GLOBAL_REPORT_ID = 8, GLOBAL_REPORT_COUNT = 9,
     GLOBAL_PUSH = 10, GLOBAL_POP = 11,
@@ -18,8 +18,8 @@ enum : uint8_t {
 // Input/Output item flags.
 enum : uint32_t { FLAG_CONSTANT = 0x01, FLAG_VARIABLE = 0x02, FLAG_RELATIVE = 0x04 };
 
-enum : uint32_t { PAGE_GENERIC_DESKTOP = 0x01, PAGE_KEYBOARD = 0x07, PAGE_LEDS = 0x08 };
-enum : uint32_t { USAGE_X = 0x30, USAGE_Y = 0x31, USAGE_LEFT_CONTROL = 0xE0 };
+enum : uint32_t { PAGE_GENERIC_DESKTOP = 0x01, PAGE_KEYBOARD = 0x07, PAGE_LEDS = 0x08, PAGE_DIGITIZER = 0x0D };
+enum : uint32_t { USAGE_X = 0x30, USAGE_Y = 0x31, USAGE_LEFT_CONTROL = 0xE0, USAGE_INPUT_MODE = 0x52 };
 
 struct GlobalState {
     uint32_t usage_page;
@@ -28,7 +28,7 @@ struct GlobalState {
     uint8_t report_id;
 };
 
-// The bit offset of the next Input field of each report ID seen so far. Descriptors may interleave
+// The bit offset of the next Input (or, in a second table, Feature) field of each report ID seen so far. Descriptors may interleave
 // report IDs, so each keeps its own. Peripherals use a handful of IDs; offsets in IDs beyond the
 // table are unknown, and a keyboard found there is not used.
 class InputOffsets {
@@ -74,9 +74,11 @@ void hid_descriptor_parse(const uint8_t *desc, uint16_t desc_len, HidDescriptorI
     GlobalState stack[4];
     uint8_t stack_depth = 0;
     InputOffsets offsets;
+    InputOffsets feature_offsets;
 
     // Local items, which apply to the next main item only.
     bool usage_xy = false;
+    bool usage_input_mode = false;
     uint32_t usage_minimum = 0;
 
     // The modifier bits seen last, to pair with a keycode array in the same report.
@@ -131,6 +133,9 @@ void hid_descriptor_parse(const uint8_t *desc, uint16_t desc_len, HidDescriptorI
                 if (state.usage_page == PAGE_GENERIC_DESKTOP && (usage == USAGE_X || usage == USAGE_Y)) {
                     usage_xy = true;
                 }
+                if (state.usage_page == PAGE_DIGITIZER && usage == USAGE_INPUT_MODE) {
+                    usage_input_mode = true;
+                }
             } else if (tag == LOCAL_USAGE_MINIMUM) {
                 usage_minimum = usage;
             }
@@ -175,8 +180,16 @@ void hid_descriptor_parse(const uint8_t *desc, uint16_t desc_len, HidDescriptorI
                 }
 
                 offsets.advance(state.report_id, state.report_size * state.report_count);
+            } else if (tag == MAIN_FEATURE) {
+                if (usage_input_mode && !out->has_input_mode && state.report_id != 0 &&
+                    feature_offsets.get(state.report_id) == 0 && state.report_size == 8) {
+                    out->has_input_mode = true;
+                    out->input_mode_report_id = state.report_id;
+                }
+                feature_offsets.advance(state.report_id, state.report_size * state.report_count);
             }
             usage_xy = false;
+            usage_input_mode = false;
             usage_minimum = 0;
         }
     }

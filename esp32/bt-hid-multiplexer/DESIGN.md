@@ -575,38 +575,39 @@ Copy every comment and keep the code.
    - The guesses only fill in for what the descriptor did not say: without a known mouse, assume ID 2 and guess mice by length; without a known keyboard, assume ID 1 or 7/8-byte ID 0 reports. Other reports are dropped, with a rate-limited "Unhandled" line.
    - **Chord mode** (`chord_mode.cpp`): a device with a chord profile (by name; only the ACK05, "Shortcut Remote") has each keyboard report split into shortcuts. The pad merges the shortcuts of all held keys into one report (modifiers ORed, keys side by side), so the report is split into the set of table entries that adds up to exactly it, preferring the set closest to the keys held before (Ctrl+Shift+Z is key 10 from nothing held, but keys 4 + 8 when 4 or 8 was held). Each becomes one keypad key with its modifiers dropped; a report that no set adds up to passes through unchanged. Each key press arrives as one report with the whole shortcut, so no timing is involved. The dial button sends only empty reports (press and release), so an empty report while nothing is held toggles Keypad Enter. That is not done in the first second after `HID_SERVICE_CONNECTED`, where it may be the release of the key that woke the pad, and the button is released by the 1 s heartbeat after 30 s without a release report.
 7. **Zero slave latency** (`BLE_ZERO_SLAVE_LATENCY`).
-   - Send the request 10 s after the last parameter update, at most 3 times, at the shortest interval observed.
+   - Send the request 10 s after the last parameter update, at most 3 times, at the shortest interval set by a parameter update (the setup interval below does not count).
    - Recompute the supervision timeout.
-8. **Pairing policy.**
+8. **Fast setup interval.** Connect at 7.5 ms (`SETUP_CONN_INTERVAL`) so GATT discovery finishes quickly: each ATT round trip takes about three connection events, and an MTU-23 peripheral with a long report map needs dozens. The ProtoArc T1 Plus trackpad disconnects 2.4 s after connecting if it is not set up; at 30 ms it got only two thirds through its report map. After `HID_SERVICE_CONNECTED`, a peripheral that has not requested parameters of its own is moved to 15-30 ms.
+9. **Pairing policy.**
    - Pairing is non-aggressive: unbonded devices are only considered during pairing mode.
    - "Bonded" means present in the table or in `le_device_db`.
-9. **Connect handling.**
+10. **Connect handling.**
    - Connect/cancel: a 10 s timeout calls `gap_connect_cancel`, and the cleanup happens on the `CONNECTION_COMPLETE` error.
    - Stop scanning before `gap_connect`.
    - `startScan` while connecting cancels the connection.
-10. **LRU eviction.** Queue the pending connect, `gap_disconnect(lru)`, and connect on `DISCONNECTION_COMPLETE`.
-11. **Stale bond.** If re-encryption fails, remove the stale `le_device_db` entry, then `sm_request_pairing`.
-12. **Slot reset.** `reset_slot` removes the latency timer before zeroing the slot.
-13. **Host LEDs.** Parse the LED output report ID from the descriptor (usage page `0x08`), and write the current LEDs on connect.
-14. **BTstack log filter.**
+11. **LRU eviction.** Queue the pending connect, `gap_disconnect(lru)`, and connect on `DISCONNECTION_COMPLETE`.
+12. **Stale bond.** If re-encryption fails, remove the stale `le_device_db` entry, then `sm_request_pairing`.
+13. **Slot reset.** `reset_slot` removes the latency timer before zeroing the slot.
+14. **Host LEDs.** Parse the LED output report ID from the descriptor (usage page `0x08`), and write the current LEDs on connect.
+15. **BTstack log filter.**
     - Let through only `sm.c`, `gatt_client.c` and `hids_client.c`, plus all errors.
     - Verbose dumps switch off after 15 s.
     - Reports are capped at 40 lines/s.
     - On the S3, console output is non-blocking, so the filter now protects the log ring's 8 KB rather than USB enumeration. It stays.
-15. **Init order.** Keep the init order of §4.4.
-16. **Key release.** `processKeyRelease` uses the stored `active_translation_` and the `HELD_KC_NO` sentinel.
-17. **Taps.** The tap queue sends a release between repeated taps.
-18. **Purge on disconnect.** `purgeKeyboard` / `purgeMouse` run on every disconnect, including `clearBonds`.
-19. **Mouse clamp.** Mouse axes clamp to ±127, and the remainder carries to the next report.
-20. **Keymap saves.** Debounced by 500 ms.
-21. **VIAL protocol.**
+16. **Init order.** Keep the init order of §4.4.
+17. **Key release.** `processKeyRelease` uses the stored `active_translation_` and the `HELD_KC_NO` sentinel.
+18. **Taps.** The tap queue sends a release between repeated taps.
+19. **Purge on disconnect.** `purgeKeyboard` / `purgeMouse` run on every disconnect, including `clearBonds`.
+20. **Mouse clamp.** Mouse axes clamp to ±127, and the remainder carries to the next report.
+21. **Keymap saves.** Debounced by 500 ms.
+22. **VIAL protocol.**
     - Version 3, with the matching keycode numbering.
     - QMK-settings query replies `0xFF…` (anything else polls forever).
     - Always unlocked.
-22. **VIAL replies.** Retried until the IN endpoint is free.
-23. **HID OUT buffer.** `CFG_TUD_HID_EP_BUFSIZE == 32` (§6.2).
-24. **CDC presence.** Decided before USB starts, after a 200 µs settle.
-25. **Bootloader jump.** Reply first, then disconnect USB, then reboot.
+23. **VIAL replies.** Retried until the IN endpoint is free.
+24. **HID OUT buffer.** `CFG_TUD_HID_EP_BUFSIZE == 32` (§6.2).
+25. **CDC presence.** Decided before USB starts, after a 200 µs settle.
+26. **Bootloader jump.** Reply first, then disconnect USB, then reboot.
 
 The host tests (§13.2) cover items 16-20 and the log ring.
 

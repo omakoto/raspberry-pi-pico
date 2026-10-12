@@ -38,7 +38,8 @@ struct BleSlot {
     uint8_t dev_idx;
     bool connected;
     uint16_t conn_interval;     // last reported LL connection interval, 1.25 ms units (0 = unknown)
-    uint16_t min_conn_interval; // shortest LL connection interval observed on this connection (1.25 ms units)
+    uint16_t min_conn_interval; // shortest LL connection interval set by a parameter update on this connection
+                                // (1.25 ms units, 0 = none yet); SETUP_CONN_INTERVAL does not count
     uint16_t conn_latency;      // last reported slave latency
     uint8_t latency_forced;     // how often parameter optimization was requested on this connection
     btstack_timer_source_t latency_timer; // delays parameter optimization past the peer's settling window
@@ -68,6 +69,16 @@ struct BleSlot {
 // peripheral's last parameter update, and at most a few times per connection before giving up.
 #define ZERO_LATENCY_DELAY_MS     10000
 #define MAX_ZERO_LATENCY_ATTEMPTS 3
+
+// Connections start at the shortest interval so GATT discovery finishes fast: it takes about three
+// connection events per ATT round trip, and a peripheral with ATT MTU 23 and a long report map needs
+// dozens of round trips. Some peripherals drop a link that is not set up quickly (the ProtoArc T1 Plus
+// trackpad disconnects 2.4 s after connecting). Once the HID service is set up, a peripheral that has
+// not asked for parameters of its own is moved to the DEFAULT_CONN_INTERVAL range, so the setup
+// interval is never mistaken for the peripheral's preference.
+#define SETUP_CONN_INTERVAL       6   // 7.5 ms
+#define DEFAULT_CONN_INTERVAL_MIN 12  // 15 ms
+#define DEFAULT_CONN_INTERVAL_MAX 24  // 30 ms
 
 // How long after the HID service comes up an empty report is not taken for a chord mode device's
 // idle button (see chord_mode.h).
@@ -483,6 +494,15 @@ static void onPairingModeTimeout(btstack_timer_source_t *ts) {
 static void onPairingDelayTimeout(btstack_timer_source_t *ts) {
     (void)ts;
     if (s_pending_pairing_handle != HCI_CON_HANDLE_INVALID) {
+        // A peripheral that sends a Security Request is usually re-encrypted (and its HIDS client
+        // started) before this fires. Requesting security again would start encryption once more,
+        // and GATT requests stall during that key refresh; the ProtoArc T1 Plus trackpad then drops
+        // the link because its setup did not finish in time.
+        if (gap_encryption_key_size(s_pending_pairing_handle) > 0) {
+            printf("[BLE Host] Handle 0x%04X already encrypted, no security request needed.\n", s_pending_pairing_handle);
+            s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
+            return;
+        }
         printf("[BLE Host] Requesting security/pairing for handle 0x%04X...\n", s_pending_pairing_handle);
         sm_request_pairing(s_pending_pairing_handle);
         s_pending_pairing_handle = HCI_CON_HANDLE_INVALID;
@@ -649,7 +669,17 @@ static void connectToDevice(const bd_addr_t addr, bd_addr_type_t addr_type, cons
     btstack_run_loop_set_timer_handler(&s_reconnect_timer, &onReconnectTimeout);
     btstack_run_loop_add_timer(&s_reconnect_timer);
 
-    gap_connect(slot->addr, slot->addr_type);
+    // When BTstack refuses the connection, no connection complete event follows and gap_connect_cancel()
+    // has nothing to cancel, so the connecting state has to be dropped here or it is never cleared.
+    uint8_t status = gap_connect(slot->addr, slot->addr_type);
+    if (status != ERROR_CODE_SUCCESS) {
+        printf("[BLE Host] gap_connect to '%s' refused (status 0x%02X). Resuming scan...\n", slot->name, status);
+        btstack_run_loop_remove_timer(&s_reconnect_timer);
+        reset_slot(slot);
+        s_is_connecting = false;
+        s_connecting_slot_idx = -1;
+        BleHidHost::startScan();
+    }
 }
 
 static void tryAutoReconnectOrScan() {
@@ -863,8 +893,8 @@ void BleHidHost::init() {
     // to preserve radio bandwidth for active concurrent BLE HID connections.
     gap_set_scan_parameters(1, 160, 32);
 
-    // Initial connection parameters: 30ms scan window/interval, 15-30ms conn interval, 4s supervision timeout
-    gap_set_connection_parameters(48, 48, 12, 24, 0, 400, 0, 0);
+    // Initial connection parameters: 30ms scan window/interval, SETUP_CONN_INTERVAL, 4s supervision timeout
+    gap_set_connection_parameters(48, 48, SETUP_CONN_INTERVAL, SETUP_CONN_INTERVAL, 0, 400, 0, 0);
 
     // From here on console-enabled dumps switch themselves off.
     btstack_run_loop_set_timer_handler(&s_heartbeat_timer, &onHeartbeat);
@@ -1222,6 +1252,18 @@ static void resolve_input_reports(BleSlot *slot) {
                info.mouse_absolute ? "absolute" : "relative");
     }
 
+    // A precision touchpad may be left in touchpad mode (by the last host it was paired with, or by
+    // default), where it sends only multi-touch contacts, which are not translated to mouse input.
+    // Mouse mode asks it to send its mouse report instead. Not every touchpad honors it: the ProtoArc
+    // T1 Plus accepts the write and keeps sending contacts.
+    if (info.has_input_mode) {
+        uint8_t mouse_mode = 0;
+        uint8_t status = hids_client_send_write_report(slot->hids_cid, info.input_mode_report_id,
+                                                       HID_REPORT_TYPE_FEATURE, &mouse_mode, 1);
+        printf("[BLE Host] Slot %u '%s': precision touchpad, setting Input Mode (ID %u) to mouse: status 0x%02X\n",
+               slot->dev_idx, slot->name, info.input_mode_report_id, status);
+    }
+
     slot->has_keyboard_layout = info.has_keyboard;
     if (info.has_keyboard) {
         slot->keyboard_layout = info.keyboard;
@@ -1431,6 +1473,15 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     add_or_update_bonded_device(slot->addr, slot->addr_type, slot->name, true);
                     slot->name_read_attempts = 0;
                     schedule_name_read(slot);
+
+                    // Leave the setup interval unless the peripheral has chosen parameters itself.
+                    if (slot->min_conn_interval == 0 && slot->conn_interval == SETUP_CONN_INTERVAL) {
+                        int param_status = gap_update_connection_parameters(slot->con_handle, DEFAULT_CONN_INTERVAL_MIN,
+                                                                            DEFAULT_CONN_INTERVAL_MAX, 0, 400);
+                        printf("[BLE Host] Slot %u: setup done, requesting %.2f-%.2f ms interval: status %d\n",
+                               slot->dev_idx, DEFAULT_CONN_INTERVAL_MIN * 1.25f, DEFAULT_CONN_INTERVAL_MAX * 1.25f,
+                               param_status);
+                    }
 
                     resolve_led_report(slot);
                     resolve_input_reports(slot);
@@ -1998,9 +2049,6 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     uint16_t latency = gap_subevent_le_connection_complete_get_conn_latency(packet);
                     slot->conn_interval = interval;
                     slot->conn_latency = latency;
-                    if (interval > 0) {
-                        slot->min_conn_interval = interval;
-                    }
                     printf("[BLE Host] LE Connection established for '%s' (slot %u, handle 0x%04X, interval %.2f ms, latency %u). Scheduling security in 200ms...\n",
                            slot->name, slot->dev_idx, handle, interval * 1.25f, latency);
                     s_pending_pairing_handle = handle;
