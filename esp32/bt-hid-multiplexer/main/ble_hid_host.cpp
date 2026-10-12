@@ -1946,15 +1946,20 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             // In pairing mode, allow new unbonded target HID devices.
             // In regular background scanning, strictly reconnect to already-bonded devices.
             bool is_candidate = is_bonded || (s_is_pairing_mode && is_target);
-            if (should_log && (is_candidate || (s_stack_logging && info.name[0] != '\0'))) {
+            // With the stack log on, unnamed advertisers are shown too (with the address type and the
+            // advertising event type), so that a bonded device advertising from an address that is not
+            // the stored one, e.g. a resolvable private address, can be spotted.
+            if (should_log && (is_candidate || s_stack_logging)) {
+                uint8_t adv_type = gap_event_advertising_report_get_advertising_event_type(packet);
                 if (info.name[0] != '\0') {
-                    printf("[BLE Host] Adv: '%s' (%s, RSSI %d dBm, HID=%d, App=0x%04X)%s\n",
-                           info.name, bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance,
-                           is_bonded ? " [bonded]" : (s_is_pairing_mode ? " [pair-candidate]" : ""));
+                    printf("[BLE Host] Adv: '%s' (%s, type %u, evt %u, RSSI %d dBm, HID=%d, App=0x%04X)%s\n",
+                           info.name, bd_addr_to_str(addr), addr_type, adv_type, rssi, info.has_hid_service,
+                           info.appearance,
+                           is_bonded ? " [bonded]" : (is_candidate ? " [pair-candidate]" : ""));
                 } else {
-                    printf("[BLE Host] Adv: %s (RSSI %d dBm, HID=%d, App=0x%04X)%s\n",
-                           bd_addr_to_str(addr), rssi, info.has_hid_service, info.appearance,
-                           is_bonded ? " [bonded]" : (s_is_pairing_mode ? " [pair-candidate]" : ""));
+                    printf("[BLE Host] Adv: %s (type %u, evt %u, RSSI %d dBm, HID=%d, App=0x%04X)%s\n",
+                           bd_addr_to_str(addr), addr_type, adv_type, rssi, info.has_hid_service, info.appearance,
+                           is_bonded ? " [bonded]" : (is_candidate ? " [pair-candidate]" : ""));
                 }
             }
             if (is_candidate) {
@@ -1974,6 +1979,27 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                        bd_addr_to_str(addr));
                 connectToDevice(addr, (bd_addr_type_t)addr_type, dev_name);
             }
+            break;
+        }
+
+        case HCI_EVENT_COMMAND_STATUS: {
+            // When the controller rejects LE Create Connection, BTstack drops its outgoing connection
+            // without emitting GAP_SUBEVENT_LE_CONNECTION_COMPLETE, and gap_connect_cancel() then has
+            // nothing to cancel. Without this the connecting state would never be cleared and no
+            // device could connect again until a reboot.
+            if (hci_event_command_status_get_command_opcode(packet) != HCI_OPCODE_HCI_LE_CREATE_CONNECTION) break;
+            uint8_t status = hci_event_command_status_get_status(packet);
+            if (status == ERROR_CODE_SUCCESS || !s_is_connecting) break;
+            btstack_run_loop_remove_timer(&s_reconnect_timer);
+            printf("[BLE Host] Controller rejected the connection (status 0x%02X). Resuming scan...\n", status);
+            if (s_connecting_slot_idx >= 0 && s_connecting_slot_idx < MAX_BLE_DEVICES) {
+                reset_slot(&s_slots[s_connecting_slot_idx]);
+            }
+            s_is_connecting = false;
+            s_connecting_slot_idx = -1;
+            s_is_scanning = false;
+            s_eviction_pending = false;
+            tryAutoReconnectOrScan();
             break;
         }
 
