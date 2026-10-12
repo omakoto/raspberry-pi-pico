@@ -579,7 +579,7 @@ Copy every comment and keep the code.
 7. **Zero slave latency** (`BLE_ZERO_SLAVE_LATENCY`).
    - Send the request 10 s after the last parameter update, at most 3 times, at the shortest interval set by a parameter update (the setup interval below does not count).
    - Recompute the supervision timeout.
-8. **Fast setup interval.** Connect at 7.5 ms (`SETUP_CONN_INTERVAL`) so GATT discovery finishes quickly: each ATT round trip takes about three connection events, and an MTU-23 peripheral with a long report map needs dozens. The ProtoArc T1 Plus trackpad disconnects 2.4 s after connecting if it is not set up; at 30 ms it got only two thirds through its report map. After `HID_SERVICE_CONNECTED`, a peripheral that has not requested parameters of its own is moved to 15-30 ms.
+8. **Fast setup interval.** Connect at 7.5 ms (`SETUP_CONN_INTERVAL`) so GATT discovery finishes quickly: each ATT round trip takes about three connection events, and an MTU-23 peripheral with a long report map needs dozens. The ProtoArc T1 Plus trackpad disconnects 2.4 s after connecting if it is not set up; at 30 ms it got only two thirds through its report map. After `HID_SERVICE_CONNECTED`, a peripheral that has not requested parameters of its own is moved to 15-30 ms, except pointing devices (touchpads, and mice without a keyboard report), which stay at 7.5 ms: the PERIPAD-706 at 30 ms reported its fingers only ~33 times a second and the pointer lagged.
 9. **Pairing policy.**
    - Pairing is non-aggressive: unbonded devices are only considered during pairing mode.
    - "Bonded" means present in the table or in `le_device_db`.

@@ -93,8 +93,9 @@ struct BleSlot {
 // connection events per ATT round trip, and a peripheral with ATT MTU 23 and a long report map needs
 // dozens of round trips. Some peripherals drop a link that is not set up quickly (the ProtoArc T1 Plus
 // trackpad disconnects 2.4 s after connecting). Once the HID service is set up, a peripheral that has
-// not asked for parameters of its own is moved to the DEFAULT_CONN_INTERVAL range, so the setup
-// interval is never mistaken for the peripheral's preference.
+// not asked for parameters of its own is moved to the DEFAULT_CONN_INTERVAL range, unless it is a
+// pointing device, which keeps the setup interval for smooth movement. The setup interval is never
+// mistaken for the peripheral's preference.
 #define SETUP_CONN_INTERVAL       6   // 7.5 ms
 #define DEFAULT_CONN_INTERVAL_MIN 12  // 15 ms
 #define DEFAULT_CONN_INTERVAL_MAX 24  // 30 ms
@@ -1528,17 +1529,25 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     slot->name_read_attempts = 0;
                     schedule_name_read(slot);
 
-                    // Leave the setup interval unless the peripheral has chosen parameters itself.
-                    if (slot->min_conn_interval == 0 && slot->conn_interval == SETUP_CONN_INTERVAL) {
-                        int param_status = gap_update_connection_parameters(slot->con_handle, DEFAULT_CONN_INTERVAL_MIN,
-                                                                            DEFAULT_CONN_INTERVAL_MAX, 0, 400);
-                        printf("[BLE Host] Slot %u: setup done, requesting %.2f-%.2f ms interval: status %d\n",
-                               slot->dev_idx, DEFAULT_CONN_INTERVAL_MIN * 1.25f, DEFAULT_CONN_INTERVAL_MAX * 1.25f,
-                               param_status);
-                    }
-
                     resolve_led_report(slot);
                     resolve_input_reports(slot);
+
+                    // Leave the setup interval unless the peripheral has chosen parameters itself. Pointing
+                    // devices (touchpads, and mice without a keyboard report) stay at it: at 30 ms a
+                    // touchpad reports its fingers only ~33 times a second, which makes the pointer lag.
+                    bool pointing = slot->has_ptp || (slot->has_mouse_report && !slot->has_keyboard_layout);
+                    if (slot->min_conn_interval == 0 && slot->conn_interval == SETUP_CONN_INTERVAL) {
+                        if (pointing) {
+                            printf("[BLE Host] Slot %u: setup done, pointing device stays at %.2f ms\n",
+                                   slot->dev_idx, SETUP_CONN_INTERVAL * 1.25f);
+                        } else {
+                            int param_status = gap_update_connection_parameters(
+                                slot->con_handle, DEFAULT_CONN_INTERVAL_MIN, DEFAULT_CONN_INTERVAL_MAX, 0, 400);
+                            printf("[BLE Host] Slot %u: setup done, requesting %.2f-%.2f ms interval: status %d\n",
+                                   slot->dev_idx, DEFAULT_CONN_INTERVAL_MIN * 1.25f, DEFAULT_CONN_INTERVAL_MAX * 1.25f,
+                                   param_status);
+                        }
+                    }
                     if (slot->has_led_report) {
                         uint8_t current_leds = Multiplexer::getHostLeds();
                         hids_client_send_write_report(slot->hids_cid, slot->led_report_id, HID_REPORT_TYPE_OUTPUT, &current_leds, 1);
