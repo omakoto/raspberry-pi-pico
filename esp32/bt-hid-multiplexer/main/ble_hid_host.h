@@ -11,6 +11,8 @@ public:
     static void startScan();
     static void stopScan();
     static bool isScanning();
+    // A connection is being made (or queued, waiting for another link to leave or make room).
+    static bool isConnecting();
     static void startPairingMode(uint32_t timeout_ms = 60000);
     static void stopPairingMode();
     static bool isPairingMode();

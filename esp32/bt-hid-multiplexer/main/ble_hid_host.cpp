@@ -42,8 +42,9 @@ struct BleSlot {
     bool connected;
     uint16_t conn_interval;     // last reported LL connection interval, 1.25 ms units (0 = unknown)
     uint16_t min_conn_interval; // shortest LL connection interval set by a parameter update on this connection
-                                // (1.25 ms units, 0 = none yet); SETUP_CONN_INTERVAL does not count
+                                // (1.25 ms units, 0 = none yet); setup_interval does not count
     uint16_t conn_latency;      // last reported slave latency
+    uint16_t setup_interval;    // the interval the connection was made with (see s_setup_interval)
     uint8_t latency_forced;     // how often parameter optimization was requested on this connection
     btstack_timer_source_t latency_timer; // delays parameter optimization past the peer's settling window
     btstack_timer_source_t name_timer;    // delays the GAP Device Name read (see schedule_name_read)
@@ -99,6 +100,20 @@ struct BleSlot {
 #define SETUP_CONN_INTERVAL       6   // 7.5 ms
 #define DEFAULT_CONN_INTERVAL_MIN 12  // 15 ms
 #define DEFAULT_CONN_INTERVAL_MAX 24  // 30 ms
+
+// The ESP32-S3 controller refuses LE Create Connection (status 0x0D, limited resources) when the new
+// link's interval is too short for the links it already runs: with three links up it refuses 7.5 ms
+// every time, and with a link at 7.5 ms it refuses a second one. It accepts longer intervals, so a
+// refused connection is tried again at once, one step (1.25 ms) slower each time, up to
+// DEFAULT_CONN_INTERVAL_MAX. The next connection starts at SETUP_CONN_INTERVAL again, since what fits
+// changes as links come and go.
+static uint16_t s_setup_interval = SETUP_CONN_INTERVAL;
+
+static void set_setup_interval(uint16_t interval) {
+    s_setup_interval = interval;
+    // 30 ms scan window/interval while connecting, 4 s supervision timeout.
+    gap_set_connection_parameters(48, 48, interval, interval, 0, 400, 0, 0);
+}
 
 // How long after the HID service comes up an empty report is not taken for a chord mode device's
 // idle button (see chord_mode.h).
@@ -935,8 +950,7 @@ void BleHidHost::init() {
     // to preserve radio bandwidth for active concurrent BLE HID connections.
     gap_set_scan_parameters(1, 160, 32);
 
-    // Initial connection parameters: 30ms scan window/interval, SETUP_CONN_INTERVAL, 4s supervision timeout
-    gap_set_connection_parameters(48, 48, SETUP_CONN_INTERVAL, SETUP_CONN_INTERVAL, 0, 400, 0, 0);
+    set_setup_interval(SETUP_CONN_INTERVAL);
 
     // From here on console-enabled dumps switch themselves off.
     btstack_run_loop_set_timer_handler(&s_heartbeat_timer, &onHeartbeat);
@@ -982,6 +996,10 @@ void BleHidHost::stopScan() {
 
 bool BleHidHost::isScanning() {
     return s_is_scanning;
+}
+
+bool BleHidHost::isConnecting() {
+    return s_is_connecting || s_eviction_pending;
 }
 
 void BleHidHost::startPairingMode(uint32_t timeout_ms) {
@@ -1543,10 +1561,10 @@ void BleHidHost::gattPacketHandler(uint8_t packet_type, uint16_t channel, uint8_
                     // devices (touchpads, and mice without a keyboard report) stay at it: at 30 ms a
                     // touchpad reports its fingers only ~33 times a second, which makes the pointer lag.
                     bool pointing = slot->has_ptp || (slot->has_mouse_report && !slot->has_keyboard_layout);
-                    if (slot->min_conn_interval == 0 && slot->conn_interval == SETUP_CONN_INTERVAL) {
+                    if (slot->min_conn_interval == 0 && slot->conn_interval == slot->setup_interval) {
                         if (pointing) {
                             printf("[BLE Host] Slot %u: setup done, pointing device stays at %.2f ms\n",
-                                   slot->dev_idx, SETUP_CONN_INTERVAL * 1.25f);
+                                   slot->dev_idx, slot->conn_interval * 1.25f);
                         } else {
                             int param_status = gap_update_connection_parameters(
                                 slot->con_handle, DEFAULT_CONN_INTERVAL_MIN, DEFAULT_CONN_INTERVAL_MAX, 0, 400);
@@ -2140,14 +2158,31 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             uint8_t status = hci_event_command_status_get_status(packet);
             if (status == ERROR_CODE_SUCCESS || !s_is_connecting) break;
             btstack_run_loop_remove_timer(&s_reconnect_timer);
-            printf("[BLE Host] Controller rejected the connection (status 0x%02X). Resuming scan...\n", status);
+            bd_addr_t addr = {0};
+            bd_addr_type_t addr_type = BD_ADDR_TYPE_LE_PUBLIC;
+            char name[sizeof(s_slots[0].name)] = "";
             if (s_connecting_slot_idx >= 0 && s_connecting_slot_idx < MAX_BLE_DEVICES) {
-                reset_slot(&s_slots[s_connecting_slot_idx]);
+                BleSlot *slot = &s_slots[s_connecting_slot_idx];
+                bd_addr_copy(addr, slot->addr);
+                addr_type = slot->addr_type;
+                memcpy(name, slot->name, sizeof(name));
+                reset_slot(slot);
             }
             s_is_connecting = false;
             s_connecting_slot_idx = -1;
             s_is_scanning = false;
             s_eviction_pending = false;
+            // The interval may be too short for the links already up (see s_setup_interval).
+            if (status == ERROR_CODE_CONNECTION_REJECTED_DUE_TO_LIMITED_RESOURCES && name[0] != '\0' &&
+                s_setup_interval < DEFAULT_CONN_INTERVAL_MAX) {
+                printf("[BLE Host] Controller rejected the connection at %.2f ms (status 0x%02X). Trying %.2f ms...\n",
+                       s_setup_interval * 1.25f, status, (s_setup_interval + 1) * 1.25f);
+                set_setup_interval(s_setup_interval + 1);
+                connectToDevice(addr, addr_type, name);
+                break;
+            }
+            printf("[BLE Host] Controller rejected the connection (status 0x%02X). Resuming scan...\n", status);
+            set_setup_interval(SETUP_CONN_INTERVAL);
             tryAutoReconnectOrScan();
             break;
         }
@@ -2197,6 +2232,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     s_connecting_slot_idx = -1;
                     s_is_scanning = false;
                     s_eviction_pending = false;
+                    set_setup_interval(SETUP_CONN_INTERVAL);
                     tryAutoReconnectOrScan();
                     break;
                 }
@@ -2224,6 +2260,8 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     uint16_t latency = gap_subevent_le_connection_complete_get_conn_latency(packet);
                     slot->conn_interval = interval;
                     slot->conn_latency = latency;
+                    slot->setup_interval = interval;
+                    if (s_setup_interval != SETUP_CONN_INTERVAL) set_setup_interval(SETUP_CONN_INTERVAL);
                     printf("[BLE Host] LE Connection established for '%s' (slot %u, handle 0x%04X, interval %.2f ms, latency %u). Scheduling security in 200ms...\n",
                            slot->name, slot->dev_idx, handle, interval * 1.25f, latency);
                     s_pending_pairing_handle = handle;
@@ -2255,6 +2293,13 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 uint16_t timeout = hci_subevent_le_connection_update_complete_get_supervision_timeout(packet);
                 hci_con_handle_t handle = hci_subevent_le_connection_update_complete_get_connection_handle(packet);
                 BleSlot *slot = find_slot_by_handle(handle);
+                uint8_t update_status = hci_subevent_le_connection_update_complete_get_status(packet);
+                if (update_status != ERROR_CODE_SUCCESS) {
+                    // The parameters in a failed update's event are not the link's.
+                    printf("[BLE Host] Connection parameter update failed (slot %u): status 0x%02X\n",
+                           slot ? slot->dev_idx : 0xFF, update_status);
+                    break;
+                }
                 if (slot) {
                     slot->conn_interval = interval;
                     slot->conn_latency = latency;

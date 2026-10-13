@@ -229,7 +229,9 @@ static void on_keymap_save_check(btstack_timer_source_t *ts) {
 static void on_scan_check(btstack_timer_source_t *ts) {
     {
         StageScope stage(STAGE_TIMER);
-        if ((BleHidHost::hasUnconnectedBonds() || BleHidHost::isPairingMode()) && !BleHidHost::isScanning()) {
+        // Scanning is off while a connection is being made; restarting it would cancel the connection.
+        if ((BleHidHost::hasUnconnectedBonds() || BleHidHost::isPairingMode()) && !BleHidHost::isScanning() &&
+            !BleHidHost::isConnecting()) {
             BleHidHost::startScan();
         }
     }
