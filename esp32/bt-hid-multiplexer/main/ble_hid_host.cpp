@@ -45,6 +45,7 @@ struct BleSlot {
                                 // (1.25 ms units, 0 = none yet); setup_interval does not count
     uint16_t conn_latency;      // last reported slave latency
     uint16_t setup_interval;    // the interval the connection was made with (see s_setup_interval)
+    bool speedup_done;          // a pointer speed-up was tried or not needed (see note_pointer_motion)
     uint8_t latency_forced;     // how often parameter optimization was requested on this connection
     btstack_timer_source_t latency_timer; // delays parameter optimization past the peer's settling window
     btstack_timer_source_t name_timer;    // delays the GAP Device Name read (see schedule_name_read)
@@ -114,6 +115,20 @@ static void set_setup_interval(uint16_t interval) {
     // 30 ms scan window/interval while connecting, 4 s supervision timeout.
     gap_set_connection_parameters(48, 48, interval, interval, 0, 400, 0, 0);
 }
+
+// A device that moves the pointer is sped up, whatever its report descriptor says: a trackball with a
+// keyboard report too (the Keychron Nape Pro) is moved to the slow DEFAULT_CONN_INTERVAL range after
+// setup, and at 30 ms the pointer lags badly. The first pointer movement asks for the shortest
+// interval the controller accepts: it refuses LE Connection Update below what fits next to the other
+// links (Command Status 0x12; with three links, 13.75 ms), so the request starts at
+// SETUP_CONN_INTERVAL and is made one step (1.25 ms) slower after each refusal. Dials, whose mouse
+// reports only turn the wheel, stay slow. One device at a time, so that a refusal is known to be about
+// its request; once the controller has accepted that, later refusals are not counted against it.
+#define SPEEDUP_TIMEOUT_MS 2000
+static int8_t s_speedup_slot = -1;        // the slot being sped up, or -1
+static uint16_t s_speedup_interval = 0;   // the interval last asked for it
+static bool s_speedup_accepted = false;   // the controller accepted that request (Command Status 0)
+static btstack_timer_source_t s_speedup_timer;
 
 // How long after the HID service comes up an empty report is not taken for a chord mode device's
 // idle button (see chord_mode.h).
@@ -1510,8 +1525,57 @@ void BleHidHost::unbond(uint8_t idx) {
            idx, name, bd_addr_to_str(target_addr), s_bonded_table.count);
 }
 
-// Applies sensitivity scaling with fractional remainder accumulation to avoid dropping sub-count movements
+static void speedup_finished() {
+    btstack_run_loop_remove_timer(&s_speedup_timer);
+    if (s_speedup_slot >= 0) s_slots[s_speedup_slot].speedup_done = true;
+    s_speedup_slot = -1;
+}
+
+static void onSpeedupTimeout(btstack_timer_source_t *ts) {
+    (void)ts;
+    printf("[BLE Host] Pointer speed-up got no answer; giving up.\n");
+    speedup_finished();
+}
+
+static void request_speedup() {
+    BleSlot *slot = &s_slots[s_speedup_slot];
+    s_speedup_accepted = false;
+    int status = gap_update_connection_parameters(slot->con_handle, s_speedup_interval, s_speedup_interval, 0, 400);
+    printf("[BLE Host] Slot %u moves the pointer: asking for %.2f ms (status %d)\n",
+           slot->dev_idx, s_speedup_interval * 1.25f, status);
+    btstack_run_loop_remove_timer(&s_speedup_timer);
+    btstack_run_loop_set_timer_handler(&s_speedup_timer, &onSpeedupTimeout);
+    btstack_run_loop_set_timer(&s_speedup_timer, SPEEDUP_TIMEOUT_MS);
+    btstack_run_loop_add_timer(&s_speedup_timer);
+}
+
+// The controller refused the interval asked for: try one step slower, while still faster than now.
+static void speedup_refused() {
+    BleSlot *slot = &s_slots[s_speedup_slot];
+    if (++s_speedup_interval < slot->conn_interval && slot->con_handle != HCI_CON_HANDLE_INVALID) {
+        request_speedup();
+    } else {
+        printf("[BLE Host] Slot %u stays at %.2f ms.\n", slot->dev_idx, slot->conn_interval * 1.25f);
+        speedup_finished();
+    }
+}
+
+static void note_pointer_motion(BleSlot *slot, int16_t dx, int16_t dy) {
+    if ((dx == 0 && dy == 0) || slot->speedup_done || !slot->connected || s_speedup_slot >= 0) return;
+    if (slot->conn_interval <= SETUP_CONN_INTERVAL) {
+        slot->speedup_done = true;
+        return;
+    }
+    s_speedup_slot = (int8_t)slot->dev_idx;
+    s_speedup_interval = SETUP_CONN_INTERVAL;
+    request_speedup();
+}
+
+// Applies sensitivity scaling with fractional remainder accumulation to avoid dropping sub-count
+// movements. Every pointer movement of a mouse report passes through here, so it also notes the
+// movement for note_pointer_motion().
 static inline void scale_mouse_delta(BleSlot *slot, int16_t &dx, int16_t &dy) {
+    if (slot) note_pointer_motion(slot, dx, dy);
     if (slot && slot->mouse_speed_percent != 100) {
         int32_t scaled_x = (int32_t)dx * slot->mouse_speed_percent + slot->scale_rem_x;
         dx = (int16_t)(scaled_x / 100);
@@ -2154,6 +2218,16 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             // without emitting GAP_SUBEVENT_LE_CONNECTION_COMPLETE, and gap_connect_cancel() then has
             // nothing to cancel. Without this the connecting state would never be cleared and no
             // device could connect again until a reboot.
+            if (hci_event_command_status_get_command_opcode(packet) == HCI_OPCODE_HCI_LE_CONNECTION_UPDATE) {
+                if (s_speedup_slot >= 0 && !s_speedup_accepted) {
+                    if (hci_event_command_status_get_status(packet) == ERROR_CODE_SUCCESS) {
+                        s_speedup_accepted = true;
+                    } else {
+                        speedup_refused();
+                    }
+                }
+                break;
+            }
             if (hci_event_command_status_get_command_opcode(packet) != HCI_OPCODE_HCI_LE_CREATE_CONNECTION) break;
             uint8_t status = hci_event_command_status_get_status(packet);
             if (status == ERROR_CODE_SUCCESS || !s_is_connecting) break;
@@ -2197,6 +2271,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
             if (slot) {
                 Multiplexer::purgeKeyboard(slot->dev_idx);
                 Multiplexer::purgeMouse(slot->dev_idx);
+                if (s_speedup_slot == (int8_t)slot->dev_idx) speedup_finished();  // before the slot is cleared
                 reset_slot(slot);
             }
 
@@ -2298,6 +2373,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     // The parameters in a failed update's event are not the link's.
                     printf("[BLE Host] Connection parameter update failed (slot %u): status 0x%02X\n",
                            slot ? slot->dev_idx : 0xFF, update_status);
+                    if (slot && s_speedup_slot == (int8_t)slot->dev_idx) speedup_finished();
                     break;
                 }
                 if (slot) {
@@ -2318,6 +2394,7 @@ void BleHidHost::packetHandler(uint8_t packet_type, uint16_t channel, uint8_t *p
                     scheduleZeroLatency(slot);
                 }
 #endif
+                if (slot && s_speedup_slot == (int8_t)slot->dev_idx) speedup_finished();
             }
             break;
         }
