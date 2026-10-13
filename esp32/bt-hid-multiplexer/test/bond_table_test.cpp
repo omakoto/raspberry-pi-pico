@@ -1,5 +1,6 @@
 // Host-side test of main/bond_table.cpp: loading the stored bonded device table (including the
-// conversion from the format without last_used), and which device makes room in a full table.
+// conversions from the 8-device format and the format without last_used), and which device makes
+// room in a full table.
 #include <stdio.h>
 #include <string.h>
 #include "bond_table.h"
@@ -32,7 +33,7 @@ static bool is_empty(const BondedTable &t) {
 }
 
 int main() {
-    const bool none_connected[MAX_BLE_DEVICES] = {};
+    const bool none_connected[MAX_BONDED_DEVICES] = {};
 
     // A table in the current format loads as it is.
     {
@@ -43,8 +44,39 @@ int main() {
         CHECK(memcmp(&t, &stored, sizeof(t)) == 0);
         CHECK(bond_table_max_last_used(t) == 9);
 
-        stored.count = MAX_BLE_DEVICES + 1;  // corrupt
+        stored.count = MAX_BONDED_DEVICES + 1;  // corrupt
         CHECK(bond_table_decode(&stored, sizeof(stored), &t) == BondTableLoad::INVALID && is_empty(t));
+    }
+
+    // A table stored when it held 8 devices is converted, byte for byte as that firmware laid it
+    // out: a count byte, padding, then 8 records in the current 48-byte layout.
+    {
+        uint8_t v2[sizeof(BondedTableV2)] = {};
+        CHECK(sizeof(v2) == 4 + 8 * 48);
+        v2[0] = 8;
+        for (uint8_t i = 0; i < 8; i++) {
+            uint8_t *r = v2 + 4 + i * 48;
+            addr_of(i, r);
+            r[8] = (uint8_t)(i % 2);  // address type, little-endian
+            snprintf((char *)r + 12, 32, "Eight %u", i);
+            r[44] = (uint8_t)(100 - i);  // last_used, little-endian
+        }
+        BondedTable t;
+        CHECK(bond_table_decode(v2, sizeof(v2), &t) == BondTableLoad::CONVERTED);
+        CHECK(t.count == 8);
+        for (uint8_t i = 0; i < 8; i++) {
+            CHECK(t.records[i].addr[5] == i && t.records[i].addr_type == i % 2u);
+            CHECK(t.records[i].last_used == 100u - i);
+        }
+        CHECK(strcmp(t.records[3].name, "Eight 3") == 0);
+        static const BondedDeviceRecord zero = {};
+        for (uint8_t i = 8; i < MAX_BONDED_DEVICES; i++) {
+            CHECK(memcmp(&t.records[i], &zero, sizeof(zero)) == 0);
+        }
+        CHECK(bond_table_max_last_used(t) == 100);
+
+        v2[0] = 9;  // corrupt
+        CHECK(bond_table_decode(v2, sizeof(v2), &t) == BondTableLoad::INVALID && is_empty(t));
     }
 
     // A table stored by the firmware before last_used existed is converted, byte for byte as that
@@ -76,7 +108,7 @@ int main() {
         CHECK(strlen(t.records[7].name) == 31);
         CHECK(bond_table_max_last_used(t) == 8);
 
-        v1[0] = MAX_BLE_DEVICES + 1;  // corrupt
+        v1[0] = 9;  // corrupt
         CHECK(bond_table_decode(v1, sizeof(v1), &t) == BondTableLoad::INVALID && is_empty(t));
     }
 
@@ -107,12 +139,12 @@ int main() {
         const uint32_t used[8] = {40, 20, 70, 10, 80, 30, 60, 50};
         BondedTable t = make_table(8, used);
         CHECK(bond_table_pick_eviction(t, none_connected) == 3);
-        bool connected[MAX_BLE_DEVICES] = {};
+        bool connected[MAX_BONDED_DEVICES] = {};
         connected[3] = true;
         CHECK(bond_table_pick_eviction(t, connected) == 1);
         connected[1] = connected[5] = connected[0] = true;
         CHECK(bond_table_pick_eviction(t, connected) == 7);  // 50: the oldest of those not connected
-        for (bool &c : connected) c = true;
+        for (uint8_t i = 0; i < 8; i++) connected[i] = true;
         CHECK(bond_table_pick_eviction(t, connected) == 3);  // all connected: the oldest anyway
         connected[6] = false;
         CHECK(bond_table_pick_eviction(t, connected) == 6);  // the only one not connected
@@ -153,24 +185,27 @@ int main() {
 
         // A full table: the least recently used device not connected makes room, and the caller
         // gets its record to remove its keys.
-        for (uint8_t i = 3; i <= MAX_BLE_DEVICES; i++) {
+        // The table holds more devices than can be connected at once.
+        CHECK(MAX_BONDED_DEVICES > MAX_BLE_DEVICES);
+        for (uint8_t i = 3; i <= MAX_BONDED_DEVICES; i++) {
             addr_of(i, addr);
-            bond_table_upsert(t, addr, 0, "More", "fallback", true, seq, none_connected);
+            r = bond_table_upsert(t, addr, 0, "More", "fallback", true, seq, none_connected);
+            CHECK(r.added && !r.evicted);
         }
-        CHECK(t.count == MAX_BLE_DEVICES);
-        // Records 0..7 were last used at 3, 2, 4..9; record 1 (address 2) is the oldest.
-        bool connected[MAX_BLE_DEVICES] = {};
+        CHECK(t.count == MAX_BONDED_DEVICES);
+        // Records 0, 1, 2.. were last used at 3, 2, 4..; record 1 (address 2) is the oldest.
+        bool connected[MAX_BONDED_DEVICES] = {};
         connected[1] = true;
-        addr_of(9, addr);
-        r = bond_table_upsert(t, addr, 0, "Ninth", "fallback", true, seq, connected);
+        addr_of(200, addr);
+        r = bond_table_upsert(t, addr, 0, "One more", "fallback", true, seq, connected);
         CHECK(r.added && r.evicted && r.index == 0);  // address 1, since address 2 is connected
         CHECK(r.evicted_record.addr[5] == 1 && strcmp(r.evicted_record.name, "Renamed") == 0);
-        CHECK(t.count == MAX_BLE_DEVICES && t.records[0].addr[5] == 9);
-        CHECK(strcmp(t.records[0].name, "Ninth") == 0 && t.records[0].last_used == seq);
+        CHECK(t.count == MAX_BONDED_DEVICES && t.records[0].addr[5] == 200);
+        CHECK(strcmp(t.records[0].name, "One more") == 0 && t.records[0].last_used == seq);
         CHECK(bond_table_max_last_used(t) == seq);
         // The device just added is the most recently used, so it is not the next to go.
-        addr_of(10, addr);
-        r = bond_table_upsert(t, addr, 0, "Tenth", "fallback", true, seq, none_connected);
+        addr_of(201, addr);
+        r = bond_table_upsert(t, addr, 0, "Another", "fallback", true, seq, none_connected);
         CHECK(r.evicted && r.evicted_record.addr[5] == 2 && r.index == 1);
     }
 

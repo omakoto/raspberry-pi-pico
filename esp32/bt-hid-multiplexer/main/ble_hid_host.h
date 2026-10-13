@@ -20,6 +20,8 @@ public:
     static uint8_t getBondedCount();
     // Address and name of bonded device idx (0 .. getBondedCount() - 1).
     static bool getBondedDevice(uint8_t idx, uint8_t addr[6], char *name, size_t name_size);
+    // When bonded device idx last connected (higher = more recent; 0 = not since it was recorded).
+    static uint32_t getBondedLastUsed(uint8_t idx);
     // Whether the device with this address is bonded, and if so its name.
     static bool findBondedDevice(const uint8_t addr[6], char *name, size_t name_size);
     static bool hasUnconnectedBonds();

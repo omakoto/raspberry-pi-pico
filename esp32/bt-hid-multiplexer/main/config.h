@@ -51,8 +51,12 @@
 #define USB_PID                 0x4004
 #define USB_PID_STR             "0x4004"
 
-// Multi-device limits
+// Multi-device limits: how many devices can be connected at once, and how many paired devices are
+// remembered. Pairing a device beyond MAX_BONDED_DEVICES drops the least recently used pairing.
+// BTstack's limits must match (MAX_NR_HCI_CONNECTIONS etc. and NVM_NUM_DEVICE_DB_ENTRIES in
+// components/btstack/include/btstack_config.h).
 #define MAX_BLE_DEVICES         8
+#define MAX_BONDED_DEVICES      32
 #define MAX_KEYBOARDS           MAX_BLE_DEVICES
 #define MAX_MICE                MAX_BLE_DEVICES
 
@@ -159,8 +163,8 @@
 // there, and a device paired again gets its layer back), up to this many; the ones unpaired longest
 // ago are dropped first.
 #define MAX_UNPAIRED_BINDINGS   8
-// Enough for every paired device (MAX_BLE_DEVICES) plus the unpaired ones.
-#define MAX_DEVICE_BINDINGS     (MAX_BLE_DEVICES + MAX_UNPAIRED_BINDINGS)
+// Enough for every paired device (MAX_BONDED_DEVICES) plus the unpaired ones.
+#define MAX_DEVICE_BINDINGS     (MAX_BONDED_DEVICES + MAX_UNPAIRED_BINDINGS)
 #define FLASH_KEYMAP_MAGIC      0x5649414C // 'VIAL'
 // Bump when the keymap layout (layers, matrix size, keycode meaning) changes; old data is discarded
 // unless StorageManager::loadKeymap converts it. Version 5 had no touchpad gestures: its gesture keys

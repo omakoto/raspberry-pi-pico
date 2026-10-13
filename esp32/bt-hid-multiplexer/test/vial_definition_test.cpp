@@ -1,5 +1,5 @@
 // Host-side test of main/vial_definition.cpp: the layout option packing (which must match VIAL's),
-// and the runtime keyboard definition. The definitions' .xz streams are written to the files given as
+// which paired devices get a dropdown, and the runtime keyboard definition. The definitions' .xz streams are written to the files given as
 // the arguments (a typical one, then the largest one); run-host-test.sh checks them with Python's
 // lzma and json modules, which is what VIAL itself uses to read them.
 #include <stdio.h>
@@ -34,6 +34,33 @@ int main(int argc, char **argv) {
     // Checkboxes alone.
     vial_unpack_layout_options(0b101, 0, nullptr, 3, flags_back);
     CHECK(flags_back[0] && !flags_back[1] && flags_back[2]);
+
+    // Up to 8 paired devices all get a dropdown, in pairing order.
+    {
+        const uint32_t used[3] = {5, 9, 1};
+        const bool bound[3] = {};
+        uint8_t picked[8];
+        CHECK(vial_pick_devices(used, bound, 3, picked) == 3);
+        CHECK(picked[0] == 0 && picked[1] == 1 && picked[2] == 2);
+        CHECK(vial_pick_devices(used, bound, 0, picked) == 0);
+    }
+    // With more, the bound devices come first, then the most recently used; still in pairing order.
+    {
+        uint32_t used[12];
+        bool bound[12] = {};
+        for (int i = 0; i < 12; i++) used[i] = 100 + i;  // the last ones are the most recent
+        bound[0] = bound[2] = true;  // bound, but used long ago
+        used[5] = 0;                 // found without metadata: never picked over a used one
+        uint8_t picked[8];
+        CHECK(vial_pick_devices(used, bound, 12, picked) == 8);
+        const uint8_t want[8] = {0, 2, 6, 7, 8, 9, 10, 11};
+        CHECK(memcmp(picked, want, 8) == 0);
+        // More bound devices than dropdowns: the most recently used of them.
+        for (int i = 0; i < 12; i++) bound[i] = (i != 11);
+        CHECK(vial_pick_devices(used, bound, 12, picked) == 8);
+        const uint8_t want_bound[8] = {2, 3, 4, 6, 7, 8, 9, 10};
+        CHECK(memcmp(picked, want_bound, 8) == 0);
+    }
 
     // Too small an output buffer is refused rather than overrun.
     uint8_t tiny[16];

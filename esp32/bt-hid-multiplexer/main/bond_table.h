@@ -23,7 +23,13 @@ struct BondedDeviceRecord {
 
 struct BondedTable {
     uint8_t count;
-    BondedDeviceRecord records[MAX_BLE_DEVICES];
+    BondedDeviceRecord records[MAX_BONDED_DEVICES];
+};
+
+// The table as stored when it held only 8 devices (one per connection). Converted when loaded.
+struct BondedTableV2 {
+    uint8_t count;
+    BondedDeviceRecord records[8];
 };
 
 // The record and table as stored before last_used existed (the table under the "HOGT" tag, and a
@@ -36,19 +42,20 @@ struct BondedDeviceRecordV1 {
 
 struct BondedTableV1 {
     uint8_t count;
-    BondedDeviceRecordV1 records[MAX_BLE_DEVICES];
+    BondedDeviceRecordV1 records[8];
 };
 
 // The stored sizes tell the versions apart, and stored data must keep loading, so they are pinned.
 static_assert(sizeof(BondedDeviceRecord) == 48, "stored layout changed");
 static_assert(sizeof(BondedDeviceRecordV1) == 44, "stored layout changed");
-static_assert(MAX_BLE_DEVICES != 8 || (sizeof(BondedTable) == 388 && sizeof(BondedTableV1) == 356),
-              "stored layout changed");
+static_assert(sizeof(BondedTableV2) == 388 && sizeof(BondedTableV1) == 356, "stored layout changed");
+static_assert(MAX_BONDED_DEVICES != 32 || sizeof(BondedTable) == 1540, "stored layout changed");
+static_assert(MAX_BONDED_DEVICES >= 8, "older tables must fit");
 
 enum class BondTableLoad {
     INVALID,    // not a table of a known version; out is empty
     CURRENT,    // stored in the current format
-    CONVERTED,  // stored in the v1 format and converted; should be saved again
+    CONVERTED,  // stored in an older format and converted; should be saved again
 };
 
 // Decodes a stored table of len bytes into out. A v1 table has no usage order, so its records get
@@ -63,7 +70,7 @@ uint32_t bond_table_max_last_used(const BondedTable &table);
 
 // The record to drop to make room in a full table: the least recently used one, preferring a device
 // that is not connected (connected[i] tells whether record i's device is). -1 for an empty table.
-int bond_table_pick_eviction(const BondedTable &table, const bool connected[MAX_BLE_DEVICES]);
+int bond_table_pick_eviction(const BondedTable &table, const bool connected[MAX_BONDED_DEVICES]);
 
 // What bond_table_upsert() did.
 struct BondUpsertResult {
@@ -80,6 +87,6 @@ struct BondUpsertResult {
 // removes the evicted device's keys. last_use_seq is the highest last_used handed out so far.
 BondUpsertResult bond_table_upsert(BondedTable &table, const uint8_t addr[6], uint32_t addr_type,
                                    const char *name, const char *fallback_name, bool connected,
-                                   uint32_t &last_use_seq, const bool device_connected[MAX_BLE_DEVICES]);
+                                   uint32_t &last_use_seq, const bool device_connected[MAX_BONDED_DEVICES]);
 
 #endif // BOND_TABLE_H_

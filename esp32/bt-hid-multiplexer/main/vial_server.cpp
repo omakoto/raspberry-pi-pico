@@ -57,7 +57,6 @@ bool VialServer::bootloader_requested_ = false;
 // layout options that VIAL then reads and writes refer to s_devices and s_unpaired, the devices
 // listed in that definition, so a bond or binding added or removed in the meantime does not shift
 // the options.
-static_assert(VIAL_MAX_DEVICE_OPTIONS >= MAX_BLE_DEVICES, "every bonded device needs a dropdown");
 static_assert(VIAL_MAX_UNPAIRED_OPTIONS >= MAX_UNPAIRED_BINDINGS, "every unpaired binding needs a checkbox");
 static VialDeviceEntry s_devices[VIAL_MAX_DEVICE_OPTIONS];
 static uint8_t s_device_count = 0;
@@ -67,11 +66,22 @@ static uint8_t s_definition[6400];
 static size_t s_definition_size = 0;
 
 static void rebuild_definition() {
-    s_device_count = 0;
+    // More devices can be paired than VIAL has dropdowns for; vial_pick_devices() chooses.
     uint8_t bonded = BleHidHost::getBondedCount();
-    for (uint8_t i = 0; i < bonded && s_device_count < VIAL_MAX_DEVICE_OPTIONS; i++) {
+    uint32_t last_used[MAX_BONDED_DEVICES];
+    bool bound[MAX_BONDED_DEVICES];
+    for (uint8_t i = 0; i < bonded; i++) {
+        VialDeviceEntry e;
+        BleHidHost::getBondedDevice(i, e.addr, e.name, sizeof(e.name));
+        last_used[i] = BleHidHost::getBondedLastUsed(i);
+        bound[i] = DeviceBindings::layerForAddress(e.addr) != DeviceBindings::NO_LAYER;
+    }
+    uint8_t picked[VIAL_MAX_DEVICE_OPTIONS];
+    uint8_t picked_count = vial_pick_devices(last_used, bound, bonded, picked);
+    s_device_count = 0;
+    for (uint8_t i = 0; i < picked_count; i++) {
         VialDeviceEntry &e = s_devices[s_device_count];
-        if (BleHidHost::getBondedDevice(i, e.addr, e.name, sizeof(e.name))) s_device_count++;
+        if (BleHidHost::getBondedDevice(picked[i], e.addr, e.name, sizeof(e.name))) s_device_count++;
     }
     s_unpaired_count = 0;
     DeviceBindingEntry b;

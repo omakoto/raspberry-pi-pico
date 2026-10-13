@@ -18,7 +18,17 @@ struct BindingsBlob {
     DeviceBindingEntry entries[MAX_DEVICE_BINDINGS];
 };
 
-static const uint16_t BINDINGS_VERSION = 2;
+static const uint16_t BINDINGS_VERSION = 3;
+
+// Version 2: the current entries, but only 16 of them (8 paired devices and 8 unpaired bindings).
+// Read once and converted.
+struct BindingsBlobV2 {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    DeviceBindingEntry entries[16];
+};
+static_assert(MAX_DEVICE_BINDINGS >= 16, "version 2 bindings must fit");
 
 // Version 1: 8 entries of address, layer and used, without names. Read once and converted.
 struct BindingEntryV1 {
@@ -37,7 +47,8 @@ static_assert(MAX_DEVICE_BINDINGS >= 8, "version 1 bindings must fit");
 // Stored data must keep loading, so the layouts are pinned.
 static_assert(sizeof(DeviceBindingEntry) == 44, "stored layout changed");
 static_assert(sizeof(BindingsBlobV1) == 72, "stored layout changed");
-static_assert(MAX_DEVICE_BINDINGS != 16 || sizeof(BindingsBlob) == 712, "stored layout changed");
+static_assert(sizeof(BindingsBlobV2) == 712, "stored layout changed");
+static_assert(MAX_DEVICE_BINDINGS != 40 || sizeof(BindingsBlob) == 1768, "stored layout changed");
 
 // Decodes a stored blob of len bytes into entries. Returns false if it is not a bindings blob of a
 // known version. needs_save is set when it was in an older version, converted, and should be stored

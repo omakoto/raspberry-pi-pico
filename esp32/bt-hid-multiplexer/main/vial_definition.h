@@ -13,7 +13,8 @@
 //
 // VIAL reads and writes all of them as one 32-bit "layout options" value (VIA keyboard value 0x02),
 // with as many bits per option as its choices need: 3 per dropdown and 1 per checkbox. 8 dropdowns
-// and 8 checkboxes use all 32 bits.
+// and 8 checkboxes use all 32 bits, so when more devices are paired, only 8 of them get a dropdown
+// (see vial_pick_devices()).
 
 // Paired devices listed in the definition, in dropdown order.
 #define VIAL_MAX_DEVICE_OPTIONS 8
@@ -29,6 +30,12 @@ struct VialDeviceEntry {
     char name[32];
     uint8_t layer;  // unpaired bindings only: the layer the device is bound to
 };
+
+// Picks the paired devices that get a dropdown when there are more than VIAL_MAX_DEVICE_OPTIONS:
+// the devices bound to a layer first, so that their bindings can always be seen and changed, then
+// the most recently used ones (last_used[i]: higher = more recent). Writes the picked indices to
+// picked, in ascending order so that the dropdowns stay in pairing order, and returns how many.
+uint8_t vial_pick_devices(const uint32_t *last_used, const bool *bound, uint8_t count, uint8_t *picked);
 
 // Builds the definition (JSON with one dropdown per paired device and one checkbox per unpaired
 // binding) and wraps it in an .xz stream, which is what VIAL expects. Returns the size written to

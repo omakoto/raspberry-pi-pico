@@ -7,14 +7,22 @@ BondTableLoad bond_table_decode(const void *data, int len, BondedTable *out) {
     if (len == (int)sizeof(BondedTable)) {
         BondedTable t;
         memcpy(&t, data, sizeof(t));
-        if (t.count > MAX_BLE_DEVICES) return BondTableLoad::INVALID;
+        if (t.count > MAX_BONDED_DEVICES) return BondTableLoad::INVALID;
         *out = t;
         return BondTableLoad::CURRENT;
+    }
+    if (len == (int)sizeof(BondedTableV2)) {
+        BondedTableV2 v2;
+        memcpy(&v2, data, sizeof(v2));
+        if (v2.count > 8) return BondTableLoad::INVALID;
+        out->count = v2.count;
+        memcpy(out->records, v2.records, sizeof(v2.records));
+        return BondTableLoad::CONVERTED;
     }
     if (len == (int)sizeof(BondedTableV1)) {
         BondedTableV1 v1;
         memcpy(&v1, data, sizeof(v1));
-        if (v1.count > MAX_BLE_DEVICES) return BondTableLoad::INVALID;
+        if (v1.count > 8) return BondTableLoad::INVALID;
         out->count = v1.count;
         for (uint8_t i = 0; i < v1.count; i++) {
             bond_record_from_v1(&out->records[i], v1.records[i], i + 1u);
@@ -41,7 +49,7 @@ uint32_t bond_table_max_last_used(const BondedTable &table) {
     return max;
 }
 
-int bond_table_pick_eviction(const BondedTable &table, const bool connected[MAX_BLE_DEVICES]) {
+int bond_table_pick_eviction(const BondedTable &table, const bool connected[MAX_BONDED_DEVICES]) {
     int victim = -1;
     for (uint8_t i = 0; i < table.count; i++) {
         if (victim < 0) {
@@ -57,7 +65,7 @@ int bond_table_pick_eviction(const BondedTable &table, const bool connected[MAX_
 
 BondUpsertResult bond_table_upsert(BondedTable &table, const uint8_t addr[6], uint32_t addr_type,
                                    const char *name, const char *fallback_name, bool connected,
-                                   uint32_t &last_use_seq, const bool device_connected[MAX_BLE_DEVICES]) {
+                                   uint32_t &last_use_seq, const bool device_connected[MAX_BONDED_DEVICES]) {
     BondUpsertResult result = {};
     bool has_name = name != nullptr && name[0] != '\0';
     for (uint8_t i = 0; i < table.count; i++) {
@@ -70,7 +78,7 @@ BondUpsertResult bond_table_upsert(BondedTable &table, const uint8_t addr[6], ui
         return result;
     }
 
-    if (table.count < MAX_BLE_DEVICES) {
+    if (table.count < MAX_BONDED_DEVICES) {
         result.index = table.count++;
     } else {
         result.index = bond_table_pick_eviction(table, device_connected);

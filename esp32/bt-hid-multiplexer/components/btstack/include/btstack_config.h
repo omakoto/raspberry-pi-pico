@@ -39,7 +39,7 @@
 #define MAX_NR_L2CAP_SERVICES 8
 #define MAX_NR_SM_LOOKUP_ENTRIES 8
 #define MAX_NR_WHITELIST_ENTRIES 8
-#define MAX_NR_LE_DEVICE_DB_ENTRIES 16
+#define MAX_NR_LE_DEVICE_DB_ENTRIES 32
 
 // HCI buffers. BLE needs no BR/EDR-sized ACL payloads; this allows 251-byte LE data length packets.
 #define HCI_ACL_PAYLOAD_SIZE (255 + 4)
@@ -52,8 +52,9 @@
 #define HCI_HOST_SCO_PACKET_LEN 0
 #define HCI_HOST_SCO_PACKET_NUM 0
 
-// Bonding storage (TLV in NVS, namespace "BTstack")
-#define NVM_NUM_DEVICE_DB_ENTRIES 16
+// Bonding storage (TLV in NVS, namespace "BTstack"): one entry per remembered pairing
+// (MAX_BONDED_DEVICES in main/config.h).
+#define NVM_NUM_DEVICE_DB_ENTRIES 32
 #define MAX_ATT_DB_SIZE 512
 
 // Security and cryptography

@@ -78,7 +78,7 @@ static bool fake_address(uint8_t dev_idx, uint8_t addr[6]) {
 // extra addresses 00:00:00:00:01:i (devices that are not connected) as "Extra i" while
 // g_paired_extra[i] is set.
 static bool g_paired_dev[MAX_KEYBOARDS];
-static bool g_paired_extra[32];
+static bool g_paired_extra[64];
 static char g_dev_name[MAX_KEYBOARDS][32];
 static bool fake_paired(const uint8_t addr[6], char *name, size_t name_size) {
     if (addr[0] || addr[1] || addr[2] || addr[3]) return false;
@@ -86,7 +86,7 @@ static bool fake_paired(const uint8_t addr[6], char *name, size_t name_size) {
         snprintf(name, name_size, "%s", g_dev_name[addr[5] - 1]);
         return true;
     }
-    if (addr[4] == 1 && addr[5] < 32 && g_paired_extra[addr[5]]) {
+    if (addr[4] == 1 && addr[5] < 64 && g_paired_extra[addr[5]]) {
         snprintf(name, name_size, "Extra %u", addr[5]);
         return true;
     }
@@ -1385,15 +1385,15 @@ int main() {
         CHECK(DeviceBindings::layerForAddress(addr) == DeviceBindings::NO_LAYER);
 
         // Unpairing several at once (clearing all bonds) keeps the cap too.
-        for (uint8_t i = 0; i < 8; i++) {
+        for (uint8_t i = 0; i < MAX_BONDED_DEVICES; i++) {
             g_paired_extra[21 + i] = true;
             extra_addr(21 + i, addr);
             CHECK(DeviceBindings::bindAddress(addr, 4));
         }
         CHECK(DeviceBindings::entryCount() == MAX_DEVICE_BINDINGS);
-        // With 8 paired and 8 unpaired bindings the table is full.
-        g_paired_extra[30] = true;
-        extra_addr(30, addr);
+        // With every bonded device and MAX_UNPAIRED_BINDINGS unpaired ones bound, the table is full.
+        g_paired_extra[60] = true;
+        extra_addr(60, addr);
         CHECK(!DeviceBindings::bindAddress(addr, 4));
         memset(g_paired_extra, 0, sizeof(g_paired_extra));
         DeviceBindings::pairingChanged();

@@ -16,8 +16,8 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
 ## Features
 
 - **BLE Central / HOGP host:** keyboards, mice and keyboard+trackpad combos (HID over GATT), up to 8 at
-  once (`MAX_BLE_DEVICES`), with the least recently used link dropped when a ninth bonded device shows
-  up. Supports 8-bit, 12-bit packed (Logitech) and 16-bit mouse reports, vertical and horizontal wheel,
+  once (`MAX_BLE_DEVICES`), with the least recently used link dropped when another bonded device shows
+  up. Up to 32 devices stay paired (`MAX_BONDED_DEVICES`). Supports 8-bit, 12-bit packed (Logitech) and 16-bit mouse reports, vertical and horizontal wheel,
   and 5 buttons.
 - **Configurable mouse speed** (`mousespeed`), globally or per device, without losing small movements.
 - **Multi-device rollover:** modifiers and keys of all keyboards are merged without stuck keys.
@@ -219,8 +219,9 @@ Device 2 bound to layer 3. Edit that layer in VIAL.
 Holding the button for 8 s clears all bonds and resets the keymap (the per-device bindings stay, and
 apply again when the devices are paired again; the `reset` console command clears those as well).
 
-Up to 8 devices stay paired. Pairing a ninth removes the pairing of the device used least recently
-(preferring one that is not connected); its per-device binding is kept, see
+Up to 32 devices stay paired (`MAX_BONDED_DEVICES`), 8 of which can be connected at once. Pairing a
+33rd removes the pairing of the device used least recently (preferring one that is not connected); its
+per-device binding is kept, see
 [manual/per-device-mapping.md](manual/per-device-mapping.md#devices-that-are-no-longer-paired).
 
 ### Pairing policy: LE legacy pairing first, Secure Connections next

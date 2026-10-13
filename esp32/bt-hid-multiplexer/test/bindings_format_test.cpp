@@ -1,5 +1,6 @@
 // Host-side test of main/bindings_format.cpp: the stored device bindings blob, and the conversion of
-// the version 1 blob (8 entries without names) written by older firmware.
+// the version 1 blob (8 entries without names) and the version 2 blob (16 entries) written by older
+// firmware.
 #include <stdio.h>
 #include <string.h>
 #include "bindings_format.h"
@@ -79,6 +80,30 @@ int main() {
         v1[0] ^= 1;
         v1[4] = 2;   // the size of version 1, but not its number
         CHECK(!bindings_decode(v1, sizeof(v1), loaded, needs_save));
+    }
+
+    // Version 2: the current entries, 16 of them.
+    {
+        static BindingsBlobV2 v2;
+        CHECK(sizeof(v2) == 8 + 16 * 44);
+        memset(&v2, 0, sizeof(v2));
+        v2.magic = FLASH_BINDINGS_MAGIC;
+        v2.version = 2;
+        for (int i = 0; i < 16; i++) v2.entries[i] = entries[i];
+        memset(loaded, 0xEE, sizeof(loaded));
+        CHECK(bindings_decode(&v2, sizeof(v2), loaded, needs_save));
+        CHECK(needs_save);
+        CHECK(memcmp(loaded, entries, 16 * sizeof(DeviceBindingEntry)) == 0);
+        static const DeviceBindingEntry zero = {};
+        for (int i = 16; i < MAX_DEVICE_BINDINGS; i++) {
+            CHECK(memcmp(&loaded[i], &zero, sizeof(zero)) == 0);
+        }
+
+        v2.magic ^= 1;
+        CHECK(!bindings_decode(&v2, sizeof(v2), loaded, needs_save));
+        v2.magic ^= 1;
+        v2.version = BINDINGS_VERSION;  // the size of version 2, but not its number
+        CHECK(!bindings_decode(&v2, sizeof(v2), loaded, needs_save));
     }
 
     // Anything of another size is not a bindings blob.

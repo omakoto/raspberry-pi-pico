@@ -210,6 +210,28 @@ size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count,
 // Layout options
 // ---------------------------------------------------------------------------------------------
 
+uint8_t vial_pick_devices(const uint32_t *last_used, const bool *bound, uint8_t count, uint8_t *picked) {
+    bool taken[256] = {};
+    uint8_t n = 0;
+    while (n < VIAL_MAX_DEVICE_OPTIONS && n < count) {
+        int best = -1;
+        for (uint8_t i = 0; i < count; i++) {
+            if (taken[i]) continue;
+            if (best < 0 || bound[i] > bound[best] ||
+                (bound[i] == bound[best] && last_used[i] > last_used[best])) {
+                best = i;
+            }
+        }
+        taken[best] = true;
+        n++;
+    }
+    uint8_t k = 0;
+    for (uint16_t i = 0; i < count; i++) {
+        if (taken[i]) picked[k++] = (uint8_t)i;
+    }
+    return k;
+}
+
 uint32_t vial_pack_layout_options(const uint8_t *choices, uint8_t count,
                                   const bool *checked, uint8_t checked_count) {
     uint32_t value = 0;

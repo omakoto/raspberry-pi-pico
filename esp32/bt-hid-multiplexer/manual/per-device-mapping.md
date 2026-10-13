@@ -27,7 +27,7 @@ This manual uses **layer 3**.
 ## Step 2. Bind the device to the layer
 
 1. Open (or reload) [vial.rocks](https://vial.rocks/), click **Start** and select the multiplexer. VIAL reads the list of paired devices when it connects, so reload it after pairing a new device.
-2. Open the **Layout** tab. It has one dropdown per paired device, labelled with the device's name. Two devices with the same name get the end of their Bluetooth address added, e.g. `MX Dialpad (7B:44)`.
+2. Open the **Layout** tab. It has one dropdown per paired device, labelled with the device's name. Two devices with the same name get the end of their Bluetooth address added, e.g. `MX Dialpad (7B:44)`. VIAL has room for 8 dropdowns: with more devices paired, it lists the devices bound to a layer and then the most recently used ones, so a device that is not listed shows up once it has connected (reload VIAL).
 3. Set the device's dropdown to **Layer 3**.
 
 The binding applies at once and is saved in flash, by the device's Bluetooth address, so it survives reconnects and reboots. The OLED confirms it (`<name>: layer 3`). Nothing changes yet, because layer 3 is still all Transparent.

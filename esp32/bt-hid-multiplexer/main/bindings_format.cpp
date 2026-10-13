@@ -15,6 +15,15 @@ bool bindings_decode(const void *data, size_t len, DeviceBindingEntry entries[MA
         memcpy(entries, bytes + offsetof(BindingsBlob, entries), sizeof(DeviceBindingEntry) * MAX_DEVICE_BINDINGS);
         return true;
     }
+    if (len == sizeof(BindingsBlobV2)) {
+        BindingsBlobV2 v2;
+        memcpy(&v2, data, sizeof(v2));
+        if (v2.magic != FLASH_BINDINGS_MAGIC || v2.version != 2) return false;
+        memset(entries, 0, sizeof(DeviceBindingEntry) * MAX_DEVICE_BINDINGS);
+        memcpy(entries, v2.entries, sizeof(v2.entries));
+        needs_save = true;
+        return true;
+    }
     if (len == sizeof(BindingsBlobV1)) {
         BindingsBlobV1 v1;
         memcpy(&v1, data, sizeof(v1));

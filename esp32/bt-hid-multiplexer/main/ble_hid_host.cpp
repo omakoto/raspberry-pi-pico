@@ -106,6 +106,8 @@ struct BleSlot {
 
 static BleSlot s_slots[MAX_BLE_DEVICES];
 static BondedTable s_bonded_table;
+// Every remembered pairing needs its keys in BTstack's device database.
+static_assert(NVM_NUM_DEVICE_DB_ENTRIES >= MAX_BONDED_DEVICES, "BTstack must store the keys of every bonded device");
 static uint32_t s_last_use_seq = 0;  // the highest last_used handed out
 static uint16_t s_global_mouse_speed_percent = 100;
 
@@ -413,7 +415,7 @@ static void load_bonded_devices() {
                     break;
                 }
             }
-            if (!exists && s_bonded_table.count < MAX_BLE_DEVICES) {
+            if (!exists && s_bonded_table.count < MAX_BONDED_DEVICES) {
                 uint8_t idx = s_bonded_table.count++;
                 bd_addr_copy(s_bonded_table.records[idx].addr, db_addr);
                 s_bonded_table.records[idx].addr_type = (bd_addr_type_t)addr_type;
@@ -450,7 +452,7 @@ static void remove_le_device_db_entry(const bd_addr_t addr) {
 // too, so that it cannot reconnect in the background and push yet another device out.
 static void add_or_update_bonded_device(const bd_addr_t addr, bd_addr_type_t addr_type, const char *name,
                                         bool connected) {
-    bool device_connected[MAX_BLE_DEVICES] = {};
+    bool device_connected[MAX_BONDED_DEVICES] = {};
     for (uint8_t i = 0; i < s_bonded_table.count; i++) {
         BleSlot *slot = find_slot_by_addr(s_bonded_table.records[i].addr);
         device_connected[i] = slot && slot->con_handle != HCI_CON_HANDLE_INVALID;
@@ -1053,6 +1055,10 @@ bool BleHidHost::getBondedDevice(uint8_t idx, uint8_t addr[6], char *name, size_
     return true;
 }
 
+uint32_t BleHidHost::getBondedLastUsed(uint8_t idx) {
+    return (idx < s_bonded_table.count) ? s_bonded_table.records[idx].last_used : 0;
+}
+
 bool BleHidHost::hasUnconnectedBonds() {
     for (uint8_t b = 0; b < s_bonded_table.count; b++) {
         bool connected = false;
@@ -1216,12 +1222,13 @@ uint16_t BleHidHost::getGlobalMouseSpeed() {
 }
 
 void BleHidHost::dumpBonds() {
-    printf("[BLE Host] Bonded Devices Table (%u stored):\n", s_bonded_table.count);
+    printf("[BLE Host] Bonded Devices Table (%u / %u stored):\n", s_bonded_table.count, MAX_BONDED_DEVICES);
     for (uint8_t i = 0; i < s_bonded_table.count; i++) {
-        printf("  [%u] '%s' (%s, type %u)\n",
+        printf("  [%u] '%s' (%s, type %u, last used #%lu)\n",
                i, s_bonded_table.records[i].name,
                bd_addr_to_str(s_bonded_table.records[i].addr),
-               (unsigned)s_bonded_table.records[i].addr_type);
+               (unsigned)s_bonded_table.records[i].addr_type,
+               (unsigned long)s_bonded_table.records[i].last_used);
     }
     printf("[BLE Host] le_device_db (max %d):\n", le_device_db_max_count());
     int valid = 0;
