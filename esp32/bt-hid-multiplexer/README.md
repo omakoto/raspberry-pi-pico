@@ -330,3 +330,22 @@ with the host compiler and runs their tests. Run it after touching `main/multipl
 
 `test/run-host-test.sh --coverage` also prints the line coverage of each of those sources and keeps
 gcov's annotated copies, with the lines that never ran marked `#####`.
+
+---
+
+## TODO
+
+- **USB remote wakeup:** the firmware cannot wake a sleeping computer. Its configuration descriptor
+  does not declare remote wakeup (`bmAttributes` `0x80`, not `0xA0`; `main/usb_descriptors.c`), so
+  the host never arms it, and nothing calls TinyUSB's `tud_remote_wakeup()`. To add it: set the
+  remote wakeup bit, and while the bus is suspended (`tud_suspended()`), make a chosen input call
+  `tud_remote_wakeup()` instead of sending a report. The connected Bluetooth devices keep running
+  while the computer sleeps, so decide which inputs may wake it: e.g. keys and mouse buttons, but not
+  mouse movement or a touchpad touch.
+  - Waking from sleep (S3 / modern standby) then works if the host allows it (Linux:
+    `/sys/bus/usb/devices/<dev>/power/wakeup`, enabled by default for boot keyboards; Windows: Device
+    Manager → the keyboard → Power Management → "Allow this device to wake the computer").
+  - Hibernate or soft-off (S4/S5) also needs the motherboard to support USB wake and keep the USB ports
+    powered (ErP off).
+  - Behind a switching KVM, only the computer the multiplexer is switched to can be woken by it.
+    Behind an emulating KVM, the KVM decides.
