@@ -20,7 +20,7 @@ Example used throughout this manual: a Logitech device with a vertical wheel, a 
 
 ## Step 1. Pick a layer for the device
 
-The keymap has 8 layers (0–7). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device. Each layer can be used by several devices; devices bound to the same layer also share their layer keys (see "A layer key" below). Pick a layer you are not using for `MO(n)` and other layer keys: while such a key selects that layer, the devices it applies to see the bound device's mappings too.
+The keymap has 16 layers (0–15). Layer 0 is the base layer shared by all devices. Choose one of layers **1 to 7** for the device (VIAL's dropdown only has room for those; layers 8–15 are for layer keys). Each layer can be used by several devices; devices bound to the same layer also share their layer keys (see "A layer key" below). Pick a layer you are not using for `MO(n)` and other layer keys: while such a key selects that layer, the devices it applies to see the bound device's mappings too.
 
 This manual uses **layer 3**.
 
@@ -49,7 +49,7 @@ A binding is kept when its device stops being paired; see [Devices that are no l
    - the **wheel down** key → **Volume Down** (`KC_VOLD`)
 
    Changes apply immediately and are saved to flash half a second after your last edit.
-4. Leave everything else **Transparent** (`KC_TRNS`, which is what every key on layers 1–7 starts as): those inputs behave as on layer 0.
+4. Leave everything else **Transparent** (`KC_TRNS`, which is what every key on layers 1–15 starts as): those inputs behave as on layer 0.
 
 ### Which physical input is which key
 

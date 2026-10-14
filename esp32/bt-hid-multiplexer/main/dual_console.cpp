@@ -244,8 +244,8 @@ static void handle_devlayer(const char *arg) {
             DeviceBindings::unbind(dev);
             dual_printf("Device %u uses the base layer (layer 0), no binding.\r\n", dev);
         }
-    } else if (layer < 0 || layer >= NUM_LAYERS) {
-        dual_printf("Layer must be 0-%d (0 is the base layer, which means no binding).\r\n", NUM_LAYERS - 1);
+    } else if (layer < 0 || layer > MAX_BOUND_LAYER) {
+        dual_printf("Layer must be 0-%d (0 is the base layer, which means no binding).\r\n", MAX_BOUND_LAYER);
     } else if (DeviceBindings::bind(dev, (uint8_t)layer)) {
         dual_printf("Device %u bound to layer %d. Edit that layer in VIAL.\r\n", dev, layer);
     } else {

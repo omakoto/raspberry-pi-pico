@@ -48,7 +48,7 @@ public:
     // Counts noteActivity() calls (wrapping), so that a change shows that there was input.
     static uint32_t activityCount();
 
-    // Layer must be 1..NUM_LAYERS-1. Returns false if the device is not connected, the layer is
+    // Layer must be 1..MAX_BOUND_LAYER. Returns false if the device is not connected, the layer is
     // invalid or the table is full.
     static bool bind(uint8_t dev_idx, uint8_t layer);
     static bool unbind(uint8_t dev_idx);

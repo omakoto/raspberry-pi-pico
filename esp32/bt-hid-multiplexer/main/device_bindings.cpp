@@ -148,7 +148,7 @@ uint8_t DeviceBindings::layerForAddress(const uint8_t addr[6]) {
 }
 
 bool DeviceBindings::bindAddress(const uint8_t addr[6], uint8_t layer, const char *name) {
-    if (layer < 1 || layer >= NUM_LAYERS) return false;
+    if (layer < 1 || layer > MAX_BOUND_LAYER) return false;
     int e = find_entry(addr);
     if (e < 0) {
         for (int i = 0; i < MAX_DEVICE_BINDINGS; i++) {

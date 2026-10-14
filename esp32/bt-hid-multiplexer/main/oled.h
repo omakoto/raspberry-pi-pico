@@ -20,6 +20,10 @@ public:
     static int drawChar(char c, int x, int y, bool color = true, bool font_large = false);
     static void drawString(const char *s, int x, int y, bool color = true, bool font_large = false);
     
+    // The 8x16 font magnified scale times (each pixel drawn as a scale x scale block).
+    static int drawCharScaled(char c, int x, int y, int scale, bool color = true);
+    static void drawStringScaled(const char *s, int x, int y, int scale, bool color = true);
+
     // Push the local 1024-byte framebuffer to the display controller over I2C
     static void show();
 
@@ -31,6 +35,8 @@ public:
     // DISCONNECTED screen.
     static void renderStatus(uint8_t connected_count, const char *dev_name, int active_layer,
                              bool pairing_active, uint32_t passkey, const char *toast_msg, bool usb_mounted);
+    // The layer that just took effect, large, shown briefly over the status screen when it changes.
+    static void renderLayer(int layer);
     static void renderBootSplash(const char *board_desc, const char *version_desc);
 
     // Probes every 7-bit address on the OLED's I2C bus and stores the ones that ACK in found (up to

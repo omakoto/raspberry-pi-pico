@@ -11,7 +11,7 @@
 
 // NVS layout (namespace NVS_NAMESPACE):
 //   "km_hdr"      KeymapHeader
-//   "km0".."km7"  one blob per layer (MATRIX_ROWS * MATRIX_COLS uint16_t keycodes)
+//   "km0".."km15" one blob per layer (MATRIX_ROWS * MATRIX_COLS uint16_t keycodes)
 //   "bind"        BindingsBlob
 //   "macros"      the VIAL macro buffer (up to MACRO_BUFFER_SIZE bytes)
 // One blob per layer keeps a typical VIAL edit (one key) to a 512-byte write. NVS checksums every
@@ -66,16 +66,27 @@ bool StorageManager::loadKeymap(uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_
     size_t len = sizeof(hdr);
     if (nvs_get_blob(s_nvs, "km_hdr", &hdr, &len) != ESP_OK || len != sizeof(hdr) ||
         hdr.magic != FLASH_KEYMAP_MAGIC || (hdr.version != FLASH_KEYMAP_VERSION && hdr.version != 5) ||
-        hdr.layers != NUM_LAYERS) {
+        hdr.layers == 0 || hdr.layers > NUM_LAYERS) {
         return false;
     }
-    for (int l = 0; l < NUM_LAYERS; l++) {
+    for (int l = 0; l < hdr.layers; l++) {
         char key[8];
         layer_key(key, l);
         len = LAYER_BYTES;
         if (nvs_get_blob(s_nvs, key, keymap[l], &len) != ESP_OK || len != LAYER_BYTES) {
             return false;
         }
+    }
+    if (hdr.layers < NUM_LAYERS) {
+        // A keymap saved with fewer layers keeps them; the layers added since start out transparent,
+        // as in a fresh keymap.
+        for (int l = hdr.layers; l < NUM_LAYERS; l++) {
+            for (int r = 0; r < MATRIX_ROWS; r++) {
+                for (int c = 0; c < MATRIX_COLS; c++) keymap[l][r][c] = KC_TRNS_;
+            }
+        }
+        needs_save = true;  // the whole keymap is written again, with the new header
+        s_stored_valid = false;
     }
     if (hdr.version == 5) {
         // Version 5 had no touchpad gestures, and its gesture keys could not be edited.
@@ -84,8 +95,8 @@ bool StorageManager::loadKeymap(uint16_t keymap[NUM_LAYERS][MATRIX_ROWS][MATRIX_
         }
         needs_save = true;  // the whole keymap is written again, with the new version
         s_stored_valid = false;
-        return true;
     }
+    if (needs_save) return true;
     memcpy(s_stored, keymap, sizeof(s_stored));
     s_stored_valid = true;
     return true;

@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 
+static_assert(MAX_BOUND_LAYER < (1 << VIAL_OPTION_BITS), "a device's dropdown must hold every layer it can be bound to");
+static_assert(MAX_BOUND_LAYER < NUM_LAYERS, "devices can only be bound to existing layers");
+
 // ---------------------------------------------------------------------------------------------
 // .xz container (format: https://tukaani.org/xz/xz-file-format.txt)
 // ---------------------------------------------------------------------------------------------
@@ -185,7 +188,7 @@ size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count,
         device_label(devices[i], devices, count, unpaired, unpaired_count, label, sizeof(label));
         put_json_string(w, label);
         put_text(w, ",\"No binding\"");
-        for (int layer = 1; layer < (1 << VIAL_OPTION_BITS); layer++) {
+        for (int layer = 1; layer <= MAX_BOUND_LAYER; layer++) {
             char choice[16];
             snprintf(choice, sizeof(choice), ",\"Layer %d\"", layer);
             put_text(w, choice);

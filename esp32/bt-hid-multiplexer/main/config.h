@@ -66,7 +66,10 @@
 // possible HID keyboard usage (0x00-0xFF; 0xE0-0xE7 are the modifiers). The otherwise unused
 // usages 0xE8-0xFF are used for mouse buttons, mouse motion directions and touchpad gestures, which
 // lets VIAL remap mice and touchpads exactly like keys.
-#define NUM_LAYERS              8
+#define NUM_LAYERS              16
+// Devices can only be bound to layers 1..MAX_BOUND_LAYER: VIAL's layout options give each device's
+// dropdown 3 bits (see VIAL_OPTION_BITS in vial_definition.h). Higher layers are reached with layer keys.
+#define MAX_BOUND_LAYER         7
 #define MATRIX_ROWS             16
 #define MATRIX_COLS             16
 

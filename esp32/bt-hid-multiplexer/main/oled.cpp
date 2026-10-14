@@ -241,6 +241,30 @@ void Oled::drawString(const char *s, int x, int y, bool color, bool font_large) 
     }
 }
 
+int Oled::drawCharScaled(char c, int x, int y, int scale, bool color) {
+    if (c < 0x20 || c > 0x7E) return 0;
+    const uint8_t *glyph = &FONT_8X16_DATA[(uint16_t)(c - 0x20) * FONT_8X16_BYTES_PER_CHAR];
+    for (int p = 0; p < FONT_8X16_NUM_PAGES; p++) {
+        for (int col = 0; col < FONT_8X16_GLYPH_WIDTH; col++) {
+            uint8_t val = glyph[p * FONT_8X16_GLYPH_WIDTH + col];
+            for (int row = 0; row < 8; row++) {
+                if (val & (1 << row)) {
+                    rect(x + col * scale, y + (p * 8 + row) * scale, scale, scale, color, true);
+                }
+            }
+        }
+    }
+    return FONT_8X16_CELL_WIDTH * scale;
+}
+
+void Oled::drawStringScaled(const char *s, int x, int y, int scale, bool color) {
+    if (!s) return;
+    while (*s) {
+        x += drawCharScaled(*s, x, y, scale, color);
+        s++;
+    }
+}
+
 void Oled::setDisplayOn(bool on) {
     writeCmd(on ? 0xAF : 0xAE);
 }
@@ -261,6 +285,17 @@ void Oled::show() {
         writeCmdList(addr_cmd, sizeof(addr_cmd));
         memcpy(&chunk_payload[1], &buffer_[page * OLED_WIDTH], OLED_WIDTH);
         write(chunk_payload, sizeof(chunk_payload));
+    }
+}
+
+// The name shown next to a layer number, or "" for a layer without one.
+static const char *layer_name(int layer) {
+    switch (layer) {
+        case 0: return "BASE";
+        case 1: return "NAV/MEDIA";
+        case 2: return "FUNCTION";
+        case 3: return "NUMPAD";
+        default: return "";
     }
 }
 
@@ -292,11 +327,7 @@ void Oled::renderStatus(uint8_t connected_count, const char *dev_name, int activ
         drawString(dev_line, 2, 16, true, false);
 
         char layer_str[32];
-        const char *l_name = "BASE";
-        if (active_layer == 1) l_name = "NAV/MEDIA";
-        else if (active_layer == 2) l_name = "FUNCTION";
-        else if (active_layer == 3) l_name = "NUMPAD";
-        else if (active_layer > 3) l_name = "";
+        const char *l_name = layer_name(active_layer);
         snprintf(layer_str, sizeof(layer_str), l_name[0] ? "LAYER %d: %s" : "LAYER %d", active_layer, l_name);
         drawString(layer_str, 2, 28, true, false);
 
@@ -345,6 +376,24 @@ void Oled::renderBootSplash(const char *board_desc, const char *version_desc) {
     // Status footer
     line(0, 54, OLED_WIDTH - 1, 54, true);
     drawString("System Ready", 6, 56, true, false);
+
+    show();
+}
+
+void Oled::renderLayer(int layer) {
+    clear(false);
+
+    // The layer number in the large font at double size (16x32 per character, so "LAYER 15" is the
+    // full 128-pixel width), centred, with the layer's name below it.
+    const int scale = 2;
+    char layer_str[16];
+    snprintf(layer_str, sizeof(layer_str), "LAYER %d", layer);
+    int width = (int)strlen(layer_str) * FONT_8X16_CELL_WIDTH * scale;
+    drawStringScaled(layer_str, (OLED_WIDTH - width) / 2, 8, scale);
+
+    const char *l_name = layer_name(layer);
+    width = (int)strlen(l_name) * FONT_4X5_CELL_WIDTH;
+    drawString(l_name, (OLED_WIDTH - width) / 2, 50, true, false);
 
     show();
 }

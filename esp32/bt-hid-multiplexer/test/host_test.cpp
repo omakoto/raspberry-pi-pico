@@ -324,12 +324,12 @@ int main() {
 
     // All layers work, including the highest one, and layers start out transparent.
     reset();
-    CHECK(NUM_LAYERS == 8);
+    CHECK(NUM_LAYERS == 16);
     CHECK(VirtualMatrix::getKeycode(NUM_LAYERS - 1, 3, 4) == KC_TRNS_);
     set(NUM_LAYERS - 1, 0x04, 0x05);
     CHECK(VirtualMatrix::getKeycode(NUM_LAYERS - 1, 0, 4) == 0x05);
     CHECK(VirtualMatrix::getKeycode(NUM_LAYERS, 0, 4) == 0);
-    set(0, VKEY_MOUSE_BTN_BASE, 0x5100 + NUM_LAYERS - 1);  // button 1 -> MO(7)
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5100 + NUM_LAYERS - 1);  // button 1 -> MO(15)
     Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
     CHECK(VirtualMatrix::getActiveLayer() == NUM_LAYERS - 1);
     uint8_t layer_a[1] = {0x04};
@@ -452,6 +452,9 @@ int main() {
     CHECK(DeviceBindings::lastActiveDevice() == 1);
     CHECK(DeviceBindings::bind(1, 3));
     CHECK(!DeviceBindings::bind(1, 0) && !DeviceBindings::bind(1, NUM_LAYERS));
+    // Layers above MAX_BOUND_LAYER exist, but VIAL's dropdown cannot show a binding to them.
+    CHECK(DeviceBindings::bind(1, MAX_BOUND_LAYER) && !DeviceBindings::bind(1, MAX_BOUND_LAYER + 1));
+    CHECK(DeviceBindings::bind(1, 3));
     CHECK(!DeviceBindings::bind(5, 2));  // not connected
     CHECK(DeviceBindings::layerFor(1) == 3 && DeviceBindings::layerFor(0) == DeviceBindings::NO_LAYER);
     g_sent_keyboard.clear();
@@ -859,7 +862,8 @@ int main() {
     g_connected[2] = false;
     CHECK(DeviceBindings::layerForAddress(addr2) == DeviceBindings::NO_LAYER);
     CHECK(DeviceBindings::bindAddress(addr2, 5));
-    CHECK(!DeviceBindings::bindAddress(addr2, 0) && !DeviceBindings::bindAddress(addr2, NUM_LAYERS));
+    CHECK(!DeviceBindings::bindAddress(addr2, 0) && !DeviceBindings::bindAddress(addr2, NUM_LAYERS) &&
+          !DeviceBindings::bindAddress(addr2, MAX_BOUND_LAYER + 1));
     CHECK(DeviceBindings::layerForAddress(addr2) == 5);
     g_connected[2] = true;
     CHECK(DeviceBindings::layerFor(2) == 5);

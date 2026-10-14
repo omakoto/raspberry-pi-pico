@@ -23,7 +23,7 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
 - **Multi-device rollover:** modifiers and keys of all keyboards are merged without stuck keys.
 - **Bonds survive reboots** (BTstack's bond database in NVS). Background scanning only reconnects bonded
   devices; new devices are only accepted during pairing mode.
-- **VIAL keymapping (WebHID):** remap every key, modifier, mouse button and mouse movement across 8
+- **VIAL keymapping (WebHID):** remap every key, modifier, mouse button and mouse movement across 16
   layers at [vial.rocks](https://vial.rocks/); per-device layers, set in VIAL's Layout tab (one
   dropdown per paired device, by name, see
   [manual/per-device-mapping.md](manual/per-device-mapping.md)). Saved in NVS.
@@ -49,7 +49,8 @@ version's classic HID host (keyboards and mice that only speak classic Bluetooth
   send (the media and browser keys listed under "Keycodes that work") are recognized.
 - **Reverse Lock LED sync:** the host's Caps/Num/Scroll Lock state is sent to the connected keyboards.
 - **SSD1306 or SH1106 OLED (128x64, I2C):** connection state, device name, the layer of the device used last, and
-  the 6-digit passkey when a keyboard needs one. It goes dark a minute after the last change or input and
+  the 6-digit passkey when a keyboard needs one. When that layer changes (a layer key, or input from a
+  device bound to another layer), the new layer is shown large for a second. It goes dark a minute after the last change or input and
   comes back on with the next one. Optional: the firmware runs without a display. Set
   `OLED_CONTROLLER` in `main/config.h` to the module's controller (default: SH1106).
 - **Pairing button.**
@@ -264,10 +265,10 @@ connects but some of its reports stay silent, check `log on` output for `GATT cl
    node (it covers the board's USB ID `045e:4004`, and Espressif's vendor ID `303a`). Re-plug the board afterwards.
 2. Open **[https://vial.rocks/](https://vial.rocks/)** in Chrome or another Chromium-based browser, click
    **Start** and select **ESP32-S3 BLE HID Multiplexer**.
-3. Remap keys across 8 layers. Changes take effect at once and are saved half a second after the last
+3. Remap keys across 16 layers. Changes take effect at once and are saved half a second after the last
    edit.
 4. **Per-device layers:** the **Layout** tab has one dropdown per paired device, labelled with its
-   name: pick a layer to remap that device on its own, see
+   name: pick a layer (1–7) to remap that device on its own, see
    [manual/per-device-mapping.md](manual/per-device-mapping.md). Bindings of devices that are no
    longer paired follow as `Unpaired` checkboxes; clear one to remove that binding. The firmware
    builds the VIAL keyboard definition at runtime for this (`main/vial_definition.cpp`), so reload
