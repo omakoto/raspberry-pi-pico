@@ -9,12 +9,14 @@
 // name, with the choices "No binding" and "Layer 1".."Layer 7". This is how a device is bound to a
 // keymap layer without the console (see DeviceBindings). After the dropdowns, each binding of a
 // device that is no longer paired gets a checkbox ("Unpaired: <name> (layer N)"), checked while the
-// binding exists, so it can be removed.
+// binding exists, so it can be removed. Before all of them, a dropdown with the single choice "Not
+// supported" lists the layer keys that VIAL offers but the firmware does not implement.
 //
 // VIAL reads and writes all of them as one 32-bit "layout options" value (VIA keyboard value 0x02),
 // with as many bits per option as its choices need: 3 per dropdown and 1 per checkbox. 8 dropdowns
 // and 8 checkboxes use all 32 bits, so when more devices are paired, only 8 of them get a dropdown
-// (see vial_pick_devices()).
+// (see vial_pick_devices()). The note's 1 bit is always 0 and sits above those 32, so it is never
+// sent.
 
 // Paired devices listed in the definition, in dropdown order.
 #define VIAL_MAX_DEVICE_OPTIONS 8

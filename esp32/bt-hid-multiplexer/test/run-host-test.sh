@@ -109,7 +109,9 @@ def load(path):
 d = load(sys.argv[1])
 labels = d["layouts"]["labels"]
 choices = ["No binding"] + [f"Layer {n}" for n in range(1, 8)]
-assert labels == [["Keychron Nape Pro (00:00)"] + choices,
+note = ["Layer keys LT, TT, OSL, Fn1/Fn2 (Fn3)", "Not supported"]
+assert labels == [note,
+                  ["Keychron Nape Pro (00:00)"] + choices,
                   ['Quote" Back\\slash ???'] + choices,
                   ["D6:54:CB:91:59:74"] + choices,
                   ["MX Dialpad (7B:44)"] + choices,
@@ -118,8 +120,20 @@ assert labels == [["Keychron Nape Pro (00:00)"] + choices,
                   "Unpaired: E1:02:03:04:05:07 (layer 7)"], labels
 assert d["matrix"] == {"rows": 16, "cols": 16} and d["layouts"]["keymap"], d
 largest = load(sys.argv[2])["layouts"]["labels"]
-assert len(largest) == 16 and all(isinstance(l, list) for l in largest[:8]), largest
-assert all(isinstance(l, str) and l.startswith("Unpaired: ") for l in largest[8:]), largest
+assert len(largest) == 17 and largest[0] == note, largest
+assert all(isinstance(l, list) for l in largest[1:9]), largest
+assert all(isinstance(l, str) and l.startswith("Unpaired: ") for l in largest[9:]), largest
+# VIAL packs the options as LayoutEditor.pack() does: each option's bits in order, the first one most
+# significant (a checkbox 1 bit, a dropdown max(1, (choices - 1).bit_length()) bits), and sends the
+# value as an unsigned 32-bit int. With every option at its highest choice it must still fit.
+bits = ""
+for l in largest:
+    if isinstance(l, str):
+        bits += "1"
+    else:
+        width = max(1, (len(l) - 2).bit_length())
+        bits += format(len(l) - 2, "b").zfill(width)
+assert int(bits, 2) < 2 ** 32, bits
 print("VIAL definition decodes: OK")
 PYEOF
 

@@ -178,11 +178,16 @@ size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count,
     Writer w{json, sizeof(json)};
     put_text(w, VIAL_DEF_PREFIX);
     put_text(w, "\"labels\":[");
+    // VIAL lists the layer keys below in its keycode picker for every keyboard, and the firmware cannot
+    // hide them, so a dropdown with a single choice says they do nothing. VIAL gives it 1 bit, always
+    // 0. As the first option it is the most significant bit, above the 32 bits the other options use,
+    // so it is never sent and does not move them.
+    put_text(w, "[\"Layer keys LT, TT, OSL, Fn1/Fn2 (Fn3)\",\"Not supported\"]");
     if (count > VIAL_MAX_DEVICE_OPTIONS) count = VIAL_MAX_DEVICE_OPTIONS;
     if (unpaired_count > VIAL_MAX_UNPAIRED_OPTIONS) unpaired_count = VIAL_MAX_UNPAIRED_OPTIONS;
     char label[48];
     for (uint8_t i = 0; i < count; i++) {
-        if (i > 0) w.put(',');
+        w.put(',');
         // A list: a dropdown.
         w.put('[');
         device_label(devices[i], devices, count, unpaired, unpaired_count, label, sizeof(label));
@@ -196,7 +201,7 @@ size_t vial_build_definition(const VialDeviceEntry *devices, uint8_t count,
         w.put(']');
     }
     for (uint8_t i = 0; i < unpaired_count; i++) {
-        if (count > 0 || i > 0) w.put(',');
+        w.put(',');
         // A plain string: a checkbox.
         device_label(unpaired[i], devices, count, unpaired, unpaired_count, label, sizeof(label));
         char text[80];

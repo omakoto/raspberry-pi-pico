@@ -307,7 +307,9 @@ shared with other TinyUSB gadgets, so the scripts find the board by its VIAL int
   keys a macro leaves pressed are released when it ends. Macros are saved half a second after the
   last edit; the `reset` console command clears them.
 - **Not supported:** tap dance,
-  mod-tap/layer-tap, combos; the 6-key rollover limit applies.
+  mod-tap/layer-tap, combos; the 6-key rollover limit applies. VIAL still offers the layer keys
+  `LT`, `TT`, `OSL` and `Fn1`/`Fn2 (Fn3)`, which do nothing here; the first row of the **Layout** tab
+  says so.
 - **Mouse:** the bottom row of the Vial key map is the mouse: buttons 1–8 on the left (6–8 default to
   F13–F15), movement directions on the right (cursor up/down/left/right, wheel up/down/left/right).
   Map a button to `MO(1)` and, on layer 1, cursor up/down to `KC_WH_U`/`KC_WH_D` to scroll by moving the
