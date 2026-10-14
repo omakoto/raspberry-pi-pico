@@ -1136,18 +1136,19 @@ int main() {
     CHECK(g_sent_mouse.size() == 1 && lastMouse().buttons == 0x01);
 
     // TO(n) switches the base layer and clears toggled layers; releasing it does not switch back.
-    // Button 3 is TG(1), button 1 is TO(2), and layer 2 maps button 2 to TO(0) and A to B.
+    // VIAL encodes TO(n) with ON_PRESS in bit 4, as 0x5010 + n. Button 3 is TG(1), button 1 is TO(9),
+    // and layer 9 maps button 2 to TO(0) and A to B.
     reset();
     set(0, VKEY_MOUSE_BTN_BASE + 2, 0x5301);
-    set(0, VKEY_MOUSE_BTN_BASE, 0x5000 + 2);
-    set(2, VKEY_MOUSE_BTN_BASE + 1, 0x5000 + 0);
-    set(2, 0x04, 0x05);
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5010 + 9);
+    set(9, VKEY_MOUSE_BTN_BASE + 1, 0x5010 + 0);
+    set(9, 0x04, 0x05);
     Multiplexer::handleMouseReport(0, 0x04, 0, 0, 0, 0);
     Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
     CHECK(VirtualMatrix::getActiveLayer() == 1);
     Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
     Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
-    CHECK(VirtualMatrix::getActiveLayer() == 2);
+    CHECK(VirtualMatrix::getActiveLayer() == 9);
     Multiplexer::handleKeyboardReport(0, 0, ka, 1);
     CHECK(lastKbd().keys[0] == 0x05);
     Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
@@ -1157,6 +1158,69 @@ int main() {
     Multiplexer::handleKeyboardReport(0, 0, ka, 1);
     CHECK(lastKbd().keys[0] == 0x04);
     Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+
+    // DF(n) (VIAL: 0x5200 + n) switches the base layer like TO(n), clearing toggled layers.
+    reset();
+    set(0, VKEY_MOUSE_BTN_BASE + 2, 0x5300 + 1);  // button 3 -> TG(1)
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5200 + 12);     // button 1 -> DF(12)
+    set(12, VKEY_MOUSE_BTN_BASE + 1, 0x5200 + 0); // layer 12: button 2 -> DF(0)
+    Multiplexer::handleMouseReport(0, 0x04, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 1);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 12);
+    Multiplexer::handleMouseReport(0, 0x02, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 0);
+
+    // TO(15) (0x501F) reaches the highest layer.
+    set(0, VKEY_MOUSE_BTN_BASE, 0x5010 + 15);
+    Multiplexer::handleMouseReport(0, 0x01, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(0, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getActiveLayer() == 15);
+
+    // TO on a bound device switches its group only. Device 1 is bound to layer 6, where button 1 is
+    // TO(9) and A is C; layer 9 maps button 1 to TO(6) and A to B. Device 0 (unbound) keeps layer 0.
+    reset();
+    CHECK(DeviceBindings::bind(1, 6));
+    set(6, VKEY_MOUSE_BTN_BASE, 0x5010 + 9);
+    set(6, 0x04, 0x06);
+    set(9, VKEY_MOUSE_BTN_BASE, 0x5010 + 6);
+    set(9, 0x04, 0x05);
+    Multiplexer::handleKeyboardReport(1, 0, ka, 1);
+    CHECK(lastKbd().keys[0] == 0x06);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+    Multiplexer::handleMouseReport(1, 0x01, 0, 0, 0, 0);
+    Multiplexer::handleMouseReport(1, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(1) == 9 && VirtualMatrix::getEffectiveLayer(0) == 0);
+    Multiplexer::handleKeyboardReport(1, 0, ka, 1);
+    CHECK(lastKbd().keys[0] == 0x05);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+    Multiplexer::handleKeyboardReport(0, 0, ka, 1);
+    CHECK(lastKbd().keys[0] == 0x04);
+    Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+    Multiplexer::handleMouseReport(1, 0x01, 0, 0, 0, 0);  // TO(6) on layer 9: back
+    Multiplexer::handleMouseReport(1, 0, 0, 0, 0, 0);
+    CHECK(VirtualMatrix::getEffectiveLayer(1) == 6);
+    Multiplexer::handleKeyboardReport(1, 0, ka, 1);
+    CHECK(lastKbd().keys[0] == 0x06);
+    Multiplexer::handleKeyboardReport(1, 0, nullptr, 0);
+
+    // Layer keys the firmware does not implement (LT, OSL, TT, LM) do nothing: no layer change, no key.
+    reset();
+    {
+        static const uint16_t unsupported[] = {0x4104, 0x5401, 0x5801, 0x5912};
+        for (uint16_t kc : unsupported) {
+            set(0, 0x04, kc);
+            g_sent_keyboard.clear();
+            Multiplexer::handleKeyboardReport(0, 0, ka, 1);
+            Multiplexer::handleKeyboardReport(0, 0, nullptr, 0);
+            pump();
+            CHECK(VirtualMatrix::getActiveLayer() == 0);
+            for (auto &k : g_sent_keyboard) CHECK(k.mods == 0 && k.keys[0] == 0);
+        }
+    }
 
     // A key that is transparent on every layer, layer 0 included, is disabled.
     set(0, 0x07, KC_TRNS_);

@@ -15,6 +15,9 @@ uint32_t VirtualMatrix::last_edit_ms_ = 0;
 // can be told apart from "not held" (0).
 static const uint16_t HELD_KC_NO = 0xFFFF;
 
+// TO(n) has 4 bits for the layer (see ACTION_LAYER_NUM).
+static_assert(NUM_LAYERS <= 16, "TO() cannot reach layers above 15");
+
 // How long keymap edits must be quiet before they are written to flash.
 static const uint32_t SAVE_DELAY_MS = 500;
 

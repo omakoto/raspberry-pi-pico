@@ -143,7 +143,8 @@
 #define KC_MACRO_FIRST_         0x5F12
 #define IS_MACRO_KEYCODE(k)     ((k) >= KC_MACRO_FIRST_ && (k) < KC_MACRO_FIRST_ + MACRO_COUNT)
 
-// QMK layer actions: the action in bits 8-15, the layer number in bits 0-7.
+// QMK layer actions in the keycode numbering of the VIAL protocol version the firmware reports (QMK's
+// numbering before 0.19): the action in bits 8-15.
 #define ACTION_LAYER_TO         0x5000 // TO(layer)
 #define ACTION_LAYER_MOMENTARY  0x5100 // MO(layer)
 #define ACTION_LAYER_DEFAULT    0x5200 // DF(layer)
@@ -152,7 +153,10 @@
 #define IS_ACTION_MO(k)         (((k) & 0xFF00) == ACTION_LAYER_MOMENTARY)
 #define IS_ACTION_TG(k)         (((k) & 0xFF00) == ACTION_LAYER_TOGGLE)
 #define IS_ACTION_TO(k)         (((k) & 0xFF00) == ACTION_LAYER_TO || ((k) & 0xFF00) == ACTION_LAYER_DEFAULT)
-#define ACTION_LAYER_NUM(k)     ((k) & 0xFF)
+// MO, DF and TG carry the layer in bits 0-7. TO carries it in bits 0-3 only: bits 4-5 say when it
+// acts, and VIAL always sets ON_PRESS (1), so TO(n) arrives as 0x5010 + n. TO therefore reaches
+// layers 0-15 at most.
+#define ACTION_LAYER_NUM(k)     ((((k) & 0xFF00) == ACTION_LAYER_TO) ? ((k) & 0x0F) : ((k) & 0xFF))
 
 // QMK modifier-wrapped keycodes (e.g. LSFT(KC_A) = 0x0204): bits 8-11 are LCTL/LSFT/LALT/LGUI,
 // bit 12 selects the right-hand modifiers.
