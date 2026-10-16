@@ -1,0 +1,31 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "config_manager.cpp"
+        "status_led.cpp"
+        "usb_msc.cpp"
+        "dual_logger.cpp"
+        "w5500_driver.cpp"
+        "mac_tracker.cpp"
+        "wifi_manager.cpp"
+        "mdns_service.cpp"
+        "http_server.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_eth
+        esp_netif
+        esp_event
+        esp_timer
+        esp_wifi
+        esp_http_server
+        driver
+        lwip
+        freertos
+        log
+        nvs_flash
+        fatfs
+        wear_levelling
+        mdns
+        esp_tinyusb
+)

@@ -1,0 +1,38 @@
+# wol-bridge Configuration
+hostname = "wol"
+http_port = 80
+led_pin = 21
+led_active_low = true
+
+# Primary Wi-Fi Access Point (Index 0)
+wifi_ssid = "YOUR_WIFI_SSID"
+wifi_password = "YOUR_WIFI_PASSWORD"
+
+# Fallback Wi-Fi Access Points (Optional: indices 1 to 9)
+# wifi_ssid1 = "BackupHotspot"
+# wifi_password1 = "HotspotPass"
+
+# Static target MAC addresses (optional, comma-separated e.g. "AA:BB:CC:DD:EE:FF, 11:22:33:44:55:66")
+# Static entries are always retained and never purged.
+static_macs = ""
+
+# W5500 Ethernet Module Own MAC Address
+mac = "DE:AD:BE:EF:FE:ED"
+
+# Hardware SPI Pin Configuration for W5500
+# -------------------------------------------------------------
+# Universal Pinout (Compatible with Seeed Studio XIAO ESP32-S3 & DevKitC-1):
+spi_sck   = 7    # XIAO: D8 (Pin 9)  | DevKitC-1: Row B, silk '7' (Pin 7)
+spi_mosi  = 9    # XIAO: D10 (Pin 11)| DevKitC-1: Row B, silk '9' (Pin 15)
+spi_miso  = 8    # XIAO: D9 (Pin 10) | DevKitC-1: Row B, silk '8' (Pin 12)
+spi_cs    = 4    # XIAO: D3 (Pin 4)  | DevKitC-1: Row B, silk '4' (Pin 4)
+spi_reset = 3    # XIAO: D2 (Pin 3)  | DevKitC-1: Row B, silk '3' (Pin 13), -1 if unconnected
+spi_int   = 2    # INTn GPIO (interrupt mode); set to -1 to fall back to SPI polling
+poll_period_ms = 2 # Polling interval in ms, used only when spi_int = -1 (1-5 ms)
+spi_speed_mhz  = 25 # SPI clock speed in MHz (14, 20, 25, 33 supported; default: 25)
+int_diag  = false
+
+# Packet Logging
+# If false, suppresses serial logs for regular packets from known MACs while still
+# displaying new MAC discoveries and updating the web dashboard real-time packet feed.
+log_rx_packets = false
