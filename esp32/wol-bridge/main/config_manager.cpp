@@ -13,9 +13,16 @@ static const char* TAG = "ConfigManager";
 ConfigManager::ConfigManager() : base_path_(""), wl_handle_(WL_INVALID_HANDLE), initialized_(false) {}
 
 ConfigManager::~ConfigManager() {
+    unmount();
+}
+
+void ConfigManager::unmount() {
     if (initialized_ && wl_handle_ != WL_INVALID_HANDLE) {
         esp_vfs_fat_spiflash_unmount_rw_wl(base_path_.c_str(), wl_handle_);
+        ESP_LOGI(TAG, "FATFS partition unmounted from '%s'", base_path_.c_str());
     }
+    wl_handle_ = WL_INVALID_HANDLE;
+    initialized_ = false;
 }
 
 bool ConfigManager::init(const char* base_path, const char* partition_label) {
@@ -41,15 +48,13 @@ bool ConfigManager::init(const char* base_path, const char* partition_label) {
 }
 
 std::string ConfigManager::trim(const std::string& s) {
-    auto start = s.begin();
-    while (start != s.end() && std::isspace(static_cast<unsigned char>(*start))) {
-        ++start;
+    static const char* WS = " \t\r\n\f\v";
+    auto first = s.find_first_not_of(WS);
+    if (first == std::string::npos) {
+        return std::string();
     }
-    auto end = s.end();
-    do {
-        --end;
-    } while (std::distance(start, end) > 0 && std::isspace(static_cast<unsigned char>(*end)));
-    return (start < end + 1) ? std::string(start, end + 1) : std::string();
+    auto last = s.find_last_not_of(WS);
+    return s.substr(first, last - first + 1);
 }
 
 bool ConfigManager::parse_file(const std::string& path) {
@@ -75,16 +80,19 @@ bool ConfigManager::parse_file(const std::string& path) {
         std::string key = trim(line.substr(0, eq_pos));
         std::string val = trim(line.substr(eq_pos + 1));
 
-        // Strip trailing comment if value is not in quotes
-        bool in_quotes = (val.length() >= 2 && ((val.front() == '"' && val.back() == '"') ||
-                                                (val.front() == '\'' && val.back() == '\'')));
-        if (!in_quotes) {
+        // A quoted value ends at its closing quote, so it may contain '#' and be followed by a
+        // trailing comment. An unquoted value ends at the first '#'.
+        size_t close_pos = std::string::npos;
+        if (!val.empty() && (val.front() == '"' || val.front() == '\'')) {
+            close_pos = val.find(val.front(), 1);
+        }
+        if (close_pos != std::string::npos) {
+            val = val.substr(1, close_pos - 1);
+        } else {
             auto hash_pos = val.find('#');
             if (hash_pos != std::string::npos) {
                 val = trim(val.substr(0, hash_pos));
             }
-        } else {
-            val = val.substr(1, val.length() - 2);
         }
 
         if (!key.empty()) {

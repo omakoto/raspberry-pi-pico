@@ -44,6 +44,8 @@ extern "C" void app_main() {
     static ConfigManager config;
     if (config.init()) {
         config.load();
+        // Release the partition so the USB MSC driver can take exclusive ownership of it.
+        config.unmount();
     } else {
         ESP_LOGW(TAG, "Running with compiled defaults (no FATFS config available)");
     }
@@ -57,7 +59,7 @@ extern "C" void app_main() {
 
     // 5. Initialize TinyUSB Composite Device (CDC ACM Console + MSC Flash Drive)
     static UsbMsc usb_msc;
-    usb_msc.init(config.get_wl_handle());
+    usb_msc.init();
 
     // 6. Configure W5500 Ethernet SPI
     W5500Config eth_cfg;
@@ -109,10 +111,9 @@ extern "C" void app_main() {
     static WifiManager wifi(ap_list);
     wifi.init();
 
-    // Spawn Wi-Fi connection task
+    // Spawn Wi-Fi task, which connects and then reconnects whenever the connection drops
     xTaskCreate([](void* arg) {
-        wifi.connect(&status_led);
-        vTaskDelete(nullptr);
+        wifi.run(&status_led);
     }, "wifi_task", 4096, nullptr, 5, nullptr);
 
     // Wait until Wi-Fi is connected

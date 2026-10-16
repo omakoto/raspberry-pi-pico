@@ -5,6 +5,7 @@
 #include <set>
 #include <utility>
 #include <atomic>
+#include <mutex>
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -19,6 +20,8 @@ public:
 
     bool init();
     void connect(StatusLed* led = nullptr);
+    // Connects, then keeps reconnecting whenever the connection drops. Never returns.
+    [[noreturn]] void run(StatusLed* led = nullptr);
     bool is_connected() const;
     std::string get_ip_address() const;
     std::vector<std::string> get_configured_ssids() const;
@@ -35,6 +38,7 @@ private:
     esp_netif_t* netif_sta_;
     EventGroupHandle_t wifi_event_group_;
     std::atomic<bool> connected_;
+    mutable std::mutex ip_mutex_;
     std::string ip_address_;
     uint8_t last_disconnect_reason_;
     bool initialized_;

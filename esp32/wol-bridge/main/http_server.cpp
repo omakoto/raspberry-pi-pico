@@ -74,14 +74,7 @@ bool HttpServer::start(int port, MacTracker* tracker, W5500Driver* w5500, Status
     };
     httpd_register_uri_handler(server_, &status_uri);
 
-    httpd_uri_t purge_get_uri = {
-        .uri = "/purge",
-        .method = HTTP_GET,
-        .handler = &HttpServer::purge_handler,
-        .user_ctx = this
-    };
-    httpd_register_uri_handler(server_, &purge_get_uri);
-
+    // Purge is POST-only so that link previews and browser prefetching can't wipe learned MACs.
     httpd_uri_t purge_post_uri = {
         .uri = "/purge",
         .method = HTTP_POST,
@@ -239,8 +232,14 @@ esp_err_t HttpServer::wake_handler(httpd_req_t* req) {
     }
 
     if (wants_json) {
+        const char* status = "ok";
+        if (dispatched == 0) {
+            status = !link_up ? "link_down" : "no_targets";
+            // A non-2xx status lets scripts detect the failure (e.g. with curl -f).
+            httpd_resp_set_status(req, "503 Service Unavailable");
+        }
         std::stringstream json;
-        json << "{\"status\":\"ok\",\"dispatched\":" << dispatched
+        json << "{\"status\":\"" << status << "\",\"dispatched\":" << dispatched
              << ",\"link_up\":" << (link_up ? "true" : "false")
              << ",\"purge_armed\":true,\"macs\":[";
         for (size_t i = 0; i < entries.size(); ++i) {

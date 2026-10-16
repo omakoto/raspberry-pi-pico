@@ -9,7 +9,22 @@
 static const char* TAG = "MacTracker";
 static const char* NVS_NAMESPACE = "wol_macs";
 
-MacTracker::MacTracker() : own_mac_{}, total_rx_packets_(0), purge_on_next_rx_(false), log_rx_packets_(false) {}
+// All persisted state lives in one blob so that every update replaces it atomically:
+// byte 0 is the purge-armed flag, followed by 6 bytes per learned MAC.
+static const char* NVS_STATE_KEY = "state";
+
+// Delay before writing NVS after a change, so that bursts of changes (e.g. several VMs appearing
+// at once) are coalesced into a single flash write.
+static constexpr uint32_t PERSIST_DEBOUNCE_MS = 200;
+
+MacTracker::MacTracker()
+    : own_mac_{},
+      total_rx_packets_(0),
+      purge_on_next_rx_(false),
+      log_rx_packets_(false),
+      persist_task_(nullptr),
+      legacy_key_count_(0),
+      legacy_keys_present_(false) {}
 
 MacTracker::~MacTracker() {}
 
@@ -67,6 +82,17 @@ bool MacTracker::init(const uint8_t own_mac[6], const std::vector<std::string>& 
     // 2. Load learned MACs and purge state from NVS
     load_from_nvs();
 
+    // 3. Flash writes are slow, so they are done on a dedicated task rather than on the Ethernet
+    // receive path or in HTTP handlers. A single writer also keeps NVS updates ordered.
+    if (persist_task_ == nullptr &&
+        xTaskCreate(&MacTracker::persist_task_entry, "mac_persist", 3072, this, 3, &persist_task_) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to spawn MAC persistence task; learned MACs will not be saved");
+        persist_task_ = nullptr;
+    }
+    if (legacy_keys_present_) {
+        request_save();
+    }
+
     return true;
 }
 
@@ -78,59 +104,141 @@ void MacTracker::load_from_nvs() {
         return;
     }
 
-    uint8_t purge_armed = 0;
-    if (nvs_get_u8(handle, "purge_arm", &purge_armed) == ESP_OK) {
-        purge_on_next_rx_.store(purge_armed != 0, std::memory_order_relaxed);
-        if (purge_armed) {
-            ESP_LOGI(TAG, "NVS state: Purge is armed on next PC packet.");
+    std::vector<uint8_t> blob;
+    size_t blob_size = 0;
+    if (nvs_get_blob(handle, NVS_STATE_KEY, nullptr, &blob_size) == ESP_OK && blob_size > 0) {
+        blob.resize(blob_size);
+        if (nvs_get_blob(handle, NVS_STATE_KEY, blob.data(), &blob_size) != ESP_OK) {
+            blob.clear();
         }
     }
 
-    uint32_t count = 0;
-    if (nvs_get_u32(handle, "count", &count) != ESP_OK || count == 0) {
+    if (blob.empty()) {
+        if (load_legacy_from_nvs(handle)) {
+            ESP_LOGI(TAG, "Migrating persisted MACs from the legacy NVS layout");
+        }
         nvs_close(handle);
         return;
+    }
+    nvs_close(handle);
+
+    bool purge_armed = blob[0] != 0;
+    purge_on_next_rx_.store(purge_armed, std::memory_order_relaxed);
+    if (purge_armed) {
+        ESP_LOGI(TAG, "NVS state: Purge is armed on next PC packet.");
+    }
+
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    size_t count = (blob.size() - 1) / 6;
+    for (size_t i = 0; i < count; ++i) {
+        const uint8_t* raw = blob.data() + 1 + i * 6;
+        if (MacEntry* added = add_learned_locked(raw, format_mac(raw), now_ms)) {
+            ESP_LOGI(TAG, "Loaded persisted learned MAC: %s", added->mac_str.c_str());
+        }
+    }
+}
+
+// Reads MACs saved by firmware that stored one NVS string key per MAC. Returns true if any legacy
+// state was found; those keys are erased once the state has been saved in the current layout.
+bool MacTracker::load_legacy_from_nvs(nvs_handle_t handle) {
+    bool found = false;
+    uint8_t purge_armed = 0;
+    if (nvs_get_u8(handle, "purge_arm", &purge_armed) == ESP_OK) {
+        purge_on_next_rx_.store(purge_armed != 0, std::memory_order_relaxed);
+        found = true;
+    }
+
+    uint32_t count = 0;
+    if (nvs_get_u32(handle, "count", &count) == ESP_OK) {
+        found = true;
     }
 
     int64_t now_ms = esp_timer_get_time() / 1000;
     for (uint32_t i = 0; i < count; ++i) {
         char key[16];
         snprintf(key, sizeof(key), "m%lu", static_cast<unsigned long>(i));
-        size_t required_size = 0;
-        if (nvs_get_str(handle, key, nullptr, &required_size) == ESP_OK && required_size > 0) {
-            std::vector<char> str_buf(required_size);
-            if (nvs_get_str(handle, key, str_buf.data(), &required_size) == ESP_OK) {
-                std::string mac_str(str_buf.data());
-                uint8_t raw[6];
-                if (parse_mac(mac_str, raw)) {
-                    // Check if already in static list
-                    bool exists = false;
-                    for (const auto& e : entries_) {
-                        if (memcmp(e.mac, raw, 6) == 0) {
-                            exists = true;
-                            break;
-                        }
-                    }
-                    if (!exists) {
-                        MacEntry entry = {};
-                        memcpy(entry.mac, raw, 6);
-                        entry.mac_str = format_mac(raw);
-                        entry.first_seen_ms = now_ms;
-                        entry.last_seen_ms = now_ms;
-                        entry.packet_count = 0;
-                        entry.is_static = false;
-                        entries_.push_back(entry);
-                        ESP_LOGI(TAG, "Loaded persisted learned MAC [%lu]: %s",
-                                 static_cast<unsigned long>(i), entry.mac_str.c_str());
-                    }
-                }
+        char str_buf[32];
+        size_t len = sizeof(str_buf);
+        uint8_t raw[6];
+        if (nvs_get_str(handle, key, str_buf, &len) == ESP_OK && parse_mac(str_buf, raw)) {
+            if (MacEntry* added = add_learned_locked(raw, format_mac(raw), now_ms)) {
+                ESP_LOGI(TAG, "Loaded persisted learned MAC (legacy): %s", added->mac_str.c_str());
             }
         }
     }
-    nvs_close(handle);
+
+    legacy_key_count_ = count;
+    legacy_keys_present_ = found;
+    return found;
 }
 
-void MacTracker::save_learned_to_nvs() {
+// Adds a learned MAC, evicting the least recently seen learned MAC when the table is full.
+// Returns the new entry, or nullptr if the MAC is already tracked. Caller must hold mutex_.
+MacEntry* MacTracker::add_learned_locked(const uint8_t mac[6], const std::string& mac_str, int64_t now_ms) {
+    for (const auto& e : entries_) {
+        if (memcmp(e.mac, mac, 6) == 0) {
+            return nullptr;
+        }
+    }
+
+    size_t learned = 0;
+    auto oldest = entries_.end();
+    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+        if (!it->is_static) {
+            learned++;
+            if (oldest == entries_.end() || it->last_seen_ms < oldest->last_seen_ms) {
+                oldest = it;
+            }
+        }
+    }
+    if (learned >= MAX_LEARNED_MACS && oldest != entries_.end()) {
+        ESP_LOGW(TAG, "Learned MAC table full (%u); evicting least recently seen %s",
+                 static_cast<unsigned>(MAX_LEARNED_MACS), oldest->mac_str.c_str());
+        entries_.erase(oldest);
+    }
+
+    MacEntry entry = {};
+    memcpy(entry.mac, mac, 6);
+    entry.mac_str = mac_str;
+    entry.first_seen_ms = now_ms;
+    entry.last_seen_ms = now_ms;
+    entry.packet_count = 0;
+    entry.is_static = false;
+    entries_.push_back(entry);
+    return &entries_.back();
+}
+
+void MacTracker::request_save() {
+    if (persist_task_ != nullptr) {
+        xTaskNotifyGive(persist_task_);
+    }
+}
+
+void MacTracker::persist_task_entry(void* arg) {
+    auto* self = static_cast<MacTracker*>(arg);
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(PERSIST_DEBOUNCE_MS));
+        // Changes made during the debounce delay are included in the snapshot below.
+        ulTaskNotifyTake(pdTRUE, 0);
+        self->save_to_nvs();
+    }
+}
+
+void MacTracker::save_to_nvs() {
+    // Snapshot under the lock so the flag and the MAC list are mutually consistent, then write
+    // without holding the lock so packet processing is not blocked by flash I/O.
+    std::vector<uint8_t> blob;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        blob.push_back(purge_on_next_rx_.load(std::memory_order_relaxed) ? 1 : 0);
+        for (const auto& e : entries_) {
+            if (!e.is_static) {
+                blob.insert(blob.end(), e.mac, e.mac + 6);
+            }
+        }
+    }
+
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -138,27 +246,31 @@ void MacTracker::save_learned_to_nvs() {
         return;
     }
 
-    // Erase existing keys in namespace
-    nvs_erase_all(handle);
-
-    uint8_t purge_armed = purge_on_next_rx_.load(std::memory_order_relaxed) ? 1 : 0;
-    nvs_set_u8(handle, "purge_arm", purge_armed);
-
-    uint32_t learned_idx = 0;
-    for (const auto& e : entries_) {
-        if (!e.is_static) {
-            char key[16];
-            snprintf(key, sizeof(key), "m%lu", static_cast<unsigned long>(learned_idx));
-            nvs_set_str(handle, key, e.mac_str.c_str());
-            learned_idx++;
-        }
+    err = nvs_set_blob(handle, NVS_STATE_KEY, blob.data(), blob.size());
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
     }
-    nvs_set_u32(handle, "count", learned_idx);
-    nvs_commit(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to persist MAC database: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return;
+    }
+
+    if (legacy_keys_present_) {
+        nvs_erase_key(handle, "purge_arm");
+        nvs_erase_key(handle, "count");
+        for (uint32_t i = 0; i < legacy_key_count_; ++i) {
+            char key[16];
+            snprintf(key, sizeof(key), "m%lu", static_cast<unsigned long>(i));
+            nvs_erase_key(handle, key);
+        }
+        nvs_commit(handle);
+        legacy_keys_present_ = false;
+    }
     nvs_close(handle);
 
-    ESP_LOGI(TAG, "Persisted %lu learned MAC(s) to NVS (purge_arm=%d)",
-             static_cast<unsigned long>(learned_idx), purge_armed);
+    ESP_LOGI(TAG, "Persisted %u learned MAC(s) to NVS (purge_arm=%d)",
+             static_cast<unsigned>((blob.size() - 1) / 6), blob[0]);
 }
 
 bool MacTracker::on_frame_received(const uint8_t src_mac[6]) {
@@ -209,17 +321,12 @@ bool MacTracker::on_frame_received(const uint8_t src_mac[6]) {
             }
         }
         if (!already_static) {
-            MacEntry entry = {};
-            memcpy(entry.mac, src_mac, 6);
-            entry.mac_str = mac_str;
-            entry.first_seen_ms = now_ms;
-            entry.last_seen_ms = now_ms;
-            entry.packet_count = 1;
-            entry.is_static = false;
-            entries_.push_back(entry);
+            if (MacEntry* added = add_learned_locked(src_mac, mac_str, now_ms)) {
+                added->packet_count = 1;
+            }
         }
 
-        save_learned_to_nvs();
+        request_save();
         return true;
     }
 
@@ -237,19 +344,14 @@ bool MacTracker::on_frame_received(const uint8_t src_mac[6]) {
     }
 
     // 4. Newly discovered MAC address
-    MacEntry entry = {};
-    memcpy(entry.mac, src_mac, 6);
-    entry.mac_str = mac_str;
-    entry.first_seen_ms = now_ms;
-    entry.last_seen_ms = now_ms;
-    entry.packet_count = 1;
-    entry.is_static = false;
-    entries_.push_back(entry);
+    if (MacEntry* added = add_learned_locked(src_mac, mac_str, now_ms)) {
+        added->packet_count = 1;
+    }
 
     ESP_LOGI(TAG, ">>> [NEW MAC RECORDED] %s (Total tracked: %u)",
              mac_str.c_str(), static_cast<unsigned>(entries_.size()));
 
-    save_learned_to_nvs();
+    request_save();
     return true;
 }
 
@@ -281,14 +383,11 @@ uint32_t MacTracker::get_total_rx_packets() const {
 }
 
 void MacTracker::arm_purge_on_next_rx() {
-    purge_on_next_rx_.store(true, std::memory_order_relaxed);
-
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK) {
-        nvs_set_u8(handle, "purge_arm", 1);
-        nvs_commit(handle);
-        nvs_close(handle);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        purge_on_next_rx_.store(true, std::memory_order_relaxed);
     }
+    request_save();
     ESP_LOGI(TAG, "Armed purge on next PC packet. When PC wakes, old entries will be cleared.");
 }
 
@@ -302,7 +401,7 @@ void MacTracker::clear_learned() {
     }
     entries_ = std::move(retained_static);
     purge_on_next_rx_.store(false, std::memory_order_relaxed);
-    save_learned_to_nvs();
+    request_save();
     ESP_LOGI(TAG, "Manually cleared all learned MAC addresses.");
 }
 

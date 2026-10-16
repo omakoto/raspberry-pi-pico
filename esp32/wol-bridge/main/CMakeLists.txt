@@ -26,6 +26,7 @@ idf_component_register(
         nvs_flash
         fatfs
         wear_levelling
+        esp_partition
         mdns
         esp_tinyusb
 )

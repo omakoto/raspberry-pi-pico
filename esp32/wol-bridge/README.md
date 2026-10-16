@@ -10,7 +10,7 @@ It connects **directly to a PC's Ethernet port** (no hub or switch needed), moni
 
 - **Direct PC Connection**: Connects straight into the PC's Ethernet jack via a standard patch cable (Gigabit NIC Auto-MDIX handles polarity automatically).
 - **Automatic MAC Discovery**: Operates the W5500 in promiscuous mode (`ETH_CMD_S_PROMISCUOUS`) to sniff incoming raw Layer-2 Ethernet frames (DHCP discovers, ARP queries, IPv6 RS, mDNS) and records all source MAC addresses without requiring a DHCP server on the cable.
-- **VM Support**: Tracks multiple MAC addresses simultaneously to wake hosts with bridged virtual machines.
+- **VM Support**: Tracks multiple MAC addresses simultaneously to wake hosts with bridged virtual machines. Up to 16 learned MACs are kept; when full, the least recently seen one is evicted.
 - **Smart Purge Strategy**:
   - Automatically persists learned MAC addresses to NVS flash so they survive ESP32 power interruptions while the PC is off.
   - When a Wake-on-LAN packet is triggered via Wi-Fi, the bridge arms an automatic purge: once the PC wakes up and transmits its first packet, all stale MAC addresses from previous PCs are purged, and tracking restarts fresh with that new machine.
@@ -90,8 +90,9 @@ spi_speed_mhz  = 25
 - **Wake the PC**:
   ```bash
   curl http://wol.local/wake
-  # Or request JSON response:
-  curl -H "Accept: application/json" http://wol.local/wake
+  # Or request JSON response. If no packet could be sent, it returns HTTP 503 with
+  # "status" set to "link_down" or "no_targets":
+  curl -f -H "Accept: application/json" http://wol.local/wake
   ```
 
 - **Query status and recorded MACs**:

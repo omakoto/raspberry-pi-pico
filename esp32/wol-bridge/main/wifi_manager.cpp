@@ -100,11 +100,14 @@ void WifiManager::handle_ip_event(int32_t event_id, void* event_data) {
         auto* event = static_cast<ip_event_got_ip_t*>(event_data);
         char ip_str[32];
         esp_ip4addr_ntoa(&event->ip_info.ip, ip_str, sizeof(ip_str));
-        ip_address_ = ip_str;
+        {
+            std::lock_guard<std::mutex> lock(ip_mutex_);
+            ip_address_ = ip_str;
+        }
         connected_.store(true, std::memory_order_relaxed);
         xEventGroupSetBits(wifi_event_group_, WIFI_CONNECTED_BIT);
         xEventGroupClearBits(wifi_event_group_, WIFI_FAIL_BIT);
-        ESP_LOGI(TAG, "Connected to Wi-Fi successfully! IP: %s", ip_address_.c_str());
+        ESP_LOGI(TAG, "Connected to Wi-Fi successfully! IP: %s", ip_str);
     }
 }
 
@@ -113,6 +116,7 @@ bool WifiManager::is_connected() const {
 }
 
 std::string WifiManager::get_ip_address() const {
+    std::lock_guard<std::mutex> lock(ip_mutex_);
     return ip_address_;
 }
 
@@ -173,9 +177,15 @@ bool WifiManager::attempt_connect(const std::string& ssid, const std::string& pa
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
 
+    // Abort any connection still in progress from a previous attempt. The resulting
+    // DISCONNECTED event is delivered asynchronously; absorb it here so that it isn't mistaken
+    // for a failure of the attempt below. When the station is idle no event arrives and this
+    // just waits out the short timeout.
+    xEventGroupClearBits(wifi_event_group_, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    ESP_ERROR_CHECK(esp_wifi_disconnect());
+    xEventGroupWaitBits(wifi_event_group_, WIFI_FAIL_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(200));
     xEventGroupClearBits(wifi_event_group_, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
 
-    ESP_ERROR_CHECK(esp_wifi_disconnect());
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_connect());
 
@@ -198,7 +208,7 @@ bool WifiManager::attempt_connect(const std::string& ssid, const std::string& pa
 
 void WifiManager::connect(StatusLed* led) {
     if (is_connected()) {
-        ESP_LOGI(TAG, "Already connected to Wi-Fi. IP: %s", ip_address_.c_str());
+        ESP_LOGI(TAG, "Already connected to Wi-Fi. IP: %s", get_ip_address().c_str());
         return;
     }
 
@@ -224,6 +234,11 @@ void WifiManager::connect(StatusLed* led) {
     // Step 2: Scan and round-robin fallback
     while (!is_connected()) {
         std::set<std::string> visible_ssids = scan_networks();
+        // A slow earlier attempt (e.g. DHCP finishing after the timeout) may have succeeded
+        // during the scan; don't tear that connection down by trying another AP.
+        if (is_connected()) {
+            return;
+        }
 
         std::vector<size_t> candidates;
         size_t num_aps = ap_list_.size();
@@ -244,6 +259,9 @@ void WifiManager::connect(StatusLed* led) {
         }
 
         for (size_t idx : candidates) {
+            if (is_connected()) {
+                return;
+            }
             last_tried_idx = idx;
             if (led != nullptr) {
                 led->set_state(LedState::WIFI_CONNECTING);
@@ -258,5 +276,32 @@ void WifiManager::connect(StatusLed* led) {
             led->set_state(LedState::WIFI_RECONNECTING);
         }
         vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+}
+
+void WifiManager::run(StatusLed* led) {
+    if (ap_list_.empty()) {
+        connect(led);  // Logs the configuration problem and sets the LED state.
+        vTaskSuspend(nullptr);
+    }
+
+    bool first = true;
+    while (true) {
+        connect(led);
+        if (is_connected()) {
+            // The initial READY state is set by app_main once the services are up.
+            if (!first && led != nullptr) {
+                led->set_state(LedState::READY);
+            }
+            first = false;
+
+            // Block until the connection drops. WIFI_FAIL_BIT is cleared on GOT_IP and set on
+            // every disconnect, so a set bit here means the link is down.
+            xEventGroupWaitBits(wifi_event_group_, WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+            ESP_LOGW(TAG, "Wi-Fi connection lost; reconnecting...");
+            if (led != nullptr) {
+                led->set_state(LedState::WIFI_RECONNECTING);
+            }
+        }
     }
 }

@@ -5,10 +5,11 @@
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_msc.h"
 #include "tusb.h"
+#include "esp_partition.h"
 
 static const char* TAG = "UsbMsc";
 
-UsbMsc::UsbMsc() : initialized_(false) {}
+UsbMsc::UsbMsc() : initialized_(false), wl_handle_(WL_INVALID_HANDLE) {}
 
 UsbMsc::~UsbMsc() {}
 
@@ -25,7 +26,7 @@ static void cdc_line_coding_changed(int itf, cdcacm_event_t *event) {
     }
 }
 
-bool UsbMsc::init(wl_handle_t wl_handle) {
+bool UsbMsc::init(const char* partition_label, const char* base_path) {
     ESP_LOGI(TAG, "Initializing TinyUSB Composite Device (CDC ACM + MSC Storage)...");
 
     const tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
@@ -51,13 +52,21 @@ bool UsbMsc::init(wl_handle_t wl_handle) {
     }
 
     // Initialize MSC Storage for FATFS wear-levelling partition
-    if (wl_handle != WL_INVALID_HANDLE) {
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, partition_label);
+    if (partition == nullptr) {
+        ESP_LOGW(TAG, "FATFS partition '%s' not found; MSC storage disabled", partition_label);
+    } else if (esp_err_t wl_ret = wl_mount(partition, &wl_handle_); wl_ret != ESP_OK) {
+        ESP_LOGW(TAG, "wl_mount failed for '%s': %s; MSC storage disabled", partition_label, esp_err_to_name(wl_ret));
+        wl_handle_ = WL_INVALID_HANDLE;
+    }
+    if (wl_handle_ != WL_INVALID_HANDLE) {
         const tinyusb_msc_storage_config_t msc_cfg = {
             .medium = {
-                .wl_handle = wl_handle
+                .wl_handle = wl_handle_
             },
             .fat_fs = {
-                .base_path = nullptr,
+                .base_path = const_cast<char*>(base_path),
                 .config = {
                     .format_if_mount_failed = false,
                     .max_files = 2,

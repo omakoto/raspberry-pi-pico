@@ -5,6 +5,9 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include "nvs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 struct MacEntry {
     uint8_t mac[6];
@@ -56,9 +59,16 @@ public:
     static bool parse_mac(const std::string& str, uint8_t mac_out[6]);
     static std::string format_mac(const uint8_t mac[6]);
 
+    // Upper bound on learned (non-static) MACs. When full, the least recently seen one is evicted.
+    static constexpr size_t MAX_LEARNED_MACS = 16;
+
 private:
     void load_from_nvs();
-    void save_learned_to_nvs();
+    bool load_legacy_from_nvs(nvs_handle_t handle);
+    MacEntry* add_learned_locked(const uint8_t mac[6], const std::string& mac_str, int64_t now_ms);
+    void request_save();
+    void save_to_nvs();
+    static void persist_task_entry(void* arg);
     bool is_own_mac(const uint8_t mac[6]) const;
 
     mutable std::mutex mutex_;
@@ -68,4 +78,9 @@ private:
     uint32_t total_rx_packets_;
     std::atomic<bool> purge_on_next_rx_;
     bool log_rx_packets_;
+    TaskHandle_t persist_task_;
+    // Number of learned MACs found in the old one-key-per-MAC NVS layout, which are erased after
+    // the first save in the current layout.
+    uint32_t legacy_key_count_;
+    bool legacy_keys_present_;
 };

@@ -60,7 +60,9 @@ LedState StatusLed::get_state() const {
 
 void StatusLed::pulse(uint32_t duration_ms) {
     uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
-    pulse_until_ms_.store(now_ms + duration_ms, std::memory_order_relaxed);
+    uint32_t until = now_ms + duration_ms;
+    // 0 means "no pulse pending", so nudge a deadline that wraps to exactly 0.
+    pulse_until_ms_.store(until != 0 ? until : 1, std::memory_order_relaxed);
 }
 
 void StatusLed::set_raw(bool on) {
@@ -78,10 +80,16 @@ void StatusLed::run_task() {
         uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
         uint32_t pulse_until = pulse_until_ms_.load(std::memory_order_relaxed);
 
-        if (now_ms < pulse_until) {
-            set_raw(true);
-            vTaskDelay(pdMS_TO_TICKS(50));
-            continue;
+        // The millisecond clock is 32-bit and wraps every ~49.7 days, so compare by signed
+        // difference and clear expired deadlines; otherwise an old deadline would look like a
+        // future one after the clock wraps.
+        if (pulse_until != 0) {
+            if (static_cast<int32_t>(pulse_until - now_ms) > 0) {
+                set_raw(true);
+                vTaskDelay(pdMS_TO_TICKS(50));
+                continue;
+            }
+            pulse_until_ms_.compare_exchange_strong(pulse_until, 0, std::memory_order_relaxed);
         }
 
         LedState state = current_state_.load(std::memory_order_relaxed);

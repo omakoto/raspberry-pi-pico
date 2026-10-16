@@ -20,7 +20,9 @@ public:
     bool has_key(const std::string& key) const;
     std::vector<std::string> get_string_list(const std::string& key) const;
 
-    wl_handle_t get_wl_handle() const { return wl_handle_; }
+    // Unmounts the FATFS partition and releases its wear-levelling handle, so the partition can be
+    // handed over to the USB MSC driver. Parsed values remain available.
+    void unmount();
 
 private:
     bool parse_file(const std::string& path);
