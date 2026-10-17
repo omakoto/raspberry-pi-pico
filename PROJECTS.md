@@ -35,6 +35,16 @@ Merges several Bluetooth keyboards, mice and trackpads into one composite USB HI
   USB-out variant. It merges wired USB keyboards and mice plugged into a hub on the Teensy's
   USB host port, with VIAL remapping.
 
+## Wake-on-LAN bridge
+
+Plugs straight into a PC's Ethernet port through a WIZnet W5500 module, sniffs traffic in
+promiscuous mode to learn the PC's MAC addresses (including VMs) and keeps them in flash.
+`http://wol.local/wake` over Wi-Fi then sends magic packets (raw Layer 2 and UDP) to wake the PC.
+`config.toml` is edited through a USB drive.
+
+- [ESP32 version](esp32/wol-bridge/) (C++, ESP-IDF, ESP32-S3 + W5500 / USR-ES1): **Current**, the
+  only version.
+
 ## Stove heat monitor
 
 Watches the stovetop with an MLX90640 32×24 thermal camera and sends a Pushover notification
