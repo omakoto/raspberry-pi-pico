@@ -45,6 +45,16 @@ promiscuous mode to learn the PC's MAC addresses (including VMs) and keeps them 
 - [ESP32 version](esp32/wol-bridge/) (C++, ESP-IDF, ESP32-S3 + W5500 / USR-ES1): **Current**, the
   only version.
 
+## BLE button dispatcher
+
+Turns BLE (BTHome) buttons, such as Shelly BLU remotes, into HTTP/HTTPS requests and SwitchBot
+commands or scenes. A password-protected web page teaches it the buttons ("press it twice") and
+sets up the actions; it runs as a systemd service and is installed from a PC with one SSH command.
+
+- [Raspberry Pi version](pi/button-dispatcher/) (Python, aiohttp + bleak, Raspberry Pi 5):
+  **Current**, the only version. It lives under `pi/` as an exception to this repo's microcontroller
+  scope, because it may be ported to a microcontroller later.
+
 ## Stove heat monitor
 
 Watches the stovetop with an MLX90640 32×24 thermal camera and sends a Pushover notification

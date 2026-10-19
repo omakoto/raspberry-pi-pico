@@ -104,6 +104,8 @@ cat >"$WRAPPER" <<'EOF'
 if [[ $EUID -ne 0 ]]; then
     exec sudo "$0" "$@"
 fi
+# The program is not installed into the virtualenv; python finds it in the current directory.
+cd /opt/button-dispatcher
 exec runuser -u button-dispatcher -- /opt/button-dispatcher/venv/bin/python -m button_dispatcher \
     --data-dir /var/lib/button-dispatcher "$@"
 EOF

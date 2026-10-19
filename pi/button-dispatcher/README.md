@@ -3,9 +3,8 @@
 Turns BLE buttons (Shelly BLU remotes and any other BTHome button) into HTTP/HTTPS requests and
 SwitchBot actions. Everything is configured from a web page on the Pi; no file editing.
 
-**Status: built and tested on a PC** (unit tests, plus a headless-Chrome run through the whole web
-UI). Not yet installed on a Raspberry Pi, and not yet tried with a real button press on the
-installed service.
+**Status: working.** Installed on a Raspberry Pi 5 (`pi9`) and tried by hand with the Shelly remotes
+(2026-10-18). Also covered by 187 unit tests and a headless-Chrome run through the whole web UI.
 
 This lives under `pi/` as an exception to the repo's "microcontroller projects" scope: it targets a
 Raspberry Pi (Python, BlueZ), but the design keeps the BTHome parser, trigger matching and config
@@ -155,13 +154,17 @@ Data directory `/var/lib/button-dispatcher/` (service user only):
 
 ## Install
 
-From the host PC (the Pi must already be on the network with SSH enabled):
+From the host PC. The Pi needs to be on the network with SSH enabled and internet access for the
+first install, and to run Raspberry Pi OS (or another Debian-based system) with Python 3.11 or
+newer:
 
 ```
-./deploy.sh pi9.local            # or user@pi9.local
+./deploy.sh pi9.local               # or user@pi9.local; use user@<ip> if .local doesn't resolve
+./deploy.sh --port 8080 pi9.local   # a different web port (default 80)
 ```
 
-`deploy.sh` copies the project over SSH and runs `install.sh` on the Pi, which:
+`deploy.sh` copies the project over SSH and runs `install.sh` on the Pi through sudo (you may be
+asked for the Pi user's password once). `install.sh`:
 
 1. installs the few apt packages needed (venv support; BlueZ is normally already there),
 2. creates a `button-dispatcher` service user in the `bluetooth` group,
@@ -170,8 +173,45 @@ From the host PC (the Pi must already be on the network with SSH enabled):
    `CAP_NET_BIND_SERVICE`; the port can be changed),
 5. prints the URL.
 
-Running it again upgrades in place and keeps `/var/lib/button-dispatcher/`. `uninstall.sh` removes
-the service (and, only if asked, the data).
+Running it again **upgrades in place** and keeps the data. (`sudo ./install.sh [--port N]` also works
+directly on the Pi, from a copy of this directory.)
+
+After installing:
+
+1. Open the printed address (`http://pi9.local/`) and **set the password at once**: until then,
+   anyone on the network can.
+2. The Log tab should say "Bluetooth scanning started". If it says "Bluetooth scan stopped (...)",
+   the message gives the reason.
+3. On the Bindings tab, use "Add by pressing a button" with the remote near the Pi (the Pi's own
+   antenna decides how far away a button can be).
+
+### Where things are on the Pi
+
+- `/opt/button-dispatcher/`: the program and its Python virtualenv (replaced on every install).
+- `/var/lib/button-dispatcher/`: `config.json` (including the SwitchBot credentials) and
+  `auth.json`; mode 0700, owned by the service user; kept across upgrades.
+- `/etc/systemd/system/button-dispatcher.service`, and `/usr/local/bin/button-dispatcher`, a
+  wrapper that runs the command line (for example `--reset-password`) as the service user.
+
+### Everyday commands (run from the PC)
+
+```
+ssh pi9.local 'systemctl status button-dispatcher --no-pager'
+ssh pi9.local 'journalctl -u button-dispatcher -n 50 --no-pager'    # add -f to follow
+ssh pi9.local 'sudo systemctl restart button-dispatcher'
+ssh -t pi9.local button-dispatcher --reset-password                 # forgotten password
+```
+
+### Uninstall
+
+The installer doesn't leave `uninstall.sh` on the Pi, so copy it over first:
+
+```
+scp uninstall.sh pi9.local:/tmp/ && ssh -t pi9.local 'sudo /tmp/uninstall.sh'
+```
+
+This removes the service and the program but keeps the data and the service user, so a later
+install picks up where this one left off; add `--purge` to delete those as well.
 
 ## Project layout
 
@@ -208,9 +248,9 @@ pi/button-dispatcher/
 
 ## Status of the build
 
-1. Done: decoder, trigger engine, config, auth, learn flow, actions, SwitchBot client, web server,
-   web page, installer scripts.
-2. To do: install on `pi9.local` and try it with a real button press there; update `PROJECTS.md`.
+Everything in this README is built: decoder, trigger engine, config, auth, learn flow, actions,
+SwitchBot client, web server, web page, installer scripts, and the install on `pi9.local`. Not
+planned yet: see "Not in v1" below.
 
 ## Not in v1
 
