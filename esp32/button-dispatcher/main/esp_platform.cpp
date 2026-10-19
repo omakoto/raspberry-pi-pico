@@ -1,18 +1,16 @@
 #include "esp_platform.hpp"
 
-#include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <sys/stat.h>
 #include <sys/time.h>
-#include <unistd.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
-#include "esp_vfs_fat.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "mbedtls/md.h"
 #include "mbedtls/pkcs5.h"
 
@@ -20,8 +18,10 @@ static const char* TAG = "EspPlatform";
 
 namespace {
 
-constexpr const char* kStatePath = "/state";
+// Documents are stored as NVS blobs in their own partition. NVS writes only the changed data and is
+// power-fail safe on its own; a FAT file on wear levelling cost seconds per save.
 constexpr const char* kStatePartition = "state";
+constexpr const char* kStateNamespace = "docs";
 constexpr int kWorkerStackBytes = 10 * 1024;   // a TLS handshake needs several KB of stack
 constexpr int kWorkQueueLength = 16;
 // The wall clock counts from 1970 until SNTP sets it; anything before this is "not set yet".
@@ -84,36 +84,21 @@ esp_http_client_method_t to_client_method(const std::string& method) {
     return HTTP_METHOD_GET;
 }
 
-std::string read_file(const std::string& path, bool* ok) {
-    std::string text;
-    FILE* file = fopen(path.c_str(), "rb");
-    if (file == nullptr) {
-        *ok = false;
-        return text;
-    }
-    char buffer[512];
-    size_t count;
-    while ((count = fread(buffer, 1, sizeof(buffer), file)) > 0) text.append(buffer, count);
-    fclose(file);
-    *ok = true;
-    return text;
-}
 
 }  // namespace
 
-EspPlatform::EspPlatform() : state_wl_(WL_INVALID_HANDLE), state_mounted_(false), work_queue_(nullptr) {}
+EspPlatform::EspPlatform() : state_mounted_(false), work_queue_(nullptr) {}
 
 bool EspPlatform::init() {
-    const esp_vfs_fat_mount_config_t mount_config = {
-        .format_if_mount_failed = true,  // the first boot finds an empty partition
-        .max_files = 4,
-        .allocation_unit_size = CONFIG_WL_SECTOR_SIZE,
-        .disk_status_check_enable = false,
-        .use_one_fat = false,
-    };
-    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(kStatePath, kStatePartition, &mount_config, &state_wl_);
+    esp_err_t err = nvs_flash_init_partition(kStatePartition);
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // The first boot finds an empty partition (or leftovers of an older layout).
+        ESP_LOGW(TAG, "Formatting the state partition");
+        ESP_ERROR_CHECK(nvs_flash_erase_partition(kStatePartition));
+        err = nvs_flash_init_partition(kStatePartition);
+    }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount the state partition: %s (settings will not be saved)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to open the state partition: %s (settings will not be saved)", esp_err_to_name(err));
     } else {
         state_mounted_ = true;
     }
@@ -169,45 +154,36 @@ std::string EspPlatform::pbkdf2_hmac_sha256(const std::string& password, const s
 
 bool EspPlatform::load_document(const std::string& name, std::string* text) {
     if (!state_mounted_) return false;
-    const std::string path = std::string(kStatePath) + "/" + name;
-    const std::string temp = path + ".tmp";
-    bool ok = false;
-    *text = read_file(path, &ok);
-    if (ok) return true;
-    // A save that was interrupted after the old file was removed but before the new one was renamed leaves
-    // only the complete temporary file; finish that rename.
-    struct stat info;
-    if (stat(temp.c_str(), &info) == 0 && rename(temp.c_str(), path.c_str()) == 0) {
-        ESP_LOGW(TAG, "Recovered %s from an interrupted save", name.c_str());
-        *text = read_file(path, &ok);
+    nvs_handle_t handle;
+    if (nvs_open_from_partition(kStatePartition, kStateNamespace, NVS_READONLY, &handle) != ESP_OK) return false;
+    size_t size = 0;
+    bool ok = nvs_get_blob(handle, name.c_str(), nullptr, &size) == ESP_OK;
+    if (ok) {
+        text->assign(size, '\0');
+        ok = nvs_get_blob(handle, name.c_str(), text->data(), &size) == ESP_OK;
     }
+    nvs_close(handle);
     return ok;
 }
 
 bool EspPlatform::save_document(const std::string& name, const std::string& text) {
     if (!state_mounted_) return false;
-    const std::string path = std::string(kStatePath) + "/" + name;
-    const std::string temp = path + ".tmp";
-    FILE* file = fopen(temp.c_str(), "wb");
-    if (file == nullptr) {
-        ESP_LOGE(TAG, "Cannot create %s: errno %d", temp.c_str(), errno);
+    const int64_t start_us = esp_timer_get_time();
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open_from_partition(kStatePartition, kStateNamespace, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Cannot open the state store: %s", esp_err_to_name(err));
         return false;
     }
-    const bool written = fwrite(text.data(), 1, text.size(), file) == text.size() && fflush(file) == 0 &&
-                         fsync(fileno(file)) == 0;
-    fclose(file);
-    if (!written) {
-        ESP_LOGE(TAG, "Cannot write %s", temp.c_str());
-        remove(temp.c_str());
+    err = nvs_set_blob(handle, name.c_str(), text.data(), text.size());
+    if (err == ESP_OK) err = nvs_commit(handle);
+    nvs_close(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Cannot save %s: %s", name.c_str(), esp_err_to_name(err));
         return false;
     }
-    // FAT cannot rename over an existing file, so the old one goes first; the complete temporary file
-    // covers the short gap (see load_document).
-    remove(path.c_str());
-    if (rename(temp.c_str(), path.c_str()) != 0) {
-        ESP_LOGE(TAG, "Cannot rename %s: errno %d", temp.c_str(), errno);
-        return false;
-    }
+    ESP_LOGI(TAG, "Saved %s (%u bytes) in %lld ms", name.c_str(), static_cast<unsigned>(text.size()),
+             static_cast<long long>((esp_timer_get_time() - start_us) / 1000));
     return true;
 }
 
@@ -236,7 +212,9 @@ dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, co
     for (const auto& header : headers) esp_http_client_set_header(client, header.first.c_str(), header.second.c_str());
     if (!body.empty()) esp_http_client_set_post_field(client, body.data(), static_cast<int>(body.size()));
 
+    const int64_t started_us = esp_timer_get_time();
     const esp_err_t err = esp_http_client_perform(client);
+    const long long took_ms = static_cast<long long>((esp_timer_get_time() - started_us) / 1000);
     if (err != ESP_OK) {
         const int socket_errno = esp_http_client_get_errno(client);
         const bool timed_out = err == ESP_ERR_TIMEOUT || err == ESP_ERR_HTTP_EAGAIN || socket_errno == ETIMEDOUT ||
@@ -247,6 +225,7 @@ dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, co
     } else {
         result.status = esp_http_client_get_status_code(client);
         result.reason = reason_phrase(result.status);
+        ESP_LOGI(TAG, "%s %s -> %d in %lld ms", method.c_str(), url.c_str(), result.status, took_ms);
     }
     esp_http_client_cleanup(client);
     return result;

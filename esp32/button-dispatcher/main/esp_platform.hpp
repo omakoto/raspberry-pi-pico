@@ -6,7 +6,6 @@
 #include "dispatcher/platform.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "wear_levelling.h"
 
 // The ESP-IDF implementation of dispatcher::Platform: esp_timer and SNTP time, hardware-backed mbedtls
 // crypto, the private `state` FAT partition for the stored documents, esp_http_client for the network, and a
@@ -40,7 +39,6 @@ private:
     static void worker_entry(void* arg);
     void worker_loop();
 
-    wl_handle_t state_wl_;
     bool state_mounted_;
     QueueHandle_t work_queue_;
 };

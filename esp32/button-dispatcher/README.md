@@ -76,16 +76,19 @@ run unchanged in the host tests (with a fake platform) and on the device.
 
 One mutex guards the application state (engine, learn session, config, log). NimBLE's callback only
 filters and queues advertisements; a worker task processes them. Actions (HTTP, SwitchBot) run on their
-own task, one at a time, because a TLS request can take seconds. Handlers that call out to the
-network ("Run now", SwitchBot lists) use `esp_http_server`'s asynchronous request support so the web
-page stays responsive meanwhile.
+own task, one at a time, because a TLS request can take seconds. Web requests, including the ones that
+call out to the network ("Run now", SwitchBot lists), are answered on `esp_http_server`'s own thread, so
+the page waits for them and other page requests queue behind a slow one. (An asynchronous variant was
+tried first; on the board a Save request was left unserved for up to a minute after one.)
 
 ### Flash and memory
 
 8 MB flash: a 3 MB app partition (NimBLE, TLS and the web assets will take about 2 MB), the 1 MB
-`storage` FAT drive with `config.toml` (the drag-and-drop drive), and a separate 1 MB `state` FAT
+`storage` FAT drive with `config.toml` (the drag-and-drop drive), and a separate 1 MB `state` NVS
 partition for `config.json` and the password hash, so credentials are not on the USB-visible drive and
-are not overwritten when the firmware is flashed. NimBLE is built as an observer only, to save RAM.
+are not overwritten when the firmware is flashed. NVS rather than FAT because a FAT save on wear
+levelling took about 3 s (dozens of 512-byte writes, each rewriting a 4 KB flash block); an NVS save
+takes milliseconds and is atomic. NimBLE is built as an observer only, to save RAM.
 
 ### Bluetooth
 

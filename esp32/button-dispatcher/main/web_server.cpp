@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/task.h"
 
 static const char* TAG = "WebServer";
@@ -24,8 +25,6 @@ EMBEDDED_FILE(favicon_svg_gz)
 namespace {
 
 constexpr size_t kMaxRequestBody = 32 * 1024;   // an imported config is the largest thing the page sends
-constexpr int kSlowWorkerStackBytes = 12 * 1024;  // TLS handshakes in "Run now" need the room
-constexpr int kSlowQueueLength = 4;
 
 struct StaticFile {
     const char* uri;
@@ -199,31 +198,19 @@ bool build_request(httpd_req_t* req, dispatcher::Request* request, dispatcher::R
 
 }  // namespace
 
-struct WebServer::SlowJob {
-    httpd_req_t* req;          // the detached copy from httpd_req_async_handler_begin
-    dispatcher::Request request;
-};
-
-WebServer::WebServer(dispatcher::Api& api) : api_(api), server_(nullptr), slow_queue_(nullptr) {}
+WebServer::WebServer(dispatcher::Api& api) : api_(api), server_(nullptr) {}
 
 WebServer::~WebServer() { stop(); }
 
 bool WebServer::start(int port) {
     stop();
 
-    if (slow_queue_ == nullptr) {
-        slow_queue_ = xQueueCreate(kSlowQueueLength, sizeof(SlowJob*));
-        if (slow_queue_ == nullptr ||
-            xTaskCreate(slow_worker_entry, "web_slow", kSlowWorkerStackBytes, this, 4, nullptr) != pdPASS) {
-            ESP_LOGE(TAG, "Failed to start the slow-request worker");
-            return false;
-        }
-    }
-
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port;
     config.max_uri_handlers = 16;
-    config.stack_size = 8192;
+    // Requests that call out to the network ("Run now", SwitchBot lists) run on this thread too, and a TLS
+    // handshake needs the room.
+    config.stack_size = 12 * 1024;
     config.uri_match_fn = httpd_uri_match_wildcard;
     // Free the oldest idle connection when a new one arrives, so a browser that keeps several
     // connections open cannot lock the page out.
@@ -275,35 +262,13 @@ esp_err_t WebServer::handle_api(httpd_req_t* req) {
         return send_api_response(req, response);
     }
 
-    if (!api_.is_slow(request)) return send_api_response(req, api_.handle(request));
-
-    // A slow request is detached from the server's thread and answered by the worker.
-    if (uxQueueSpacesAvailable(slow_queue_) == 0) {
-        return send_api_response(req, error_response(503, "busy; try again in a moment"));
-    }
-    httpd_req_t* detached = nullptr;
-    if (httpd_req_async_handler_begin(req, &detached) != ESP_OK) {
-        return send_api_response(req, error_response(503, "busy; try again in a moment"));
-    }
-    auto* job = new SlowJob{detached, std::move(request)};
-    if (xQueueSend(slow_queue_, &job, 0) != pdTRUE) {
-        // Only possible if the queue filled up in between: answer from here instead.
-        send_api_response(detached, error_response(503, "busy; try again in a moment"));
-        httpd_req_async_handler_complete(detached);
-        delete job;
-    }
-    return ESP_OK;
-}
-
-void WebServer::slow_worker_entry(void* arg) { static_cast<WebServer*>(arg)->slow_worker_loop(); }
-
-void WebServer::slow_worker_loop() {
-    while (true) {
-        SlowJob* job = nullptr;
-        if (xQueueReceive(slow_queue_, &job, portMAX_DELAY) != pdTRUE || job == nullptr) continue;
-        const dispatcher::Response response = api_.handle(job->request);
-        send_api_response(job->req, response);
-        httpd_req_async_handler_complete(job->req);
-        delete job;
-    }
+    if (req->method != HTTP_GET) ESP_LOGI(TAG, "%s %s received", request.method.c_str(), request.path.c_str());
+    const int64_t start_us = esp_timer_get_time();
+    const dispatcher::Response answer = api_.handle(request);
+    const int64_t handled_us = esp_timer_get_time();
+    const esp_err_t sent = send_api_response(req, answer);
+    ESP_LOGI(TAG, "%s %s -> %d: handled in %lld ms, sent in %lld ms (err %d)", request.method.c_str(),
+             request.path.c_str(), answer.status, static_cast<long long>((handled_us - start_us) / 1000),
+             static_cast<long long>((esp_timer_get_time() - handled_us) / 1000), static_cast<int>(sent));
+    return sent;
 }

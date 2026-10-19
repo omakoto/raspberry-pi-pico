@@ -3,14 +3,12 @@
 #include <esp_http_server.h>
 
 #include "dispatcher/api.hpp"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 
 // The web server: serves the embedded single-page UI and hands the /api routes to dispatcher::Api.
 //
-// Requests the API marks as slow (they call out to the network) are detached from the server's single
-// request thread with the asynchronous-request support and answered by a worker task, so the page stays
-// responsive while, for example, "Run now" waits for a slow server.
+// Every request is answered on the server's own thread, including the ones that call out to the network
+// ("Run now", SwitchBot lists): the page waits for them anyway, so plain synchronous handlers are enough and
+// avoid esp_http_server's asynchronous-request machinery.
 class WebServer {
 public:
     explicit WebServer(dispatcher::Api& api);
@@ -20,15 +18,10 @@ public:
     void stop();
 
 private:
-    struct SlowJob;
-
     static esp_err_t api_handler(httpd_req_t* req);
-    static void slow_worker_entry(void* arg);
 
     esp_err_t handle_api(httpd_req_t* req);
-    void slow_worker_loop();
 
     dispatcher::Api& api_;
     httpd_handle_t server_;
-    QueueHandle_t slow_queue_;
 };
