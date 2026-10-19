@@ -1,0 +1,30 @@
+[Unit]
+Description=BLE button dispatcher (BTHome buttons to HTTP and SwitchBot actions)
+Documentation=file:///opt/button-dispatcher/README.md
+After=bluetooth.service network-online.target
+Wants=bluetooth.service network-online.target
+
+[Service]
+Type=simple
+User=button-dispatcher
+Group=button-dispatcher
+# BlueZ lets members of the "bluetooth" group scan over D-Bus.
+SupplementaryGroups=bluetooth
+WorkingDirectory=/opt/button-dispatcher
+ExecStart=/opt/button-dispatcher/venv/bin/python -m button_dispatcher --data-dir /var/lib/button-dispatcher --port 80
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+# Lets the unprivileged service listen on port 80 (and nothing else).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# The data directory holds the SwitchBot credentials, so only the service can read it.
+StateDirectory=button-dispatcher
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

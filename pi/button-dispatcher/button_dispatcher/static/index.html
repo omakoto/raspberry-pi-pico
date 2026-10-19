@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Button dispatcher</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<!-- Sign-in / first-run password screen -->
+<main id="auth-view" class="auth" hidden>
+  <h1>Button dispatcher</h1>
+  <p id="auth-notice" class="notice" hidden></p>
+
+  <form id="setup-form" class="card" hidden novalidate>
+    <h2>Set a password</h2>
+    <p class="help">This page controls actions on your devices (web requests and SwitchBot commands),
+      so anyone who can sign in can trigger them. Choose a password that is hard to guess.</p>
+    <div class="field">
+      <label for="setup-password">Password (at least 8 characters)</label>
+      <input id="setup-password" type="password" autocomplete="new-password" minlength="8" required>
+    </div>
+    <div class="field">
+      <label for="setup-repeat">Repeat password</label>
+      <input id="setup-repeat" type="password" autocomplete="new-password" minlength="8" required>
+    </div>
+    <p id="setup-error" class="error" role="alert" hidden></p>
+    <div class="actions"><button type="submit" class="primary">Set password and sign in</button></div>
+  </form>
+
+  <form id="login-form" class="card" hidden novalidate>
+    <h2>Sign in</h2>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required>
+    </div>
+    <p id="login-error" class="error" role="alert" hidden></p>
+    <div class="actions"><button type="submit" class="primary">Sign in</button></div>
+  </form>
+</main>
+
+<!-- Main application -->
+<div id="app-view" hidden>
+  <header class="topbar">
+    <h1>Button dispatcher</h1>
+    <button id="signout" type="button">Sign out</button>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" id="tab-buttons" data-tab="buttons" aria-controls="panel-buttons">Devices</button>
+    <button type="button" role="tab" id="tab-bindings" data-tab="bindings" aria-controls="panel-bindings">Bindings</button>
+    <button type="button" role="tab" id="tab-log" data-tab="log" aria-controls="panel-log">Log</button>
+    <button type="button" role="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings">Settings</button>
+  </nav>
+
+  <main class="content">
+    <p id="page-error" class="error" role="alert" hidden></p>
+
+    <section id="panel-buttons" role="tabpanel" aria-labelledby="tab-buttons" hidden>
+      <div class="section-head">
+        <h2>Devices</h2>
+        <button id="find-button" type="button" class="primary">Find device</button>
+      </div>
+      <p class="help">A device is a remote or a button. All the physical buttons of one remote belong to
+        the same device; each physical button gets its own binding (Bindings tab).</p>
+      <div id="buttons-list" class="list"></div>
+    </section>
+
+    <section id="panel-bindings" role="tabpanel" aria-labelledby="tab-bindings" hidden>
+      <div class="section-head">
+        <h2>Bindings</h2>
+        <div class="actions">
+          <button id="add-binding-press" type="button" class="primary">Add by pressing a button</button>
+          <button id="add-binding" type="button">Add manually</button>
+        </div>
+      </div>
+      <div id="bindings-list" class="list"></div>
+    </section>
+
+    <section id="panel-log" role="tabpanel" aria-labelledby="tab-log" hidden>
+      <div class="section-head">
+        <h2>Log</h2>
+        <button id="log-clear" type="button">Clear</button>
+      </div>
+      <p id="log-error" class="error" role="alert" hidden></p>
+      <ul id="log-list" class="log"></ul>
+    </section>
+
+    <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <h2 class="visually-hidden">Settings</h2>
+
+      <form id="settings-form" class="card" novalidate>
+        <h3>HTTP requests</h3>
+        <div class="field">
+          <label for="set-timeout">Default timeout (seconds, 1-60)</label>
+          <input id="set-timeout" type="number" min="1" max="60" step="any" inputmode="decimal" required>
+        </div>
+        <div class="actions"><button type="submit" class="primary">Save</button></div>
+      </form>
+
+      <form id="cred-form" class="card" novalidate>
+        <h3>SwitchBot credentials</h3>
+        <p class="help">Found in the SwitchBot app under Profile, Preferences, App Version (tap ten times),
+          Developer Options. Stored values are never shown again; leave a field empty to keep its stored value.</p>
+        <p id="cred-status" class="status-line"></p>
+        <div class="field">
+          <label for="cred-token">Token</label>
+          <input id="cred-token" type="password" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="cred-secret">Secret</label>
+          <input id="cred-secret" type="password" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="actions">
+          <button type="submit" class="primary">Save credentials</button>
+          <button id="cred-remove" type="button" class="danger">Remove credentials</button>
+        </div>
+      </form>
+
+      <form id="password-form" class="card" novalidate>
+        <h3>Change password</h3>
+        <div class="field">
+          <label for="pw-current">Current password</label>
+          <input id="pw-current" type="password" autocomplete="current-password" required>
+        </div>
+        <div class="field">
+          <label for="pw-new">New password (at least 8 characters)</label>
+          <input id="pw-new" type="password" autocomplete="new-password" minlength="8" required>
+        </div>
+        <div class="field">
+          <label for="pw-repeat">Repeat new password</label>
+          <input id="pw-repeat" type="password" autocomplete="new-password" minlength="8" required>
+        </div>
+        <div class="actions"><button type="submit" class="primary">Change password</button></div>
+      </form>
+
+      <div class="card">
+        <h3>Export / import</h3>
+        <div class="field check">
+          <input id="export-creds" type="checkbox">
+          <label for="export-creds">Include SwitchBot credentials</label>
+        </div>
+        <p class="help warn">If checked, the file will contain your SwitchBot token and secret. Keep it private.</p>
+        <div class="actions"><a id="export-link" class="button" href="/api/export" download>Download configuration</a></div>
+
+        <hr>
+        <div class="field">
+          <label for="import-file">Configuration file (.json)</label>
+          <input id="import-file" type="file" accept=".json,application/json">
+        </div>
+        <div class="field">
+          <label for="import-mode">Mode</label>
+          <select id="import-mode">
+            <option value="merge">Merge (add and overwrite matching ids)</option>
+            <option value="replace">Replace everything</option>
+          </select>
+        </div>
+        <p id="import-result" class="status-line" role="status" hidden></p>
+        <p id="import-error" class="error" role="alert" hidden></p>
+        <div class="actions"><button id="import-go" type="button" class="primary">Import</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Find button dialog -->
+<dialog id="learn-dialog" aria-labelledby="learn-title">
+  <div class="dialog-body">
+    <h2 id="learn-title">Press a button</h2>
+    <p id="learn-message" class="big-message" aria-live="polite"></p>
+    <p id="learn-seconds" class="help" hidden></p>
+    <dl id="learn-candidate" class="details" hidden></dl>
+    <p id="learn-known" class="notice" hidden></p>
+    <div id="learn-name-field" class="field" hidden>
+      <label for="learn-name">Name for this device (for example, where it is)</label>
+      <input id="learn-name" type="text" maxlength="60" autocomplete="off">
+    </div>
+    <div id="learn-saved" hidden>
+      <p id="learn-saved-text" class="notice"></p>
+    </div>
+    <p id="learn-error" class="error" role="alert" hidden></p>
+    <div class="actions">
+      <button id="learn-save-binding" type="button" class="primary" hidden>Add a binding for this press</button>
+      <button id="learn-save" type="button" hidden>Save device only</button>
+      <button id="learn-again" type="button" class="primary" hidden>Try again</button>
+      <button id="learn-binding" type="button" class="primary" hidden>Create a binding for this press</button>
+      <button id="learn-close" type="button">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Rename dialog -->
+<dialog id="rename-dialog" aria-labelledby="rename-title">
+  <form id="rename-form" class="dialog-body" novalidate>
+    <h2 id="rename-title">Rename device</h2>
+    <div class="field">
+      <label for="rename-name">Name</label>
+      <input id="rename-name" type="text" maxlength="60" autocomplete="off" required>
+    </div>
+    <p id="rename-error" class="error" role="alert" hidden></p>
+    <div class="actions">
+      <button type="submit" class="primary">Save</button>
+      <button id="rename-cancel" type="button">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Binding editor dialog -->
+<dialog id="binding-dialog" aria-labelledby="binding-title">
+  <form id="binding-form" class="dialog-body" novalidate>
+    <h2 id="binding-title">Binding</h2>
+
+    <div class="field">
+      <label for="b-name">Name</label>
+      <input id="b-name" type="text" maxlength="60" autocomplete="off" required>
+    </div>
+    <div class="field check">
+      <input id="b-enabled" type="checkbox">
+      <label for="b-enabled">Enabled</label>
+    </div>
+
+    <fieldset>
+      <legend>Trigger</legend>
+      <p id="b-nobuttons" class="notice" hidden>There are no devices yet. Add one first (Devices tab, Find
+        device), or close this and use "Add by pressing a button".</p>
+      <div class="field">
+        <label for="b-button">Device (the remote or button)</label>
+        <select id="b-button"></select>
+      </div>
+      <div class="field">
+        <label for="b-input">Physical button</label>
+        <select id="b-input"></select>
+      </div>
+      <div class="field">
+        <label for="b-event">Press type</label>
+        <select id="b-event"></select>
+      </div>
+      <div class="field">
+        <label for="b-channel">Channel (on a Shelly Remote Control, LED 1 = channel 0)</label>
+        <select id="b-channel"></select>
+      </div>
+      <div class="field">
+        <label for="b-cooldown">Cooldown (ms, 0-60000)</label>
+        <input id="b-cooldown" type="number" min="0" max="60000" step="1" inputmode="numeric">
+        <p class="help">Ignores repeat triggers for this long after the binding runs.</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Action</legend>
+      <div class="field">
+        <label for="b-type">Type</label>
+        <select id="b-type">
+          <option value="http">HTTP request</option>
+          <option value="switchbot_command">SwitchBot command</option>
+          <option value="switchbot_scene">SwitchBot scene</option>
+        </select>
+      </div>
+
+      <div id="sec-http">
+        <div class="field">
+          <label for="h-method">Method</label>
+          <select id="h-method"></select>
+        </div>
+        <div class="field">
+          <label for="h-url">URL</label>
+          <input id="h-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.com/hook">
+        </div>
+        <div class="field">
+          <label for="h-headers">Headers (one "Name: value" per line)</label>
+          <textarea id="h-headers" rows="3" spellcheck="false" autocomplete="off"></textarea>
+        </div>
+        <div class="field">
+          <label for="h-body">Body (optional)</label>
+          <textarea id="h-body" rows="3" spellcheck="false" autocomplete="off"></textarea>
+        </div>
+        <div class="field">
+          <label for="h-timeout">Timeout (seconds, optional)</label>
+          <input id="h-timeout" type="number" min="1" max="60" step="any" inputmode="decimal">
+          <p class="help">Empty uses the default from Settings.</p>
+        </div>
+      </div>
+
+      <div id="sec-sbcmd" hidden>
+        <div class="field">
+          <label for="c-device">Device</label>
+          <div class="row">
+            <select id="c-device"></select>
+            <button id="c-refresh" type="button">Refresh</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="c-command">Command</label>
+          <select id="c-command"></select>
+          <input id="c-command-other" type="text" autocomplete="off" spellcheck="false" aria-label="Command name" placeholder="Command name" hidden>
+          <p id="c-help" class="help" hidden></p>
+          <ul id="c-notes" class="help notes" hidden></ul>
+        </div>
+        <div class="field">
+          <label for="c-param">Parameter</label>
+          <input id="c-param" type="text" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field check">
+          <input id="c-json" type="checkbox">
+          <label for="c-json">Parameter is JSON</label>
+        </div>
+        <div class="field">
+          <label for="c-ctype">Command type</label>
+          <select id="c-ctype">
+            <option value="command">command</option>
+            <option value="customize">customize</option>
+          </select>
+          <p class="help">Use "customize" for custom (learned) IR remote buttons; use "command" for everything else.</p>
+        </div>
+      </div>
+
+      <div id="sec-sbscene" hidden>
+        <div class="field">
+          <label for="s-scene">Scene</label>
+          <div class="row">
+            <select id="s-scene"></select>
+            <button id="s-refresh" type="button">Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <p id="sb-error" class="error" aria-live="polite" hidden></p>
+    </fieldset>
+
+    <p id="binding-error" class="error" role="alert" hidden></p>
+    <div class="actions">
+      <button id="binding-save" type="submit" class="primary">Save</button>
+      <button id="binding-cancel" type="button">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
