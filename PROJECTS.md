@@ -52,8 +52,11 @@ commands or scenes. A password-protected web page teaches it the buttons ("press
 sets up the actions; it runs as a systemd service and is installed from a PC with one SSH command.
 
 - [Raspberry Pi version](pi/button-dispatcher/) (Python, aiohttp + bleak, Raspberry Pi 5):
-  **Current**, the only version. It lives under `pi/` as an exception to this repo's microcontroller
+  **Current**, working. It lives under `pi/` as an exception to this repo's microcontroller
   scope, because it may be ported to a microcontroller later.
+- [ESP32-S3 version](esp32/button-dispatcher/) (C++, ESP-IDF, NimBLE): **In progress**. A port of the
+  Pi version with the same web page and config format. The core is tested on the PC and the firmware
+  builds, but it has not been run on a board yet.
 
 ## Stove heat monitor
 

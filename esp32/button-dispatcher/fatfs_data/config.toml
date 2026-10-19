@@ -1,0 +1,17 @@
+# button-dispatcher configuration (edit on the USB drive that the device shows, or before flashing).
+# Everything else (buttons, bindings, SwitchBot credentials, password) is set on the web page.
+hostname = "dispatcher"
+http_port = 80
+
+# Optional status LED. -1 disables it. GPIO21 is the XIAO ESP32-S3's yellow LED (active low) and
+# the pin the ESP32-S3-DevKitC-1 Row A "21" can drive an external LED from.
+led_pin = 21
+led_active_low = true
+
+# Primary Wi-Fi access point (2.4 GHz)
+wifi_ssid = "YOUR_WIFI_SSID"
+wifi_password = "YOUR_WIFI_PASSWORD"
+
+# Fallback access points (optional, indices 1 to 9)
+# wifi_ssid1 = "BackupHotspot"
+# wifi_password1 = "HotspotPass"
