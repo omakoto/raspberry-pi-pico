@@ -76,23 +76,30 @@ async function api(method, path, body) {
   return data;
 }
 
-// Disables `btn` while `fn` runs so a request cannot be started twice.
-async function withBusy(btn, fn) {
+// Disables `btn` while `fn` runs so a request cannot be started twice. With `cooldownMs`, a button whose
+// action succeeded stays disabled that much longer: the device can be slow, and a repeat click right after
+// the result is almost always impatience rather than intent. A failure re-enables it at once so the user
+// can fix the input and retry.
+async function withBusy(btn, fn, cooldownMs = 0) {
   if (btn.disabled) return undefined;
   btn.disabled = true;
+  let cooling = false;
   try {
-    return await fn();
+    const result = await fn();
+    cooling = cooldownMs > 0;
+    return result;
   } finally {
-    btn.disabled = false;
+    if (cooling) setTimeout(() => { btn.disabled = false; }, cooldownMs);
+    else btn.disabled = false;
   }
 }
 
 // Runs fn and shows a failure in `errNode` (or the page-level alert); session-ended is silent.
-async function guarded(btn, errNode, fn) {
+async function guarded(btn, errNode, fn, cooldownMs = 0) {
   const target = errNode || $('page-error');
   setError(target, '');
   try {
-    return await withBusy(btn, fn);
+    return await withBusy(btn, fn, cooldownMs);
   } catch (e) {
     if (!e.sessionEnded) setError(target, e.message);
     return undefined;
@@ -1054,6 +1061,9 @@ $('log-clear').addEventListener('click', () => {
 
 // ---- Settings tab -------------------------------------------------------------------------------
 
+// How long a Settings button stays disabled after it succeeded (see withBusy).
+const SETTINGS_COOLDOWN_MS = 5000;
+
 function renderSettings() {
   $('set-timeout').value = state.settings.http_timeout_s;
   const status = $('cred-status');
@@ -1070,7 +1080,7 @@ $('settings-form').addEventListener('submit', (ev) => {
     await api('PUT', '/api/settings', { http_timeout_s: n });
     await refresh();
     toast('Settings saved.');
-  });
+  }, SETTINGS_COOLDOWN_MS);
 });
 
 $('cred-form').addEventListener('submit', (ev) => {
@@ -1084,7 +1094,7 @@ $('cred-form').addEventListener('submit', (ev) => {
     $('cred-secret').value = '';
     await refresh();
     toast('Credentials saved.');
-  });
+  }, SETTINGS_COOLDOWN_MS);
 });
 
 $('cred-remove').addEventListener('click', (ev) => {
@@ -1093,7 +1103,7 @@ $('cred-remove').addEventListener('click', (ev) => {
     await api('DELETE', '/api/switchbot/credentials');
     await refresh();
     toast('Credentials removed.');
-  });
+  }, SETTINGS_COOLDOWN_MS);
 });
 
 $('password-form').addEventListener('submit', (ev) => {
@@ -1108,12 +1118,24 @@ $('password-form').addEventListener('submit', (ev) => {
     await api('POST', '/api/auth/password', { current, new: next });
     for (const id of ['pw-current', 'pw-new', 'pw-repeat']) $(id).value = '';
     toast('Password changed.');
-  });
+  }, SETTINGS_COOLDOWN_MS);
 });
 
 // The export link is a plain download; the checkbox only decides whether credentials are included.
 $('export-creds').addEventListener('change', () => {
   $('export-link').setAttribute('href', '/api/export' + ($('export-creds').checked ? '?credentials=1' : ''));
+});
+
+// A download gives no feedback while the server prepares it, so the link looks pressed (and ignores further
+// clicks) for a few seconds to stop impatient repeat clicks from starting several downloads.
+$('export-link').addEventListener('click', (ev) => {
+  const link = ev.currentTarget;
+  if (link.getAttribute('aria-disabled') === 'true') {
+    ev.preventDefault();
+    return;
+  }
+  link.setAttribute('aria-disabled', 'true');
+  setTimeout(() => link.removeAttribute('aria-disabled'), SETTINGS_COOLDOWN_MS);
 });
 
 $('import-go').addEventListener('click', (ev) => {
@@ -1137,7 +1159,7 @@ $('import-go').addEventListener('click', (ev) => {
     $('import-file').value = '';
     res.textContent = `Imported. Now ${r.buttons} button(s) and ${r.bindings} binding(s).`;
     res.hidden = false;
-  });
+  }, SETTINGS_COOLDOWN_MS);
 });
 
 // ---- start --------------------------------------------------------------------------------------

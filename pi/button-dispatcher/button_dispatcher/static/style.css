@@ -228,14 +228,14 @@ button, a.button {
   text-decoration: none;
   display: inline-flex; align-items: center; justify-content: center;
 }
-button:hover:not(:disabled), a.button:hover { border-color: var(--muted); }
+button:hover:not(:disabled), a.button:hover:not([aria-disabled="true"]) { border-color: var(--muted); }
 button.primary, a.button.primary {
   background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600;
 }
 a.button { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.danger { color: var(--danger); border-color: var(--danger); }
 button.danger.solid { background: var(--danger); color: var(--danger-text); }
-button:disabled { opacity: 0.55; cursor: not-allowed; }
+button:disabled, a.button[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 .tabs button:hover:not(:disabled) { border-color: transparent; border-bottom-color: var(--border); }
 .tabs button[aria-selected="true"]:hover { border-bottom-color: var(--accent); }
 
