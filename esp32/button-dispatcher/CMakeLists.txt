@@ -1,19 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 
 # Handle external configuration override if the ESP32_CONFIG_TOML environment variable is set (for example
-# Wi-Fi credentials, kept out of git). Only the keys this firmware reads are copied into the config drive image:
-# the override file is shared with other projects and may also hold their credentials (SwitchBot, Pushover,
-# ...), and the drive can be read over USB.
+# Wi-Fi credentials, kept out of git). The whole file is copied into the config drive image: it is shared with
+# other projects and may hold their credentials too (SwitchBot, Pushover, ...), but the firmware moves every
+# secret (keys ending in _password, _key or _token) into private storage and comments it out in the file
+# before the drive is first shown over USB. See "Configuration" in the README.
 if(DEFINED ENV{ESP32_CONFIG_TOML})
     if(EXISTS "$ENV{ESP32_CONFIG_TOML}")
-        message(STATUS "Including external config override from $ENV{ESP32_CONFIG_TOML} (only the keys this firmware reads)")
-        # grep exits with 1 when nothing matches, which just means the override has nothing for us.
-        execute_process(
-            COMMAND grep -E "^[[:space:]]*(hostname|http_port|led_pin|led_active_low|buzzer_pin|buzzer_active_low|wifi_ssid[0-9]?|wifi_password[0-9]?|ble_scan_interval_ms|ble_scan_window_ms|ble_scan_active|pbkdf2_iterations)[[:space:]]*=" "$ENV{ESP32_CONFIG_TOML}"
-            OUTPUT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/fatfs_data/config-override.toml"
-            RESULT_VARIABLE grep_result)
-        # Rebuild the drive image when the override changes.
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "$ENV{ESP32_CONFIG_TOML}")
+        message(STATUS "Including external config override from $ENV{ESP32_CONFIG_TOML}")
+        configure_file("$ENV{ESP32_CONFIG_TOML}" "${CMAKE_CURRENT_SOURCE_DIR}/fatfs_data/config-override.toml" COPYONLY)
     else()
         message(WARNING "ESP32_CONFIG_TOML is set to '$ENV{ESP32_CONFIG_TOML}', but the file does not exist.")
     endif()

@@ -9,6 +9,7 @@ idf_component_register(
         "src/beeps.cpp"
         "src/eventlog.cpp"
         "src/config.cpp"
+        "src/config_secrets.cpp"
         "src/util.cpp"
         "src/auth.cpp"
         "src/app.cpp"

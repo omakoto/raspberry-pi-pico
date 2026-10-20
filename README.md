@@ -57,6 +57,45 @@ For CircuitPython projects where scripts are executed directly without an explic
 
 ---
 
+## Configuration Files (`config.toml` and `config-override.toml`)
+
+Projects of every kind here (ESP-IDF firmware, native Pico C++ firmware and CircuitPython scripts, not just ESP32) keep
+their settings (Wi-Fi, pins, hostname, ...) in the same plain `key = value` TOML files, and one private override
+file is shared by all of them. On a board the files sit on a small drive that the board shows over USB (a FAT
+"config drive" for the C++ projects, the `CIRCUITPY` drive for CircuitPython), so a setting can be changed by
+editing a file on a PC. The reference implementation for the ESP-IDF projects is
+[`esp32/button-dispatcher`](esp32/button-dispatcher/); `wol-bridge` has the older copy without the secret hiding
+below.
+
+- **Two files.** `fatfs_data/config.toml` is the committed template (placeholders only). `fatfs_data/config-override.toml`
+  is git-ignored and holds the real values. The firmware reads `config.toml` first and then the override; a key in
+  the override replaces the same key in the base file, and keys in neither keep their compiled-in defaults.
+- **One shared override for all projects.** Set `ESP32_CONFIG_TOML` to a TOML file outside the repository. ESP-IDF
+  and Pico C++ builds copy it whole into their config drive image (for ESP-IDF, `configure_file` to
+  `fatfs_data/config-override.toml` in the project's `CMakeLists.txt`).
+  CircuitPython projects get it from [`circuit-run`](circuitpython/bin/circuit-run), which copies it to the board as
+  `config-override.toml` (it also accepts `PICO_CONFIG_TOML`). The file therefore contains keys a given project never
+  reads, such as another project's `pushover_token`, and every project must ignore keys it doesn't know.
+- **Secrets are hidden at boot.** Anyone can read the drive by plugging the board in, so before the USB drive is
+  first shown the firmware moves every secret into NVS and comments it out in the file as
+  `# wifi_password = "***"`. A secret is any key ending in `_password` (optionally followed by digits, such as
+  `wifi_password1`), `_key` or `_token`, whether or not the project uses it. Later boots read a commented-out
+  secret from NVS, so the code just calls `config.get_string("wifi_password")`. To change a secret, write a new
+  `key = "value"` line in either file; the next boot stores and hides it again. The file is rewritten only after
+  the NVS write succeeded.
+- **Only the ESP-IDF projects that use `config_manager` + `config_secrets` hide secrets.** On a CircuitPython board
+  the whole override file, secrets included, is readable on the `CIRCUITPY` drive, and the other C++ projects (including
+  the Pico ones) copy it as it is. Keep that in mind when a board is left somewhere others can plug it in.
+- **Limit.** This keeps secrets off the drive, not off the flash chip: someone with `esptool` can still dump the
+  flash unless flash encryption is enabled.
+
+To use this in another project, copy `main/config_manager.{hpp,cpp}` and
+`components/dispatcher_core/{include/dispatcher,src}/config_secrets.*` (plain C++, with host tests in
+`test/test_config_secrets.cpp`), and use `configure_file` for the override as button-dispatcher does. Details:
+[button-dispatcher README, Configuration](esp32/button-dispatcher/README.md#configuration-configtoml-config-overridetoml).
+
+---
+
 ## Directory Overview
 
 - **[`pico/`](pico/)**: Native C++ firmware projects for Raspberry Pi Pico / Pico 2 / Pico W / Pico 2 W built with Pico SDK, some on FreeRTOS SMP (e.g., [`nsbackend-pico`](pico/nsbackend-pico), [`otg-lan-test`](pico/otg-lan-test)).

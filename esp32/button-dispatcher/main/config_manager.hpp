@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include "dispatcher/config_secrets.hpp"
 #include "wear_levelling.h"
 
 class ConfigManager {
@@ -25,7 +26,16 @@ public:
     void unmount();
 
 private:
-    bool parse_file(const std::string& path);
+    // A file that holds secrets in the clear, to be rewritten once they are stored.
+    struct ScrubPlan {
+        std::string path;
+        std::string text;
+    };
+
+    bool parse_file(const std::string& path, std::vector<ScrubPlan>* plans);
+    void hide_secrets(const std::vector<ScrubPlan>& plans);
+    static std::vector<dispatcher::ConfigEntry> load_stored_secrets();
+    static bool store_secrets(const std::vector<dispatcher::ConfigEntry>& secrets);
     static std::string trim(const std::string& s);
 
     std::unordered_map<std::string, std::string> config_map_;

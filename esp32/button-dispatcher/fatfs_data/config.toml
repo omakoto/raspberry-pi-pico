@@ -1,4 +1,6 @@
 # button-dispatcher configuration (edit on the USB drive that the device shows, or before flashing).
+# Secrets (keys ending in _password, _key or _token) are moved into private storage at the next boot and
+# commented out here as `# key = "***"`; to change one, add a line with the new value again.
 # Everything else (buttons, bindings, SwitchBot credentials, password) is set on the web page.
 hostname = "dispatcher"
 http_port = 80

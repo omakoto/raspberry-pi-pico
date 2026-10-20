@@ -115,16 +115,20 @@ check, "is this a 0xFCD2 service-data block?", and drops everything else. Wi-Fi 
 radio, so scan timing is something to tune by measurement (a press is repeated 15-30 times over about a
 second, which helps).
 
-## Configuration (`config.toml`)
+## Configuration (`config.toml`, `config-override.toml`)
 
 Same file and keys as `wol-bridge`, plus: `hostname`, `http_port`, `led_pin`, `led_active_low`,
 `buzzer_pin`, `buzzer_active_low`, `wifi_ssid[0-9]` / `wifi_password[0-9]`, and the tuning keys `ble_scan_interval_ms`,
 `ble_scan_window_ms`, `ble_scan_active` and `pbkdf2_iterations` (default 20000; the time one login
 takes is logged at boot, raise it if there is room).
 
-**Build-time secrets filter.** If `ESP32_CONFIG_TOML` points at a shared override file, only the keys
-above are copied into the drive image. The shared file also holds other projects' tokens, which must
-never end up on the USB-visible drive.
+How the two files work (the override, the shared `ESP32_CONFIG_TOML`, and how secrets are moved out of the
+files at boot) is described in the top-level
+[README](../../README.md#configuration-files-configtoml-and-config-overridetoml), so all ESP32 projects share
+one description. This project's implementation: `main/config_manager.cpp` reads the files and talks to NVS (default
+partition, namespace `secrets`, one blob), `components/dispatcher_core/src/config_secrets.cpp` holds the
+parsing and scrubbing (covered by `test/test_config_secrets.cpp`). SwitchBot credentials and the password hash are
+not in the config files at all; they live in the `state` partition and are set on the web page.
 
 ## Testing
 
