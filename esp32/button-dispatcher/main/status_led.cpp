@@ -114,10 +114,9 @@ void StatusLed::run_task() {
                 break;
 
             case LedState::READY:
-                // Gentle heartbeat pulse: 50ms ON every 2 seconds (40 steps of 50ms)
-                set_raw((step % 40) == 0);
-                vTaskDelay(pdMS_TO_TICKS(50));
-                step++;
+                // Solid ON: only the non-idle states blink, so any blinking means attention is needed.
+                set_raw(true);
+                vTaskDelay(pdMS_TO_TICKS(100));
                 break;
 
             case LedState::PRESS:

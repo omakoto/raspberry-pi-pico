@@ -9,7 +9,7 @@ enum class LedState : int {
     INITIALIZING = 1,        // Solid ON during boot
     WIFI_CONNECTING = 2,     // Fast blink (0.2s ON, 0.2s OFF)
     WIFI_RECONNECTING = 3,   // Double blink
-    READY = 4,               // Idle heartbeat (0.05s ON, 1.95s OFF)
+    READY = 4,               // Idle, solid ON
     PRESS = 5,          // Rapid strobe, a press was heard (0.05s ON, 0.05s OFF)
 };
 
