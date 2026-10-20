@@ -1,4 +1,6 @@
 #include <cstdio>
+#include <ctime>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,7 +30,27 @@
 static const char* TAG = "Main";
 
 // The clock matters for HTTPS certificate checks, for signing SwitchBot requests and for log times.
-static void start_time_sync() {
+// Until it is set, SwitchBot calls fail with "the clock is not set yet", so the log records when that ends.
+static dispatcher::AppCore* g_app_for_clock_log = nullptr;
+
+static void on_clock_synced(struct timeval* tv) {
+    char text[32];
+    struct tm utc;
+    gmtime_r(&tv->tv_sec, &utc);
+    strftime(text, sizeof(text), "%Y-%m-%d %H:%M:%S UTC", &utc);
+    ESP_LOGI(TAG, "Clock set from NTP: %s", text);
+    // Only the first sync goes to the log page; the periodic re-syncs are not interesting there.
+    static bool first = true;
+    if (first && g_app_for_clock_log != nullptr) {
+        first = false;
+        std::lock_guard<std::mutex> lock(g_app_for_clock_log->mutex);
+        g_app_for_clock_log->log.add("info", std::string("Clock set from NTP: ") + text);
+    }
+}
+
+static void start_time_sync(dispatcher::AppCore* app) {
+    g_app_for_clock_log = app;
+    esp_sntp_set_time_sync_notification_cb(on_clock_synced);
     esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "pool.ntp.org");
     esp_sntp_setservername(1, "time.google.com");
@@ -107,7 +129,7 @@ extern "C" void app_main() {
 
     ESP_LOGI(TAG, "Waiting for Wi-Fi connection...");
     while (!wifi.is_connected()) vTaskDelay(pdMS_TO_TICKS(200));
-    start_time_sync();
+    start_time_sync(&app);
 
     const std::string hostname = config.get_string("hostname", "dispatcher");
     const int http_port = config.get_int("http_port", 80);
