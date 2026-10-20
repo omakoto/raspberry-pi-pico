@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "dispatcher/beeps.hpp"
+
 namespace dispatcher {
 
 using HeaderList = std::vector<std::pair<std::string, std::string>>;
@@ -61,6 +63,14 @@ class Platform {
   // Runs `task` soon on a worker thread, one task at a time, in the order submitted. Used for the actions
   // that fire when a button is pressed, so a slow HTTPS request never delays Bluetooth processing.
   virtual void run_in_background(std::function<void()> task) = 0;
+
+  // ---- feedback ----
+  // Sounds `count` beeps of the given kind on the buzzer, if there is one. Returns at once; the platform
+  // spaces the sequences out (see BeepScheduler).
+  virtual void beep(Beep kind, int count) {
+    (void)kind;
+    (void)count;
+  }
 };
 
 }  // namespace dispatcher

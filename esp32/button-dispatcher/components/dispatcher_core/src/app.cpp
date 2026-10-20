@@ -1,5 +1,6 @@
 #include "dispatcher/app.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <vector>
@@ -128,12 +129,21 @@ void AppCore::handle_packet(const std::string& mac, std::optional<int> rssi, con
       to_run.push_back(firing.binding);
     }
   }
+  // One acknowledgement per advertisement, however many bindings the press fires.
+  int ack_beeps = 0;
+  for (const Binding& binding : to_run) ack_beeps = std::max(ack_beeps, click_count(binding.trigger.event));
+  if (ack_beeps > 0) platform_.beep(Beep::kShort, ack_beeps);
   // Queued only after the lock is released: a platform may run the task right here, and the task takes the lock.
   for (const Binding& binding : to_run) spawn_binding(binding);
 }
 
 void AppCore::spawn_binding(const Binding& binding) {
-  platform_.run_in_background([this, binding] { run_binding(binding); });
+  platform_.run_in_background([this, binding] {
+    const ActionResult result = run_binding(binding);
+    // A short beep for success; a failure sounds longer, since an active buzzer has only one pitch.
+    if (result.ok) platform_.beep(Beep::kShort, 1);
+    else platform_.beep(Beep::kLong, 3);
+  });
 }
 
 ActionResult AppCore::run_binding(const Binding& binding) {

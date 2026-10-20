@@ -4,6 +4,7 @@
 #include <string>
 
 #include "dispatcher/platform.hpp"
+#include "buzzer.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -34,11 +35,16 @@ public:
                                           double timeout_s, size_t max_response_bytes) override;
 
     void run_in_background(std::function<void()> task) override;
+    void beep(dispatcher::Beep kind, int count) override;
+
+    // The buzzer to sound beeps on; without one, beeps are ignored. Not owned.
+    void set_buzzer(Buzzer* buzzer) { buzzer_ = buzzer; }
 
 private:
     static void worker_entry(void* arg);
     void worker_loop();
 
     bool state_mounted_;
+    Buzzer* buzzer_ = nullptr;
     QueueHandle_t work_queue_;
 };

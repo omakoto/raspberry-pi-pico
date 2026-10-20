@@ -15,6 +15,7 @@
 #include "nvs_flash.h"
 
 #include "ble_scanner.hpp"
+#include "buzzer.hpp"
 #include "config_manager.hpp"
 #include "dual_logger.hpp"
 #include "esp_platform.hpp"
@@ -67,12 +68,17 @@ extern "C" void app_main() {
     status_led.init();
     status_led.set_state(LedState::INITIALIZING);
 
+    // 4b. Acknowledgement buzzer
+    static Buzzer buzzer(config.get_int("buzzer_pin", 9), config.get_bool("buzzer_active_low", true));
+    buzzer.init();
+
     // 5. USB: serial console and the drag-and-drop config drive
     static UsbMsc usb_msc;
     usb_msc.init();
 
     // 6. The application: stored settings, buttons, bindings and the password
     static EspPlatform platform;
+    platform.set_buzzer(&buzzer);
     if (!platform.init()) ESP_LOGE(TAG, "Platform start-up problem; settings may not be saved");
     static dispatcher::AppCore app(platform,
                                    config.get_int("pbkdf2_iterations", dispatcher::AuthService::kDefaultIterations));

@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "config_manager.cpp"
         "status_led.cpp"
+        "buzzer.cpp"
         "usb_msc.cpp"
         "dual_logger.cpp"
         "wifi_manager.cpp"

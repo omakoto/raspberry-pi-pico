@@ -6,6 +6,7 @@ idf_component_register(
         "src/bthome.cpp"
         "src/triggers.cpp"
         "src/learn.cpp"
+        "src/beeps.cpp"
         "src/eventlog.cpp"
         "src/config.cpp"
         "src/util.cpp"

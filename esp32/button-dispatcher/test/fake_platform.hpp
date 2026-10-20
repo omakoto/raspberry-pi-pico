@@ -43,6 +43,8 @@ class FakePlatform : public dispatcher::Platform {
   bool run_background_immediately = true;
   std::vector<std::function<void()>> background;
   int pbkdf2_calls = 0;
+  // Every beep the core asked for, in order (kind, count).
+  std::vector<std::pair<dispatcher::Beep, int>> beeps;
 
   void run_queued_background() {
     std::vector<std::function<void()>> tasks;
@@ -97,6 +99,11 @@ class FakePlatform : public dispatcher::Platform {
     dispatcher::HttpResponse response = http_handler(request);
     if (response.body.size() > max_response_bytes) response.body.resize(max_response_bytes);
     return response;
+  }
+
+  void beep(dispatcher::Beep kind, int count) override {
+    std::lock_guard<std::mutex> lock(requests_mutex_);
+    beeps.emplace_back(kind, count);
   }
 
   void run_in_background(std::function<void()> task) override {

@@ -36,7 +36,24 @@ are on-chip, so nothing needs wiring. The board is powered and set up over its U
 | Function | ESP32-S3 GPIO | DevKitC-1 Physical Pin | Seeed Studio XIAO Pin | Details |
 | :--- | :---: | :---: | :---: | :--- |
 | **Status LED** | `GPIO21` | Row A, Pin 18 (silk `21`) | Onboard Yellow LED | Active-low, optional (`led_pin = -1` disables it) |
+| **Ack buzzer** | `GPIO9` | J1, between `46` and `10` (silk `9`) | `D10`, next to `3V3` | Optional (`buzzer_pin = -1` disables it); active-low by default, see below |
 | **USB (config drive, serial)** | `GPIO19`/`GPIO20` | the port marked `USB` | USB-C connector | Native USB: serial console and the drag-and-drop config drive |
+
+### Ack buzzer
+
+An active buzzer (it has its own oscillator, so a single fixed pitch) acknowledges presses:
+
+- When a press fires a binding: as many short beeps as clicks (single press 1, double press 2, triple press
+  3; long-press variants and the wheel count like their short counterparts).
+- When the action finishes: one short beep for success, three long beeps for a failure (an active buzzer
+  cannot change pitch, so a failure is told apart by its length).
+- Every sequence of beeps starts at least 1 s after the previous one ended, so an acknowledgement and its
+  result are heard as separate things.
+
+Wiring for a ready-made module with `GND`, `VCC` and `I/O` pins that beeps when `I/O` is shorted to `GND`
+(a low-level trigger, the default): `I/O` to `GPIO9`, `VCC` to `3V3`, `GND` to `GND`. The module has its own
+transistor. For a bare buzzer, drive it through an NPN transistor (GPIO through about 1 kΩ to the base,
+emitter to `GND`, buzzer between `3V3` and the collector) and set `buzzer_active_low = false`.
 
 ## How it differs from the Pi version
 
@@ -101,7 +118,7 @@ second, which helps).
 ## Configuration (`config.toml`)
 
 Same file and keys as `wol-bridge`, plus: `hostname`, `http_port`, `led_pin`, `led_active_low`,
-`wifi_ssid[0-9]` / `wifi_password[0-9]`, and the tuning keys `ble_scan_interval_ms`,
+`buzzer_pin`, `buzzer_active_low`, `wifi_ssid[0-9]` / `wifi_password[0-9]`, and the tuning keys `ble_scan_interval_ms`,
 `ble_scan_window_ms`, `ble_scan_active` and `pbkdf2_iterations` (default 20000; the time one login
 takes is logged at boot, raise it if there is room).
 

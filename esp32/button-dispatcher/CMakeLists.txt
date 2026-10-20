@@ -9,7 +9,7 @@ if(DEFINED ENV{ESP32_CONFIG_TOML})
         message(STATUS "Including external config override from $ENV{ESP32_CONFIG_TOML} (only the keys this firmware reads)")
         # grep exits with 1 when nothing matches, which just means the override has nothing for us.
         execute_process(
-            COMMAND grep -E "^[[:space:]]*(hostname|http_port|led_pin|led_active_low|wifi_ssid[0-9]?|wifi_password[0-9]?|ble_scan_interval_ms|ble_scan_window_ms|ble_scan_active|pbkdf2_iterations)[[:space:]]*=" "$ENV{ESP32_CONFIG_TOML}"
+            COMMAND grep -E "^[[:space:]]*(hostname|http_port|led_pin|led_active_low|buzzer_pin|buzzer_active_low|wifi_ssid[0-9]?|wifi_password[0-9]?|ble_scan_interval_ms|ble_scan_window_ms|ble_scan_active|pbkdf2_iterations)[[:space:]]*=" "$ENV{ESP32_CONFIG_TOML}"
             OUTPUT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/fatfs_data/config-override.toml"
             RESULT_VARIABLE grep_result)
         # Rebuild the drive image when the override changes.

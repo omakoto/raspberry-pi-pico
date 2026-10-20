@@ -252,3 +252,7 @@ void EspPlatform::worker_loop() {
         }
     }
 }
+
+void EspPlatform::beep(dispatcher::Beep kind, int count) {
+    if (buzzer_ != nullptr) buzzer_->beep(kind, count);
+}

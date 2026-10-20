@@ -8,6 +8,12 @@ http_port = 80
 led_pin = 21
 led_active_low = true
 
+# Optional acknowledgement buzzer. -1 disables it. GPIO9 is D10 on the XIAO ESP32-S3, next to 3V3.
+# A ready-made buzzer module with GND, VCC and I/O pins sounds when I/O is pulled low, which is what
+# buzzer_active_low = true means; use false for a buzzer that sounds when the pin is high.
+buzzer_pin = 9
+buzzer_active_low = true
+
 # Primary Wi-Fi access point (2.4 GHz)
 wifi_ssid = "YOUR_WIFI_SSID"
 wifi_password = "YOUR_WIFI_PASSWORD"
