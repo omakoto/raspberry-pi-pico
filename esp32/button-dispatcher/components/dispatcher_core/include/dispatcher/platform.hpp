@@ -26,6 +26,9 @@ struct HttpResponse {
   int status = 0;
   std::string reason;                // "OK", "Not Found", ... when known
   std::string body;                  // at most max_response_bytes of it
+  // Why the transport failed (error codes, errno, TLS verdict), for messages shown to the user. Empty
+  // when unknown or when the request got a response.
+  std::string detail;
 };
 
 class Platform {

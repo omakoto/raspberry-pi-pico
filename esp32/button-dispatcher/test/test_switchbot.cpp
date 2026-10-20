@@ -68,7 +68,7 @@ struct FakeSwitchBot {
 
   HttpResponse handle(const test_support::RecordedRequest& request) {
     const std::string base = kSwitchBotApiBase;
-    if (!starts_with(request.url, base)) return HttpResponse{HttpResponse::Failure::kConnect, 0, "", ""};
+    if (!starts_with(request.url, base)) return HttpResponse{HttpResponse::Failure::kConnect, 0, "", "", ""};
     const std::string path = request.url.substr(base.size());
     if (request.method == "GET" && path == "/devices") {
       ++devices_calls;
@@ -262,6 +262,25 @@ TEST(switchbot_client_unreachable_server) {
     return response;
   };
   CHECK_EQ(error_of(f.client.devices()), std::string("cannot reach SwitchBot"));
+}
+
+TEST(switchbot_client_failure_detail_is_included) {
+  ClientFixture f;
+  f.platform.http_handler = [](const test_support::RecordedRequest&) {
+    HttpResponse response;
+    response.failure = HttpResponse::Failure::kConnect;
+    response.detail = "ESP_ERR_HTTP_CONNECT, errno 113: Host unreachable";
+    return response;
+  };
+  CHECK_EQ(error_of(f.client.devices()),
+           std::string("cannot reach SwitchBot (ESP_ERR_HTTP_CONNECT, errno 113: Host unreachable)"));
+  f.platform.http_handler = [](const test_support::RecordedRequest&) {
+    HttpResponse response;
+    response.failure = HttpResponse::Failure::kTimeout;
+    response.detail = "ESP_ERR_HTTP_EAGAIN";
+    return response;
+  };
+  CHECK_EQ(error_of(f.client.devices()), std::string("timed out after 15s (ESP_ERR_HTTP_EAGAIN)"));
 }
 
 TEST(switchbot_client_timeout_text) {

@@ -184,11 +184,12 @@ ActionResult AppCore::run_action(const Action& action) {
   const HttpResponse response =
       platform_.http_request(http.method, http.url, headers, http.body, timeout_s, kMaxActionResponseBytes);
   const std::string prefix = http.method + " " + where + ": ";
+  const std::string why = response.detail.empty() ? "" : " (" + response.detail + ")";
   switch (response.failure) {
     case HttpResponse::Failure::kTimeout:
-      return {false, prefix + "timed out after " + format_seconds(timeout_s) + "s"};
+      return {false, prefix + "timed out after " + format_seconds(timeout_s) + "s" + why};
     case HttpResponse::Failure::kConnect:
-      return {false, prefix + "connection failed"};
+      return {false, prefix + "connection failed" + why};
     case HttpResponse::Failure::kNone:
       break;
   }

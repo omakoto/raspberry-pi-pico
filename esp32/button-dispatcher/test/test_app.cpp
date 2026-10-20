@@ -79,6 +79,21 @@ bool contains(const std::string& text, const char* part) { return text.find(part
 
 // ---- loading and saving ----
 
+TEST(http_action_failure_detail_is_included) {
+  Fixture f;
+  f.app.init();
+  f.platform.http_handler = [](const test_support::RecordedRequest&) {
+    HttpResponse response;
+    response.failure = HttpResponse::Failure::kConnect;
+    response.detail = "ESP_ERR_HTTP_CONNECT, errno 104";
+    return response;
+  };
+  HttpAction http;
+  http.url = "http://example.com/x";
+  CHECK_EQ(f.app.run_action(http).summary,
+           std::string("GET http://example.com: connection failed (ESP_ERR_HTTP_CONNECT, errno 104)"));
+}
+
 TEST(app_starts_empty_without_stored_documents) {
   Fixture f;
   f.app.init();

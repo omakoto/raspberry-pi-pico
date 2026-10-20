@@ -251,8 +251,11 @@ SwitchBotBody SwitchBotClient::request(const std::string& method, const std::str
 
   const HttpResponse response = platform_.http_request(method, api_base_ + path, headers, json_body, timeout_s_,
                                                        kSwitchBotMaxResponseBytes);
-  if (response.failure == HttpResponse::Failure::kTimeout) return failure("timed out after " + format_g(timeout_s_) + "s");
-  if (response.failure != HttpResponse::Failure::kNone) return failure("cannot reach SwitchBot");
+  const std::string why = response.detail.empty() ? "" : " (" + response.detail + ")";
+  if (response.failure == HttpResponse::Failure::kTimeout) {
+    return failure("timed out after " + format_g(timeout_s_) + "s" + why);
+  }
+  if (response.failure != HttpResponse::Failure::kNone) return failure("cannot reach SwitchBot" + why);
   if (response.status == 401) return failure("HTTP 401: authentication failed; check the token and secret");
   if (response.status >= 400) return failure("HTTP " + std::to_string(response.status));
 

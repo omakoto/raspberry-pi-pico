@@ -11,7 +11,9 @@
 #include "esp_timer.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "mbedtls/error.h"
 #include "mbedtls/md.h"
+#include "mbedtls/x509_crt.h"
 #include "mbedtls/pkcs5.h"
 
 static const char* TAG = "EspPlatform";
@@ -187,6 +189,38 @@ bool EspPlatform::save_document(const std::string& name, const std::string& text
     return true;
 }
 
+// Everything the HTTP client knows about why a request failed. Without this a failed SwitchBot call only
+// says "cannot reach", which cannot tell DNS, routing, a refused connection and a certificate problem apart.
+static std::string describe_failure(esp_http_client_handle_t client, esp_err_t err, int socket_errno,
+                                    long long took_ms) {
+    char buf[160];
+    std::string detail = esp_err_to_name(err);
+    if (socket_errno != 0) {
+        snprintf(buf, sizeof(buf), ", errno %d: %s", socket_errno, strerror(socket_errno));
+        detail += buf;
+    }
+    int tls_code = 0;
+    int tls_flags = 0;
+    if (esp_http_client_get_and_clear_last_tls_error(client, &tls_code, &tls_flags) == ESP_OK &&
+        (tls_code != 0 || tls_flags != 0)) {
+        if (tls_code != 0) {
+            char msg[100];
+            mbedtls_strerror(tls_code, msg, sizeof(msg));
+            snprintf(buf, sizeof(buf), ", TLS error -0x%04x: %s", -tls_code, msg);
+            detail += buf;
+        }
+        if (tls_flags != 0) {
+            char msg[100];
+            mbedtls_x509_crt_verify_info(msg, sizeof(msg), "", static_cast<uint32_t>(tls_flags));
+            std::string verdict = msg;
+            while (!verdict.empty() && (verdict.back() == '\n' || verdict.back() == ' ')) verdict.pop_back();
+            detail += ", certificate: " + verdict;
+        }
+    }
+    snprintf(buf, sizeof(buf), ", after %lld ms", took_ms);
+    return detail + buf;
+}
+
 dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, const std::string& url,
                                                    const dispatcher::HeaderList& headers, const std::string& body,
                                                    double timeout_s, size_t max_response_bytes) {
@@ -207,6 +241,7 @@ dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, co
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == nullptr) {
         result.failure = dispatcher::HttpResponse::Failure::kConnect;
+        result.detail = "could not create the HTTP client (out of memory?)";
         return result;
     }
     for (const auto& header : headers) esp_http_client_set_header(client, header.first.c_str(), header.second.c_str());
@@ -221,7 +256,8 @@ dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, co
                                socket_errno == EAGAIN || socket_errno == EWOULDBLOCK;
         result.failure = timed_out ? dispatcher::HttpResponse::Failure::kTimeout
                                    : dispatcher::HttpResponse::Failure::kConnect;
-        ESP_LOGW(TAG, "HTTP request failed: %s (errno %d)", esp_err_to_name(err), socket_errno);
+        result.detail = describe_failure(client, err, socket_errno, took_ms);
+        ESP_LOGW(TAG, "%s %s failed: %s", method.c_str(), url.c_str(), result.detail.c_str());
     } else {
         result.status = esp_http_client_get_status_code(client);
         result.reason = reason_phrase(result.status);
