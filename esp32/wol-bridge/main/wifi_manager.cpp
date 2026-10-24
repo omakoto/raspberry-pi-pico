@@ -66,9 +66,16 @@ bool WifiManager::init() {
         WIFI_EVENT, ESP_EVENT_ANY_ID, &WifiManager::event_handler, this, nullptr));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiManager::event_handler, this, nullptr));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT, IP_EVENT_STA_LOST_IP, &WifiManager::event_handler, this, nullptr));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Modem sleep makes the station miss broadcast/multicast frames between DTIM beacons, which
+    // makes mDNS (wol.local) and ARP unreliable on some APs. The board is USB powered, so the power
+    // saving isn't worth it.
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     initialized_ = true;
     ESP_LOGI(TAG, "Wi-Fi subsystem initialized");
@@ -108,7 +115,27 @@ void WifiManager::handle_ip_event(int32_t event_id, void* event_data) {
         xEventGroupSetBits(wifi_event_group_, WIFI_CONNECTED_BIT);
         xEventGroupClearBits(wifi_event_group_, WIFI_FAIL_BIT);
         ESP_LOGI(TAG, "Connected to Wi-Fi successfully! IP: %s", ip_str);
+    } else if (event_id == IP_EVENT_STA_LOST_IP) {
+        // The DHCP lease couldn't be renewed while the station stayed associated. Nothing works
+        // without an address, so treat it like a disconnect: run() then reconnects from scratch,
+        // which starts DHCP over.
+        {
+            std::lock_guard<std::mutex> lock(ip_mutex_);
+            ip_address_.clear();
+        }
+        connected_.store(false, std::memory_order_relaxed);
+        xEventGroupSetBits(wifi_event_group_, WIFI_FAIL_BIT);
+        xEventGroupClearBits(wifi_event_group_, WIFI_CONNECTED_BIT);
+        ESP_LOGW(TAG, "Wi-Fi lost its IP address (DHCP lease not renewed)");
     }
+}
+
+int WifiManager::get_rssi() const {
+    wifi_ap_record_t ap = {};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        return 0;
+    }
+    return ap.rssi;
 }
 
 bool WifiManager::is_connected() const {
@@ -151,7 +178,11 @@ std::set<std::string> WifiManager::scan_networks() {
     }
 
     std::vector<wifi_ap_record_t> ap_records(num_ap);
-    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&num_ap, ap_records.data()));
+    ret = esp_wifi_scan_get_ap_records(&num_ap, ap_records.data());
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Reading Wi-Fi scan results failed: %s", esp_err_to_name(ret));
+        return visible_ssids;
+    }
 
     for (uint16_t i = 0; i < num_ap; ++i) {
         std::string ssid_str = reinterpret_cast<const char*>(ap_records[i].ssid);
@@ -182,12 +213,20 @@ bool WifiManager::attempt_connect(const std::string& ssid, const std::string& pa
     // for a failure of the attempt below. When the station is idle no event arrives and this
     // just waits out the short timeout.
     xEventGroupClearBits(wifi_event_group_, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
-    ESP_ERROR_CHECK(esp_wifi_disconnect());
+    esp_wifi_disconnect();
     xEventGroupWaitBits(wifi_event_group_, WIFI_FAIL_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(200));
     xEventGroupClearBits(wifi_event_group_, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_connect());
+    // These fail e.g. while esp_restart() is stopping Wi-Fi (whose disconnect wakes up run()); the
+    // caller just retries later, so an error must not abort.
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (err == ESP_OK) {
+        err = esp_wifi_connect();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Can't start connecting to '%s': %s", ssid.c_str(), esp_err_to_name(err));
+        return false;
+    }
 
     EventBits_t bits = xEventGroupWaitBits(
         wifi_event_group_,

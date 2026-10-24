@@ -16,13 +16,17 @@ UsbMsc::~UsbMsc() {}
 #include "soc/rtc_cntl_reg.h"
 #include "esp_system.h"
 
+void UsbMsc::reboot_to_download_mode() {
+    REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_SW_HW_USB_PHY_SEL | RTC_CNTL_SW_USB_PHY_SEL);
+    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+    esp_restart();
+}
+
 static void cdc_line_coding_changed(int itf, cdcacm_event_t *event) {
     if (event->line_coding_changed_data.p_line_coding->bit_rate == 1200) {
         ESP_LOGI("UsbMsc", "1200 baud touch detected! Rebooting into download mode...");
         vTaskDelay(pdMS_TO_TICKS(50));
-        REG_CLR_BIT(RTC_CNTL_USB_CONF_REG, RTC_CNTL_SW_HW_USB_PHY_SEL | RTC_CNTL_SW_USB_PHY_SEL);
-        REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-        esp_restart();
+        UsbMsc::reboot_to_download_mode();
     }
 }
 

@@ -15,6 +15,9 @@ public:
     // Returns true if the USB device is mounted by the host.
     bool is_mounted() const;
 
+    // Restarts into the ROM download mode, so that the board can be flashed over this USB port.
+    [[noreturn]] static void reboot_to_download_mode();
+
 private:
     bool initialized_;
     wl_handle_t wl_handle_;

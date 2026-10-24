@@ -5,6 +5,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "dual_logger.hpp"
+#include "log_ring.hpp"
 
 static const char* TAG = "HttpServer";
 
@@ -82,6 +84,14 @@ bool HttpServer::start(int port, MacTracker* tracker, W5500Driver* w5500, Status
         .user_ctx = this
     };
     httpd_register_uri_handler(server_, &purge_post_uri);
+
+    httpd_uri_t log_uri = {
+        .uri = "/log",
+        .method = HTTP_GET,
+        .handler = &HttpServer::log_get_handler,
+        .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &log_uri);
 
     running_ = true;
     ESP_LOGI(TAG, "HTTP Server listening at http://%s.local:%d/", hostname_.c_str(), port);
@@ -188,7 +198,7 @@ esp_err_t HttpServer::root_get_handler(httpd_req_t* req) {
     }
 
     html << "<hr style='margin-top:24px;border:none;border-top:1px solid #e2e8f0;'>"
-         << "<p style='font-size:12px;color:#94a3b8;'>Direct endpoint: <code>GET /wake</code> | JSON: <code>GET /status</code></p>"
+         << "<p style='font-size:12px;color:#94a3b8;'>Direct endpoint: <code>GET /wake</code> | JSON: <code>GET /status</code> | <a href='/log'>Log</a> (includes the previous run)</p>"
          << "</div></body></html>";
 
     std::string s = html.str();
@@ -309,4 +319,34 @@ esp_err_t HttpServer::purge_handler(httpd_req_t* req) {
     httpd_resp_set_status(req, "303 See Other");
     httpd_resp_set_hdr(req, "Location", "/");
     return httpd_resp_send(req, nullptr, 0);
+}
+
+// ESP_LOG* colors its lines with ANSI escape sequences, which a browser would show as garbage.
+static std::string strip_ansi(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '\x1b' && i + 1 < in.size() && in[i + 1] == '[') {
+            i += 2;
+            while (i < in.size() && !(in[i] >= '@' && in[i] <= '~')) ++i;
+            continue;
+        }
+        out += in[i];
+    }
+    return out;
+}
+
+esp_err_t HttpServer::log_get_handler(httpd_req_t* req) {
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    std::string head = dual_logger_boot_report() + "\n\n===== Log of this run =====\n";
+    httpd_resp_send_chunk(req, head.data(), head.size());
+    std::string current = strip_ansi(LogRing::snapshot());
+    httpd_resp_send_chunk(req, current.data(), current.size());
+    if (LogRing::previous_valid()) {
+        static const char prev_head[] = "\n===== Log of the previous run (end) =====\n";
+        httpd_resp_send_chunk(req, prev_head, sizeof(prev_head) - 1);
+        std::string prev = strip_ansi(LogRing::previous_log());
+        httpd_resp_send_chunk(req, prev.data(), prev.size());
+    }
+    return httpd_resp_send_chunk(req, nullptr, 0);
 }

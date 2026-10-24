@@ -5,6 +5,7 @@ idf_component_register(
         "status_led.cpp"
         "usb_msc.cpp"
         "dual_logger.cpp"
+        "log_ring.cpp"
         "w5500_driver.cpp"
         "mac_tracker.cpp"
         "wifi_manager.cpp"

@@ -20,6 +20,7 @@ private:
     static esp_err_t wake_handler(httpd_req_t* req);
     static esp_err_t status_get_handler(httpd_req_t* req);
     static esp_err_t purge_handler(httpd_req_t* req);
+    static esp_err_t log_get_handler(httpd_req_t* req);
 
     httpd_handle_t server_;
     MacTracker* tracker_;

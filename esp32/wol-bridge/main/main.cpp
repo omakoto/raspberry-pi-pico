@@ -3,6 +3,7 @@
 #include <vector>
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -19,12 +20,32 @@
 
 static const char* TAG = "Main";
 
+// How often the health line is logged, so that the log shows the state leading up to a problem.
+static constexpr int64_t HEALTH_LOG_INTERVAL_US = 10LL * 60 * 1000 * 1000;
+
+static WifiManager* s_wifi = nullptr;
+static W5500Driver* s_w5500 = nullptr;
+
+static void log_health() {
+    uint32_t up_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
+    bool wifi_up = s_wifi != nullptr && s_wifi->is_connected();
+    ESP_LOGI(TAG, "Health: up %luh%02lum, Wi-Fi %s (IP %s, RSSI %d dBm), Ethernet %s, heap %lu free (min %lu)",
+             static_cast<unsigned long>(up_s / 3600), static_cast<unsigned long>(up_s / 60 % 60),
+             wifi_up ? "connected" : "DISCONNECTED",
+             wifi_up ? s_wifi->get_ip_address().c_str() : "-",
+             wifi_up ? s_wifi->get_rssi() : 0,
+             (s_w5500 != nullptr && s_w5500->is_link_up()) ? "up" : "down",
+             static_cast<unsigned long>(esp_get_free_heap_size()),
+             static_cast<unsigned long>(esp_get_minimum_free_heap_size()));
+}
+
 #include "esp_netif.h"
 #include "esp_event.h"
 
 extern "C" void app_main() {
-    // 1. Dual logger initialization (UART0 + TinyUSB CDC ACM)
+    // 1. Console initialization (log ring drained to UART0 + TinyUSB CDC ACM)
     dual_logger_init();
+    dual_logger_set_status_callback(&log_health);
     ESP_LOGI(TAG, "Starting ESP32 Wake-on-LAN Bridge...");
 
     // 2. Initialize NVS (needed for Wi-Fi and MAC address persistence)
@@ -60,6 +81,7 @@ extern "C" void app_main() {
     // 5. Initialize TinyUSB Composite Device (CDC ACM Console + MSC Flash Drive)
     static UsbMsc usb_msc;
     usb_msc.init();
+    dual_logger_start_console();
 
     // 6. Configure W5500 Ethernet SPI
     W5500Config eth_cfg;
@@ -85,6 +107,7 @@ extern "C" void app_main() {
 
     // 8. Start W5500 Sniffer Driver
     static W5500Driver w5500;
+    s_w5500 = &w5500;
     if (w5500.init(eth_cfg, &mac_tracker, &status_led)) {
         w5500.start();
     } else {
@@ -109,6 +132,7 @@ extern "C" void app_main() {
     }
 
     static WifiManager wifi(ap_list);
+    s_wifi = &wifi;
     wifi.init();
 
     // Spawn Wi-Fi task, which connects and then reconnects whenever the connection drops
@@ -141,7 +165,12 @@ extern "C" void app_main() {
     ESP_LOGI(TAG, " Wake URL:    http://%s.local:%d/wake", hostname.c_str(), http_port);
     ESP_LOGI(TAG, "=================================================");
 
+    int64_t next_health_us = 0;
     while (true) {
+        if (esp_timer_get_time() >= next_health_us) {
+            log_health();
+            next_health_us = esp_timer_get_time() + HEALTH_LOG_INTERVAL_US;
+        }
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }

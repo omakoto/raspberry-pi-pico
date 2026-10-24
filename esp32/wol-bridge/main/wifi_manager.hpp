@@ -24,6 +24,8 @@ public:
     [[noreturn]] void run(StatusLed* led = nullptr);
     bool is_connected() const;
     std::string get_ip_address() const;
+    // Signal strength of the current AP in dBm, or 0 when not associated.
+    int get_rssi() const;
     std::vector<std::string> get_configured_ssids() const;
     std::set<std::string> scan_networks();
 
