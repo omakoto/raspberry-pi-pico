@@ -144,3 +144,14 @@ spi_speed_mhz  = 25
   ```bash
   curl -X POST http://wol.local/purge
   ```
+
+---
+
+## Future Tasks
+
+- **Save crash core dumps to flash.** A panic backtrace currently only goes to UART0 at the moment
+  of the crash, so it's lost unless a USB-UART adapter happens to be capturing it. Enabling
+  ESP-IDF's core dump to flash (`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`, plus a `coredump` partition
+  of ~64 KB in `partitions.csv`; the 8 MB flash has room after `storage`) would keep the backtrace
+  across the reboot, to be read later over USB with `idf.py coredump-info`. Note that changing the
+  partition table requires a full re-flash.
