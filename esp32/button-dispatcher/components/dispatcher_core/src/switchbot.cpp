@@ -256,6 +256,7 @@ SwitchBotBody SwitchBotClient::request(const std::string& method, const std::str
     return failure("timed out after " + format_g(timeout_s_) + "s" + why);
   }
   if (response.failure != HttpResponse::Failure::kNone) return failure("cannot reach SwitchBot" + why);
+  if (response.body_dropped) return failure("the answer from SwitchBot is too large for the board's memory" + why);
   if (response.status == 401) return failure("HTTP 401: authentication failed; check the token and secret");
   if (response.status >= 400) return failure("HTTP " + std::to_string(response.status));
 

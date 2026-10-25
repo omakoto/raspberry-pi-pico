@@ -1,10 +1,12 @@
 #include "esp_platform.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <sys/time.h>
 
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -63,20 +65,52 @@ const char* reason_phrase(int status) {
     }
 }
 
+// The free memory that must remain after the response body grows. The TLS connection, Wi-Fi and Bluetooth
+// keep allocating while a request runs, and an allocation that fails aborts the whole firmware (it is built
+// without exceptions), so a body that would leave less than this is thrown away instead.
+constexpr size_t kHeapReserveBytes = 8 * 1024;
+
 struct BodyCollector {
     std::string* body;
     size_t limit;
+    bool dropped = false;  // the body did not fit in the free memory
+    size_t needed = 0;     // how large it was, as far as known, when it was dropped
 };
 
-esp_err_t http_event_handler(esp_http_client_event_t* event) {
-    if (event->event_id == HTTP_EVENT_ON_DATA && event->user_data != nullptr && event->data_len > 0) {
-        auto* collector = static_cast<BodyCollector*>(event->user_data);
-        if (collector->body->size() < collector->limit) {
-            const size_t room = collector->limit - collector->body->size();
-            collector->body->append(static_cast<const char*>(event->data),
-                                    std::min(static_cast<size_t>(event->data_len), room));
+// Makes room for `needed` bytes of body, if the free memory allows it. The buffer grows by half its size (at
+// least to `hint`, the announced Content-Length) rather than doubling as std::string would, and the free memory
+// is checked first, since a std::string that cannot allocate aborts.
+bool reserve_body(BodyCollector* collector, size_t needed, size_t hint) {
+    std::string& body = *collector->body;
+    if (needed <= body.capacity()) return true;
+    const size_t grown = std::min(collector->limit, std::max({needed, hint, body.capacity() + body.capacity() / 2}));
+    for (const size_t size : {grown, needed}) {
+        // The old buffer is still allocated while its contents are copied to the new one.
+        if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) > size &&
+            esp_get_free_heap_size() > size + kHeapReserveBytes) {
+            body.reserve(size);
+            return true;
         }
     }
+    return false;
+}
+
+esp_err_t http_event_handler(esp_http_client_event_t* event) {
+    if (event->event_id != HTTP_EVENT_ON_DATA || event->user_data == nullptr || event->data_len <= 0) return ESP_OK;
+    auto* collector = static_cast<BodyCollector*>(event->user_data);
+    std::string& body = *collector->body;
+    if (collector->dropped || body.size() >= collector->limit) return ESP_OK;
+    const size_t length = std::min(static_cast<size_t>(event->data_len), collector->limit - body.size());
+    const int64_t announced = esp_http_client_get_content_length(event->client);
+    const size_t hint = announced > 0 ? std::min(static_cast<size_t>(announced), collector->limit) : 0;
+    if (!reserve_body(collector, body.size() + length, hint)) {
+        collector->dropped = true;
+        collector->needed = std::max(body.size() + length, hint);
+        // Frees the memory the partial body holds.
+        std::string().swap(body);
+        return ESP_OK;
+    }
+    body.append(static_cast<const char*>(event->data), length);
     return ESP_OK;
 }
 
@@ -262,7 +296,16 @@ dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, co
     } else {
         result.status = esp_http_client_get_status_code(client);
         result.reason = reason_phrase(result.status);
-        ESP_LOGI(TAG, "%s %s -> %d in %lld ms", method.c_str(), url.c_str(), result.status, took_ms);
+        if (collector.dropped) {
+            result.body_dropped = true;
+            result.detail = "the answer has " + std::to_string((collector.needed + 1023) / 1024) + " KB or more, and " +
+                            std::to_string(esp_get_free_heap_size() / 1024) + " KB of memory are free";
+            ESP_LOGW(TAG, "%s %s: %s", method.c_str(), url.c_str(), result.detail.c_str());
+        }
+        // The lowest free heap shows how close requests come to running out (TLS needs the most).
+        ESP_LOGI(TAG, "%s %s -> %d in %lld ms (free heap %u bytes, lowest since boot %u)", method.c_str(),
+                 url.c_str(), result.status, took_ms, static_cast<unsigned>(esp_get_free_heap_size()),
+                 static_cast<unsigned>(esp_get_minimum_free_heap_size()));
     }
     esp_http_client_cleanup(client);
     return result;

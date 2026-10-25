@@ -283,6 +283,20 @@ TEST(switchbot_client_failure_detail_is_included) {
   CHECK_EQ(error_of(f.client.devices()), std::string("timed out after 15s (ESP_ERR_HTTP_EAGAIN)"));
 }
 
+TEST(switchbot_client_answer_too_large_for_the_memory) {
+  ClientFixture f;
+  f.platform.http_handler = [](const test_support::RecordedRequest&) {
+    HttpResponse response;
+    response.status = 200;
+    response.body_dropped = true;
+    response.detail = "the answer has 30 KB or more, and 21 KB of memory are free";
+    return response;
+  };
+  CHECK_EQ(error_of(f.client.devices()),
+           std::string("the answer from SwitchBot is too large for the board's memory (the answer has 30 KB or more, "
+                       "and 21 KB of memory are free)"));
+}
+
 TEST(switchbot_client_timeout_text) {
   ClientFixture f;
   f.platform.http_handler = [](const test_support::RecordedRequest&) {

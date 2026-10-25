@@ -834,6 +834,7 @@ Response put_device(Context& c) {
   const bool saved = c.app.commit_device(&save_error);
   if (role_changed) {
     c.app.reset_forwarding();
+    if (c.app.device.role == Role::kSatellite && c.app.on_became_satellite) c.app.on_became_satellite();
     c.app.log.add("info", std::string("This board is now a ") + role_name(c.app.device.role));
   }
   if (!saved) return save_failed(save_error);

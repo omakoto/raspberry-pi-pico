@@ -1434,6 +1434,20 @@ TEST(api_device_settings_are_saved_and_survive_a_restart) {
   CHECK_EQ(env.client.get("/api/device").str("role"), std::string("satellite"));
 }
 
+TEST(api_device_becoming_a_satellite_is_announced_to_the_firmware) {
+  Env env;
+  int calls = 0;
+  env.app->on_became_satellite = [&calls] { ++calls; };
+  env.sign_in();
+  env.client.put("/api/device", "{\"role\":\"satellite\"}");
+  env.client.put("/api/device", "{\"role\":\"satellite\"}");  // no change
+  CHECK_EQ(calls, 1);
+  env.client.put("/api/device", "{\"role\":\"dispatcher\"}");
+  CHECK_EQ(calls, 1);
+  env.client.put("/api/device", "{\"role\":\"satellite\"}");
+  CHECK_EQ(calls, 2);
+}
+
 TEST(api_device_role_change_is_logged) {
   Env env;
   env.sign_in();

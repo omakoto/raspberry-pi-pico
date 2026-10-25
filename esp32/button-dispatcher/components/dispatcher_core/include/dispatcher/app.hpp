@@ -83,6 +83,9 @@ class AppCore {
   // Called when there is something new to forward; it should wake the task that calls forward_once(). It is
   // called with or without `mutex` held, so it must not lock it.
   std::function<void()> on_forward_queued;
+  // Called with `mutex` held after the page made the board a satellite, so the firmware can start the task that
+  // calls forward_once() then rather than keep one on every dispatcher. Must not lock `mutex`.
+  std::function<void()> on_became_satellite;
 
   // ---- operations ----
 

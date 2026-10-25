@@ -59,6 +59,8 @@ static void start_time_sync(dispatcher::AppCore* app) {
 
 // The forwarding task: sends reports whenever forward_once() says one is due, woken early when a press is
 // queued. Reports are plain HTTP, so this needs less stack than the action worker, which also does TLS.
+// It only exists on a board that is (or has been, since it started) a satellite: a dispatcher needs the
+// memory for TLS.
 constexpr int kForwardStackBytes = 8 * 1024;
 
 [[noreturn]] static void forward_loop(dispatcher::AppCore& app, StatusLed& led) {
@@ -173,13 +175,26 @@ extern "C" void app_main() {
     static WebServer web(api);
     web.start(http_port);
 
-    // 8b. Forwarding to the dispatcher (satellite role); idle on a dispatcher, so a role change needs no restart
+    // 8b. Forwarding to the dispatcher (satellite role). The task starts when the board is a satellite and then
+    // stays (idle if the board is made a dispatcher again), so a role change needs no restart.
     static TaskHandle_t forward_task = nullptr;
     app.on_forward_queued = [] {
         if (forward_task != nullptr) xTaskNotifyGive(forward_task);
     };
-    xTaskCreate([](void*) { forward_loop(app, status_led); }, "forwarder", kForwardStackBytes, nullptr, 4,
-                &forward_task);
+    // Always called with app.mutex held, which keeps two callers from both creating the task.
+    static auto start_forwarding = [] {
+        if (forward_task != nullptr) return;
+        if (xTaskCreate([](void*) { forward_loop(app, status_led); }, "forwarder", kForwardStackBytes, nullptr, 4,
+                        &forward_task) != pdPASS) {
+            forward_task = nullptr;
+            ESP_LOGE(TAG, "Cannot start the forwarding task (out of memory)");
+        }
+    };
+    app.on_became_satellite = [] { start_forwarding(); };
+    {
+        std::lock_guard<std::mutex> lock(app.mutex);
+        if (app.device.role == dispatcher::Role::kSatellite) start_forwarding();
+    }
 
     // 9. Bluetooth scanning: presses feed the application core
     static BleScanner scanner(app, [] { status_led.pulse(150); });

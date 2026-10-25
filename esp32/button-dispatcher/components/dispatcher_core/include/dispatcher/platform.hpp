@@ -26,9 +26,12 @@ struct HttpResponse {
   int status = 0;
   std::string reason;                // "OK", "Not Found", ... when known
   std::string body;                  // at most max_response_bytes of it
-  // Why the transport failed (error codes, errno, TLS verdict), for messages shown to the user. Empty
-  // when unknown or when the request got a response.
+  // Why the transport failed (error codes, errno, TLS verdict), or why the body was dropped, for messages
+  // shown to the user. Empty when unknown or when the request got a whole response.
   std::string detail;
+  // The response arrived, but its body did not fit in the free memory and was thrown away (`body` is empty
+  // and `detail` says how large it was).
+  bool body_dropped = false;
 };
 
 class Platform {

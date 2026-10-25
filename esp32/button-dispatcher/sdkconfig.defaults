@@ -40,6 +40,12 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=n
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+# TLS buffers sized to the data in flight, and the configuration and CA certificates freed after the
+# handshake: with Wi-Fi and Bluetooth running, a dispatcher has under 60 KB of heap, and fixed 16 KB + 4 KB
+# buffers next to a large response body (the SwitchBot device list) run it out.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
 
 # HTTP server: room for the API's routes, long request lines and the asynchronous request helpers
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
