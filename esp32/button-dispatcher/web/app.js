@@ -1197,29 +1197,22 @@ $('import-go').addEventListener('click', (ev) => {
 
 // ---- This board (Settings) -----------------------------------------------------------------------
 
-// The name the board will have with the form's current values; mirrors effective_hostname() in device.cpp.
-function previewHostname() {
-  if (!device) return '';
-  const base = $('dev-hostname').value.trim().toLowerCase() || device.default_hostname_base || 'dispatcher';
-  const mac = (device.mac || '').toLowerCase().replace(/:/g, '-');
-  return base + ($('dev-append-mac').checked && mac ? '-' + mac : '') + '.local';
-}
-
-function updateHostnamePreview() {
-  $('dev-preview').textContent = 'Name on the network: ' + previewHostname();
-}
-
 function renderDevice() {
   if (!device) return;
   $('dev-role').value = device.role;
-  $('dev-hostname').value = device.hostname_base;
-  $('dev-hostname').placeholder = device.default_hostname_base;
-  $('dev-append-mac').checked = device.hostname_append_mac;
-  updateHostnamePreview();
+  $('dev-hostname').textContent = 'Name on the network: ' + device.hostname + '.local';
+  // The board-specific config keys need the MAC; without it there is nothing to show.
+  const prefix = device.board_config_prefix;
+  $('dev-rename').hidden = !prefix;
+  if (prefix) {
+    $('dev-config-lines').value =
+      `${prefix}hostname = "${device.hostname}"\n${prefix}hostname_append_mac = false`;
+  }
 }
 
-$('dev-hostname').addEventListener('input', updateHostnamePreview);
-$('dev-append-mac').addEventListener('change', updateHostnamePreview);
+$('dev-config-copy').addEventListener('click', async () => {
+  toast(await copyText($('dev-config-lines')) ? 'Copied.' : 'Select the lines and copy them.');
+});
 
 $('device-form').addEventListener('submit', (ev) => {
   ev.preventDefault();
@@ -1231,19 +1224,10 @@ $('device-form').addEventListener('submit', (ev) => {
       : 'Make this board a dispatcher? It will run its bindings again and stop forwarding presses.';
     if (!confirm(text)) return;
   }
-  const oldName = device.hostname;
   guarded(ev.target.querySelector('button[type=submit]'), err, async () => {
-    await api('PUT', '/api/device', {
-      role: newRole,
-      hostname_base: $('dev-hostname').value.trim(),
-      hostname_append_mac: $('dev-append-mac').checked,
-    });
+    await api('PUT', '/api/device', { role: newRole });
     await refresh();
-    if (device.hostname !== oldName) {
-      toast(`Saved. The board is now ${device.hostname}.local; open it there if this address stops working.`);
-    } else {
-      toast('Saved.');
-    }
+    toast('Saved.');
   }, SETTINGS_COOLDOWN_MS);
 });
 

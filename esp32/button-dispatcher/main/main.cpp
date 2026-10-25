@@ -121,9 +121,14 @@ extern "C" void app_main() {
     if (!platform.init()) ESP_LOGE(TAG, "Platform start-up problem; settings may not be saved");
     static dispatcher::AppCore app(platform,
                                    config.get_int("pbkdf2_iterations", dispatcher::AuthService::kDefaultIterations));
-    // config.toml's hostname is only the default: the web page can rename the board (stored in device.json).
-    app.default_hostname_base = config.get_string("hostname", dispatcher::kDefaultHostnameBase);
-    app.default_hostname_append_mac = config.get_bool("hostname_append_mac", true);
+    // The board's own keys (board.<mac>.hostname...) win over the defaults that every board shares.
+    const std::string board_prefix = dispatcher::board_config_prefix(platform.device_mac());
+    app.hostname_config.base = config.get_string(
+        board_prefix + "hostname", config.get_string("hostname", dispatcher::kDefaultHostnameBase));
+    app.hostname_config.append_mac = config.get_bool(
+        board_prefix + "hostname_append_mac", config.get_bool("hostname_append_mac", true));
+    std::string hostname_problem;
+    dispatcher::effective_hostname(app.hostname_config, platform.device_mac(), &hostname_problem);
     app.http_port = config.get_int("http_port", 80);
     std::string init_error;
     app.init(&init_error);
@@ -136,7 +141,9 @@ extern "C" void app_main() {
         role = app.device.role;
         app.log.add("info", std::string("Started as a ") + dispatcher::role_name(role));
         if (!init_error.empty()) app.log.add("error", init_error);
+        if (!hostname_problem.empty()) app.log.add("error", "Bad " + hostname_problem);
     }
+    if (!hostname_problem.empty()) ESP_LOGE(TAG, "Bad %s", hostname_problem.c_str());
 
     // 7. Wi-Fi with fallback access points
     std::vector<std::pair<std::string, std::string>> ap_list;
@@ -162,10 +169,6 @@ extern "C" void app_main() {
     // 8. mDNS (for example dispatcher-aa-bb-cc-dd-ee-ff.local) and the web server
     static MdnsService mdns;
     mdns.init(hostname, http_port);
-    platform.set_hostname_handler([](const std::string& name) {
-        mdns.set_hostname(name);
-        wifi.set_hostname(name);
-    });
     static dispatcher::Api api(app);
     static WebServer web(api);
     web.start(http_port);

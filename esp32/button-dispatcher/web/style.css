@@ -306,6 +306,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .badge.online { background: var(--notice-bg); color: var(--ok); }
 .badge.offline { background: var(--warn-bg); color: var(--warn-text); }
 #satellite-code { word-break: break-all; }
+#dev-config-lines { white-space: pre; overflow-x: auto; }
 .details dd { margin: 0; overflow-wrap: anywhere; }
 /* Five tabs do not fit a phone's width: they scroll sideways rather than break words. */
 .tabs button { flex: none; white-space: nowrap; }

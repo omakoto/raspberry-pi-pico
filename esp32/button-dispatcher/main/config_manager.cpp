@@ -132,7 +132,12 @@ bool ConfigManager::parse_file(const std::string& path, std::vector<ScrubPlan>* 
     for (const auto& entry : dispatcher::parse_config_text(text)) {
         // A masked secret stands for the stored one.
         if (dispatcher::is_secret_key(entry.key) && entry.value == dispatcher::kMaskedSecret) continue;
-        config_map_[entry.key] = entry.value;
+        // The MAC in a board-specific key ("board.AA-BB-...") may be written in either case.
+        std::string key = entry.key;
+        if (key.compare(0, 6, "board.") == 0) {
+            std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+        }
+        config_map_[key] = entry.value;
     }
     if (!dispatcher::find_exposed_secrets(text).empty()) plans->push_back({path, text});
     return true;

@@ -34,17 +34,6 @@ bool MdnsService::init(const std::string& hostname, int http_port) {
     return true;
 }
 
-void MdnsService::set_hostname(const std::string& hostname) {
-    hostname_ = hostname;
-    if (!initialized_) return;
-    const esp_err_t err = mdns_hostname_set(hostname_.c_str());
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot change the MDNS hostname to %s: %s", hostname_.c_str(), esp_err_to_name(err));
-    } else {
-        ESP_LOGI(TAG, "MDNS hostname set to: %s.local", hostname_.c_str());
-    }
-}
-
 void MdnsService::stop() {
     if (initialized_) {
         mdns_free();

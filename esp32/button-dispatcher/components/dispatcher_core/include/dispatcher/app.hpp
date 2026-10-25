@@ -76,10 +76,8 @@ class AppCore {
   Forwarder forwarder;
 
   // ---- set once by the firmware before init(), then read-only ----
-  // The host name base used when the device settings leave it empty (config.toml's `hostname`).
-  std::string default_hostname_base = kDefaultHostnameBase;
-  // Whether the MAC is appended when the device settings don't say (config.toml's `hostname_append_mac`).
-  bool default_hostname_append_mac = true;
+  // How the board is named on the network (from config.toml).
+  HostnameConfig hostname_config;
   // The port of the web server, for the pairing codes this board hands out.
   int http_port = 80;
   // Called when there is something new to forward; it should wake the task that calls forward_once(). It is
@@ -91,15 +89,13 @@ class AppCore {
   // Saves the config document and applies the config to the trigger engine and the credential copy.
   // Call with `mutex` held. Returns false, setting `*error`, if the document could not be stored.
   bool commit_config(std::string* error);
-  // Saves device.json, and applies the host name if it changed. Call with `mutex` held.
+  // Saves device.json. Call with `mutex` held.
   bool commit_device(std::string* error);
   // Saves satellites.json. Call with `mutex` held.
   bool commit_satellites(std::string* error);
 
-  // The board's current network name, such as "dispatcher-aa-bb-cc-dd-ee-ff". Call with `mutex` held.
+  // The board's network name, such as "dispatcher-aa-bb-cc-dd-ee-ff".
   std::string hostname() const;
-  // Whether the MAC is appended to the host name, from the device settings or the default. Call with `mutex` held.
-  bool hostname_append_mac() const;
 
   // Forgets what is queued for forwarding and makes a report due now; for changes of role or pairing. Call
   // with `mutex` held.
@@ -143,7 +139,6 @@ class AppCore {
   std::mutex credentials_mutex_;
   std::pair<std::string, std::string> credentials_;
   std::map<std::string, double> last_error_log_;
-  std::string applied_hostname_;
   // Bumped by reset_forwarding(), so the outcome of a report sent before the change is ignored.
   uint64_t forward_generation_ = 0;
 };

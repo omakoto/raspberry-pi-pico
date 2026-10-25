@@ -9,8 +9,6 @@ public:
 
     bool init(const std::string& hostname = "dispatcher", int http_port = 80);
     void stop();
-    // Renames the board on the network ("<hostname>.local"); takes effect at once.
-    void set_hostname(const std::string& hostname);
 
 private:
     bool initialized_;

@@ -139,6 +139,14 @@
 
       <form id="device-form" class="card" novalidate>
         <h3>This board</h3>
+        <p id="dev-hostname" class="help"></p>
+        <div id="dev-rename" class="field" hidden>
+          <label for="dev-config-lines">To rename this board, add these lines to config.toml</label>
+          <textarea id="dev-config-lines" rows="2" spellcheck="false" readonly></textarea>
+          <p class="help">They apply only to this board, so they can go in the config file all boards share.
+            Change the name, and restart the board to use it.</p>
+          <div class="actions"><button id="dev-config-copy" type="button">Copy</button></div>
+        </div>
         <div class="field">
           <label for="dev-role">Role</label>
           <select id="dev-role">
@@ -146,16 +154,6 @@
             <option value="satellite">Satellite: forwards presses to a dispatcher</option>
           </select>
         </div>
-        <div class="field">
-          <label for="dev-hostname">Host name</label>
-          <input id="dev-hostname" type="text" maxlength="63" autocomplete="off" spellcheck="false">
-          <p class="help">Letters, digits and hyphens. Empty uses the default from config.toml.</p>
-        </div>
-        <div class="field check">
-          <input id="dev-append-mac" type="checkbox">
-          <label for="dev-append-mac">Append the MAC address, so boards set up the same way get different names</label>
-        </div>
-        <p id="dev-preview" class="help"></p>
         <p id="device-error" class="error" role="alert" hidden></p>
         <div class="actions"><button type="submit" class="primary">Save</button></div>
       </form>

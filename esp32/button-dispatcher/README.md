@@ -122,8 +122,8 @@ second, which helps).
 
 ## Configuration (`config.toml`, `config-override.toml`)
 
-Same file and keys as `wol-bridge`, plus: `hostname` and `hostname_append_mac` (only defaults, see
-[Host name](#host-name)), `http_port`, `led_pin`, `led_active_low`,
+Same file and keys as `wol-bridge`, plus: `hostname_append_mac` and the per-board `board.<mac>.hostname` /
+`board.<mac>.hostname_append_mac` (see [Host name](#host-name)), `http_port`, `led_pin`, `led_active_low`,
 `buzzer_pin`, `buzzer_active_low`, `wifi_ssid[0-9]` / `wifi_password[0-9]`, and the tuning keys `ble_scan_interval_ms`,
 `ble_scan_window_ms`, `ble_scan_active` and `pbkdf2_iterations` (default 20000; the time one login
 takes is logged at boot, raise it if there is room).
@@ -138,15 +138,27 @@ not in the config files at all; they live in the `state` partition and are set o
 
 ## Host name
 
-The board's network name is `<base>-<Wi-Fi MAC>`, for example `dispatcher-24-0a-c4-12-34-56.local`, so that
-boards flashed with the same `config.toml` (the shared `ESP32_CONFIG_TOML` override) don't claim the same
-name. Settings, This board, changes the base and turns the MAC suffix off. The change takes effect at once for
-mDNS (`.local`); the name sent to the router with DHCP changes at the next lease renewal. The base defaults to
-`config.toml`'s `hostname` (`dispatcher` if unset), and the suffix to `hostname_append_mac` (`true` if unset);
-what is set on the page is stored in `device.json` and wins. To give one board an exact name from the first
-boot, build it with `ESP32_CONFIG_TOML` pointing at a copy of the shared override with
-`hostname_append_mac = false` added (or add it to `config-override.toml` on the board's USB drive later); with
-the default `hostname`, it comes up as `dispatcher.local`.
+The board's network name comes from the config files, and is set once at boot (mDNS `.local` and the name sent
+to the router with DHCP). By default it is `<hostname>-<Wi-Fi MAC>`, for example
+`dispatcher-24-0a-c4-12-34-56.local`, so that boards flashed with the same files (the shared
+`ESP32_CONFIG_TOML` override) don't claim the same name. `hostname` is `dispatcher` if unset, and
+`hostname_append_mac = false` turns the suffix off.
+
+To give one board its own name, add keys that carry its MAC address (lowercase, with hyphens):
+
+```toml
+board.24-0a-c4-12-34-56.hostname = "dispatcher"
+board.24-0a-c4-12-34-56.hostname_append_mac = false
+```
+
+These win over the defaults on that board only, so they can go in the shared override file, and survive
+reflashing. To find a new board's MAC, open its page under the default name (Settings, This board, shows the
+two lines ready to copy) or read its boot log.
+
+They are one-line dotted keys rather than a `[board.<mac>]` table on purpose: the other projects that read the
+shared file parse it line by line, and would take a `hostname = ...` under a table header as their own
+`hostname`. An invalid name (letters, digits and hyphens only, at most 63 characters with the suffix) is
+logged and replaced by `dispatcher` with the MAC.
 
 ## Satellites
 

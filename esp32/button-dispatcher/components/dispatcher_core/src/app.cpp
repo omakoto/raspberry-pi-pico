@@ -114,8 +114,6 @@ void AppCore::init(std::string* error) {
     }
   }
   forwarder.reset(platform_.monotonic_s());
-  // The firmware starts the network under this name.
-  applied_hostname_ = hostname();
 }
 
 bool AppCore::commit_config(std::string* error) {
@@ -134,11 +132,6 @@ bool AppCore::commit_config(std::string* error) {
 }
 
 bool AppCore::commit_device(std::string* error) {
-  const std::string name = hostname();
-  if (name != applied_hostname_) {
-    applied_hostname_ = name;
-    platform_.apply_hostname(name);
-  }
   if (!platform_.save_document(kDeviceDocument, device_settings_to_text(device))) {
     if (error != nullptr) *error = "the device settings could not be saved";
     return false;
@@ -155,10 +148,8 @@ bool AppCore::commit_satellites(std::string* error) {
 }
 
 std::string AppCore::hostname() const {
-  return effective_hostname(device, default_hostname_base, default_hostname_append_mac, platform_.device_mac());
+  return effective_hostname(hostname_config, platform_.device_mac());
 }
-
-bool AppCore::hostname_append_mac() const { return device.hostname_append_mac.value_or(default_hostname_append_mac); }
 
 void AppCore::reset_forwarding() {
   ++forward_generation_;

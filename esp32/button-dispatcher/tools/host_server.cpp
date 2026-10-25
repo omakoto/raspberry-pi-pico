@@ -77,7 +77,6 @@ class HostPlatform : public Platform {
   }
   bool wall_clock_valid() const override { return true; }
   std::string device_mac() const override { return mac_; }
-  void apply_hostname(const std::string& hostname) override { std::cerr << "host name is now " << hostname << "\n"; }
   int64_t wall_time_ms() const override {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
         .count();

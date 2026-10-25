@@ -83,13 +83,25 @@ std::string mac_suffix(const std::string& mac) {
   return out;
 }
 
-std::string effective_hostname(const DeviceSettings& settings, const std::string& default_base,
-                               bool default_append_mac, const std::string& mac) {
-  std::string base = settings.hostname_base;
-  if (base.empty()) base = default_base;
+std::string board_config_prefix(const std::string& mac) {
+  const std::string suffix = mac_suffix(mac);
+  return suffix.empty() ? "" : "board." + suffix + ".";
+}
+
+std::string effective_hostname(const HostnameConfig& config, const std::string& mac, std::string* problem) {
+  std::string base = trim(config.base);
+  for (char& c : base) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  bool append_mac = config.append_mac;
+  std::string error = check_hostname_base(base, append_mac);
+  if (!error.empty()) {
+    error = "host name \"" + config.base + "\" in config.toml: " + error + "; using the default";
+    base.clear();
+    append_mac = true;
+  }
+  if (problem != nullptr) *problem = error;
   if (base.empty()) base = kDefaultHostnameBase;
   const std::string suffix = mac_suffix(mac);
-  if (settings.hostname_append_mac.value_or(default_append_mac) && !suffix.empty()) base += "-" + suffix;
+  if (append_mac && !suffix.empty()) base += "-" + suffix;
   return base;
 }
 
@@ -159,23 +171,6 @@ Parsed<DeviceSettings> device_settings_from_text(const std::string& text) {
     if (!parsed) return fail<DeviceSettings>("unknown role");
     settings.role = *parsed;
   }
-  const cJSON* base = get(json.get(), "hostname_base");
-  if (base != nullptr) {
-    if (!cJSON_IsString(base)) return fail<DeviceSettings>("hostname_base must be text");
-    settings.hostname_base = base->valuestring;
-  }
-  const cJSON* append = get(json.get(), "hostname_append_mac");
-  if (append != nullptr) {
-    if (!cJSON_IsBool(append)) return fail<DeviceSettings>("hostname_append_mac must be true or false");
-    settings.hostname_append_mac = cJSON_IsTrue(append);
-  }
-  // Without a stored choice the length is checked as if no MAC were appended: the default isn't known here, and
-  // the web page stores the choice whenever it sets a base, so a long base never relies on the default.
-  if (const std::string problem =
-          check_hostname_base(settings.hostname_base, settings.hostname_append_mac.value_or(false));
-      !problem.empty()) {
-    return fail<DeviceSettings>(problem);
-  }
   const cJSON* pairing = get(json.get(), "pairing");
   if (pairing != nullptr && !cJSON_IsNull(pairing)) {
     if (!cJSON_IsString(pairing)) return fail<DeviceSettings>("pairing must be a pairing code");
@@ -190,10 +185,6 @@ std::string device_settings_to_text(const DeviceSettings& settings) {
   JsonPtr json = make_json(cJSON_CreateObject());
   cJSON_AddNumberToObject(json.get(), "version", 1);
   cJSON_AddStringToObject(json.get(), "role", role_name(settings.role));
-  cJSON_AddStringToObject(json.get(), "hostname_base", settings.hostname_base.c_str());
-  if (settings.hostname_append_mac) {
-    cJSON_AddBoolToObject(json.get(), "hostname_append_mac", *settings.hostname_append_mac);
-  }
   // The pairing is stored as its code, so there is one format to parse and validate.
   if (settings.pairing) {
     cJSON_AddStringToObject(json.get(), "pairing", format_pairing_code(*settings.pairing).c_str());

@@ -216,7 +216,7 @@ struct Env {
   ApiClient client{nullptr};
   FakeSwitchBot switchbot;
   std::vector<std::string> hits;  // "<method> <url>" of requests to the target
-  bool default_append_mac = true;  // config.toml's hostname_append_mac, applied by open()
+  HostnameConfig hostname_config;  // from config.toml, applied by open()
 
   Env() {
     platform.http_handler = [this](const test_support::RecordedRequest& request) { return network(request); };
@@ -241,7 +241,7 @@ struct Env {
   void open() {
     api.reset();
     app = std::make_unique<AppCore>(platform, kFastIterations);
-    app->default_hostname_append_mac = default_append_mac;
+    app->hostname_config = hostname_config;
     app->init();
     api = std::make_unique<Api>(*app);
     client.use(api.get());
@@ -1381,12 +1381,8 @@ TEST(api_device_defaults) {
   CHECK_EQ(device.str("role"), std::string("dispatcher"));
   CHECK_EQ(device.str("mac"), std::string("24:0A:C4:12:34:56"));
   CHECK_EQ(device.str("hostname"), std::string("dispatcher-24-0a-c4-12-34-56"));
-  CHECK_EQ(device.str("hostname_base"), std::string());
-  CHECK_EQ(device.str("default_hostname_base"), std::string("dispatcher"));
-  CHECK(device.flag("hostname_append_mac"));
-  CHECK(device.flag("default_hostname_append_mac"));
+  CHECK_EQ(device.str("board_config_prefix"), std::string("board.24-0a-c4-12-34-56."));
   CHECK(device.is_null("pairing"));
-  CHECK(env.platform.applied_hostnames.empty());
 }
 
 TEST(api_state_has_the_device_role_and_hostname) {
@@ -1397,111 +1393,45 @@ TEST(api_state_has_the_device_role_and_hostname) {
   CHECK_EQ(state.str("device.hostname"), std::string("dispatcher-24-0a-c4-12-34-56"));
 }
 
-TEST(api_device_hostname_base_is_trimmed_and_lowercased) {
+TEST(api_device_hostname_comes_from_the_config) {
+  Env env;
+  env.hostname_config.base = "dispatcher";
+  env.hostname_config.append_mac = false;
+  env.open();
+  env.sign_in();
+  CHECK_EQ(env.client.get("/api/device").str("hostname"), std::string("dispatcher"));
+  CHECK_EQ(env.client.get("/api/state").str("device.hostname"), std::string("dispatcher"));
+}
+
+TEST(api_device_hostname_cannot_be_set_from_the_page) {
   Env env;
   env.sign_in();
-  const Reply put = env.client.put("/api/device", "{\"hostname_base\":\"  Living-Room \"}");
+  const Reply put = env.client.put("/api/device", "{\"hostname_base\":\"desk\",\"hostname_append_mac\":false}");
   CHECK_EQ(put.status, 200);
-  CHECK_EQ(put.str("hostname_base"), std::string("living-room"));
-  CHECK_EQ(put.str("hostname"), std::string("living-room-24-0a-c4-12-34-56"));
-  CHECK_EQ(env.platform.applied_hostnames.size(), static_cast<size_t>(1));
-  CHECK_EQ(env.platform.applied_hostnames[0], std::string("living-room-24-0a-c4-12-34-56"));
-  CHECK_EQ(env.client.get("/api/state").str("device.hostname"), std::string("living-room-24-0a-c4-12-34-56"));
-  CHECK(contains(env.log_text(), "Host name is now living-room-24-0a-c4-12-34-56"));
-}
-
-TEST(api_device_toggling_the_mac_suffix) {
-  Env env;
-  env.sign_in();
-  const Reply off = env.client.put("/api/device", "{\"hostname_append_mac\":false}");
-  CHECK_EQ(off.status, 200);
-  CHECK(!off.flag("hostname_append_mac"));
-  CHECK_EQ(off.str("hostname"), std::string("dispatcher"));
-  const Reply on = env.client.put("/api/device", "{\"hostname_append_mac\":true}");
-  CHECK_EQ(on.str("hostname"), std::string("dispatcher-24-0a-c4-12-34-56"));
-  CHECK_EQ(env.platform.applied_hostnames.size(), static_cast<size_t>(2));
-  CHECK_EQ(env.platform.applied_hostnames[0], std::string("dispatcher"));
-}
-
-TEST(api_device_config_can_turn_the_mac_suffix_off) {
-  Env env;
-  env.default_append_mac = false;
-  env.open();
-  env.sign_in();
-  const Reply device = env.client.get("/api/device");
-  CHECK_EQ(device.str("hostname"), std::string("dispatcher"));
-  CHECK(!device.flag("hostname_append_mac"));
-  CHECK(!device.flag("default_hostname_append_mac"));
-  CHECK_EQ(env.app->hostname(), std::string("dispatcher"));
-}
-
-TEST(api_device_role_change_leaves_the_mac_suffix_to_the_config) {
-  Env env;
-  env.default_append_mac = false;
-  env.open();
-  env.sign_in();
-  CHECK_EQ(env.client.put("/api/device", "{\"role\":\"satellite\"}").status, 200);
-  CHECK(!contains(env.platform.documents["device.json"], "hostname_append_mac"));
-  env.default_append_mac = true;
-  env.open();
-  CHECK_EQ(env.app->hostname(), std::string("dispatcher-24-0a-c4-12-34-56"));
-}
-
-TEST(api_device_setting_a_base_stores_the_mac_suffix_choice) {
-  Env env;
-  env.default_append_mac = false;
-  env.open();
-  env.sign_in();
-  // 50 characters only fit without the suffix, so the choice it was checked against is kept with it.
-  const std::string base(50, 'a');
-  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"" + base + "\"}").status, 200);
-  CHECK(contains(env.platform.documents["device.json"], "\"hostname_append_mac\":false"));
-  env.default_append_mac = true;
-  env.open();
-  CHECK_EQ(env.app->hostname(), base);
-}
-
-TEST(api_device_unchanged_hostname_is_not_applied_again) {
-  Env env;
-  env.sign_in();
-  env.client.put("/api/device", "{\"hostname_base\":\"desk\"}");
-  env.client.put("/api/device", "{\"hostname_base\":\"desk\"}");
-  CHECK_EQ(env.platform.applied_hostnames.size(), static_cast<size_t>(1));
+  CHECK_EQ(put.str("hostname"), std::string("dispatcher-24-0a-c4-12-34-56"));
+  CHECK(!contains(env.platform.documents["device.json"], "desk"));
 }
 
 TEST(api_device_rejects_invalid_values) {
   Env env;
   env.sign_in();
-  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"bad name\"}").status, 400);
-  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"-x\"}").status, 400);
-  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":7}").status, 400);
-  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"" + std::string(46, 'a') + "\"}").status, 400);
-  CHECK_EQ(env.client.put("/api/device", "{\"hostname_append_mac\":\"no\"}").status, 400);
   CHECK_EQ(env.client.put("/api/device", "{\"role\":\"boss\"}").status, 400);
+  CHECK_EQ(env.client.put("/api/device", "{\"role\":3}").status, 400);
   CHECK_EQ(env.client.put("/api/device", "[]").status, 400);
-  // Turning the suffix off makes room for a longer name.
-  CHECK_EQ(env.client.put("/api/device",
-                          "{\"hostname_base\":\"" + std::string(46, 'a') + "\",\"hostname_append_mac\":false}")
-               .status,
-           200);
-  CHECK(env.platform.applied_hostnames.size() == 1);
 }
 
 TEST(api_device_settings_are_saved_and_survive_a_restart) {
   Env env;
   env.sign_in();
-  env.client.put("/api/device", "{\"hostname_base\":\"porch\",\"hostname_append_mac\":false,\"role\":\"satellite\"}");
+  env.client.put("/api/device", "{\"role\":\"satellite\"}");
   CHECK(env.platform.documents.count("device.json") == 1);
-  CHECK(contains(env.platform.documents["device.json"], "porch"));
+  CHECK(contains(env.platform.documents["device.json"], "satellite"));
   // The device settings never travel in config.json.
-  CHECK(!contains(env.config_document(), "porch"));
+  CHECK(!contains(env.config_document(), "satellite"));
 
   env.open();
   CHECK_EQ(env.client.post("/api/auth/login", password_body(kPassword)).status, 200);
-  const Reply device = env.client.get("/api/device");
-  CHECK_EQ(device.str("role"), std::string("satellite"));
-  CHECK_EQ(device.str("hostname"), std::string("porch"));
-  CHECK(!device.flag("hostname_append_mac"));
+  CHECK_EQ(env.client.get("/api/device").str("role"), std::string("satellite"));
 }
 
 TEST(api_device_role_change_is_logged) {
@@ -1518,7 +1448,7 @@ TEST(api_device_save_failure_is_reported) {
   Env env;
   env.sign_in();
   env.platform.fail_saves = true;
-  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"desk\"}").status, 500);
+  CHECK_EQ(env.client.put("/api/device", "{\"role\":\"satellite\"}").status, 500);
 }
 
 TEST(api_corrupt_device_json_leaves_the_defaults) {
@@ -1617,11 +1547,12 @@ TEST(api_satellite_create_returns_a_pairing_code) {
   CHECK(!contains(created.body.substr(0, created.body.find("pairing_code")), "secret"));
 }
 
-TEST(api_satellite_create_uses_the_http_port_and_new_hostname) {
+TEST(api_satellite_create_uses_the_http_port_and_hostname) {
   Env env;
+  env.hostname_config.base = "hub";
+  env.open();
   env.app->http_port = 8080;
   env.sign_in();
-  env.client.put("/api/device", "{\"hostname_base\":\"hub\"}");
   const Reply created = env.client.post("/api/satellites", "{\"name\":\"Porch\"}");
   CHECK(contains(created.str("pairing_code"), "@hub-24-0a-c4-12-34-56.local:8080"));
 }

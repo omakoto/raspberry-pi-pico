@@ -786,10 +786,8 @@ JsonPtr device_json(AppCore& app) {
   cJSON_AddStringToObject(json.get(), "role", role_name(device.role));
   cJSON_AddStringToObject(json.get(), "mac", app.platform().device_mac().c_str());
   cJSON_AddStringToObject(json.get(), "hostname", app.hostname().c_str());
-  cJSON_AddStringToObject(json.get(), "hostname_base", device.hostname_base.c_str());
-  cJSON_AddStringToObject(json.get(), "default_hostname_base", app.default_hostname_base.c_str());
-  cJSON_AddBoolToObject(json.get(), "hostname_append_mac", app.hostname_append_mac());
-  cJSON_AddBoolToObject(json.get(), "default_hostname_append_mac", app.default_hostname_append_mac);
+  // The page shows the config.toml lines that rename this board, so they can be copied.
+  cJSON_AddStringToObject(json.get(), "board_config_prefix", board_config_prefix(app.platform().device_mac()).c_str());
   cJSON_AddNumberToObject(json.get(), "http_port", app.http_port);
   if (device.pairing) {
     cJSON* pairing = cJSON_AddObjectToObject(json.get(), "pairing");
@@ -829,36 +827,15 @@ Response put_device(Context& c) {
     if (!parsed) return fail(400, "role must be \"dispatcher\" or \"satellite\"");
     updated.role = *parsed;
   }
-  const cJSON* base = field(body.get(), "hostname_base");
-  if (base != nullptr) {
-    if (!cJSON_IsString(base)) return fail(400, "the host name must be text");
-    updated.hostname_base = trim(base->valuestring);
-    for (char& ch : updated.hostname_base) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-  }
-  const cJSON* append = field(body.get(), "hostname_append_mac");
-  if (append != nullptr) {
-    if (!cJSON_IsBool(append)) return fail(400, "hostname_append_mac must be true or false");
-    updated.hostname_append_mac = cJSON_IsTrue(append);
-  } else if (base != nullptr && !updated.hostname_append_mac) {
-    // A base is only known to fit with the suffix setting it was checked against, so that setting is stored with
-    // it rather than left to a default that could change.
-    updated.hostname_append_mac = c.app.default_hostname_append_mac;
-  }
-  const bool append_mac = updated.hostname_append_mac.value_or(c.app.default_hostname_append_mac);
-  const std::string problem = check_hostname_base(updated.hostname_base, append_mac);
-  if (!problem.empty()) return fail(400, problem);
 
   const bool role_changed = updated.role != c.app.device.role;
-  const std::string old_hostname = c.app.hostname();
   c.app.device = std::move(updated);
-  const std::string new_hostname = c.app.hostname();
   std::string save_error;
   const bool saved = c.app.commit_device(&save_error);
   if (role_changed) {
     c.app.reset_forwarding();
     c.app.log.add("info", std::string("This board is now a ") + role_name(c.app.device.role));
   }
-  if (new_hostname != old_hostname) c.app.log.add("info", "Host name is now " + new_hostname);
   if (!saved) return save_failed(save_error);
   return reply(200, device_json(c.app));
 }

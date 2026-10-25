@@ -1,6 +1,9 @@
 // Settings of the board itself rather than of the buttons: its role (dispatcher or satellite), its network
 // name, and, on a satellite, how to reach the dispatcher it reports to.
 //
+// The network name comes from config.toml rather than device.json, so that one shared config file can name
+// every board (see HostnameConfig).
+//
 // They are kept in their own document, device.json, apart from config.json: config.json is the format the
 // Raspberry Pi version exports and imports, and these settings (including the pairing secret) belong to one
 // board and must never travel with an exported config.
@@ -37,24 +40,34 @@ struct Pairing {
 
 struct DeviceSettings {
   Role role = Role::kDispatcher;
-  // The first part of the host name; empty means the default (config.toml's `hostname`).
-  std::string hostname_base;
-  // Whether "-<Wi-Fi MAC>" is appended, so that boards flashed with the same config.toml get different names.
-  // Unset means the default (config.toml's `hostname_append_mac`), so one board's config-override.toml can give
-  // it an exact name from the first boot.
-  std::optional<bool> hostname_append_mac;
   std::optional<Pairing> pairing;
+};
+
+// How the board is named on the network, from config.toml. The shared config file is flashed onto every board,
+// so the plain keys (`hostname`, `hostname_append_mac`) give each board "<base>-<Wi-Fi MAC>", and
+// one board can be given its own name with keys that carry its MAC, such as
+// `board.24-0a-c4-12-34-56.hostname = "dispatcher"` and `board.24-0a-c4-12-34-56.hostname_append_mac = false`.
+// These are single-line dotted keys rather than a [board.<mac>] table because the other projects that share
+// the file read it line by line, and would take a `hostname` line under a table header as their own.
+struct HostnameConfig {
+  std::string base = kDefaultHostnameBase;
+  // Whether "-<Wi-Fi MAC>" is appended, so that boards flashed with the same config.toml get different names.
+  bool append_mac = true;
 };
 
 // "AA:BB:CC:DD:EE:FF" -> "aa-bb-cc-dd-ee-ff"; empty if `mac` is not a MAC address.
 std::string mac_suffix(const std::string& mac);
 
+// "board.aa-bb-cc-dd-ee-ff." for the board with Wi-Fi MAC `mac`: the prefix of the config keys that apply to
+// that board only. Empty if `mac` is not a MAC address.
+std::string board_config_prefix(const std::string& mac);
+
 // The name the board uses on the network (mDNS "<name>.local" and DHCP), for example
-// "dispatcher-aa-bb-cc-dd-ee-ff". Falls back to `default_base`, then to kDefaultHostnameBase, when the base is
-// empty, and to `default_append_mac` when the settings don't say whether to append the MAC; the MAC is left out
-// if it is unknown.
-std::string effective_hostname(const DeviceSettings& settings, const std::string& default_base,
-                               bool default_append_mac, const std::string& mac);
+// "dispatcher-aa-bb-cc-dd-ee-ff". The base is trimmed and lowercased, and an empty one means
+// kDefaultHostnameBase. An invalid base (see check_hostname_base) is replaced by kDefaultHostnameBase with the
+// MAC appended, so the board still gets a name no other board has, and `*problem` (if given) says why;
+// otherwise `*problem` is cleared. The MAC is left out if it is unknown.
+std::string effective_hostname(const HostnameConfig& config, const std::string& mac, std::string* problem = nullptr);
 
 // Checks a host name base: letters, digits and hyphens, not starting or ending with a hyphen, and short enough
 // for one DNS label with the MAC suffix if it is appended. Returns the message to show, or "" if it is valid.

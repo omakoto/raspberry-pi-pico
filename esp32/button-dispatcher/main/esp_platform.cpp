@@ -276,10 +276,6 @@ std::string EspPlatform::device_mac() const {
     return text;
 }
 
-void EspPlatform::apply_hostname(const std::string& hostname) {
-    if (hostname_handler_) hostname_handler_(hostname);
-}
-
 void EspPlatform::run_in_background(std::function<void()> task) {
     auto* heap_task = new std::function<void()>(std::move(task));
     // A full queue means the worker is badly behind (for example a dead server on every press); dropping

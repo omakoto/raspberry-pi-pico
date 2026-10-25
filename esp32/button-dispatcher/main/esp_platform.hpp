@@ -35,15 +35,12 @@ public:
                                           double timeout_s, size_t max_response_bytes) override;
 
     std::string device_mac() const override;
-    void apply_hostname(const std::string& hostname) override;
 
     void run_in_background(std::function<void()> task) override;
     void beep(dispatcher::Beep kind, int count) override;
 
     // The buzzer to sound beeps on; without one, beeps are ignored. Not owned.
     void set_buzzer(Buzzer* buzzer) { buzzer_ = buzzer; }
-    // What apply_hostname does (renaming mDNS and the Wi-Fi interface); set once the network is up.
-    void set_hostname_handler(std::function<void(const std::string&)> handler) { hostname_handler_ = std::move(handler); }
 
 private:
     static void worker_entry(void* arg);
@@ -51,6 +48,5 @@ private:
 
     bool state_mounted_;
     Buzzer* buzzer_ = nullptr;
-    std::function<void(const std::string&)> hostname_handler_;
     QueueHandle_t work_queue_;
 };

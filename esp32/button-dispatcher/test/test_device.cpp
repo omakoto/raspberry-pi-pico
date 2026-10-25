@@ -49,44 +49,71 @@ TEST(device_mac_suffix_rejects_junk) {
   CHECK_EQ(mac_suffix("ZZ:0A:C4:12:34:56"), std::string());
 }
 
-TEST(device_hostname_defaults_to_the_base_and_mac) {
-  DeviceSettings settings;
-  CHECK_EQ(effective_hostname(settings, "buttons", true, kMac), std::string("buttons-24-0a-c4-12-34-56"));
+TEST(device_hostname_defaults_to_dispatcher_and_the_mac) {
+  const HostnameConfig config;
+  CHECK_EQ(effective_hostname(config, kMac), std::string("dispatcher-24-0a-c4-12-34-56"));
 }
 
-TEST(device_hostname_uses_a_custom_base) {
-  DeviceSettings settings;
-  settings.hostname_base = "desk";
-  CHECK_EQ(effective_hostname(settings, "buttons", true, kMac), std::string("desk-24-0a-c4-12-34-56"));
+TEST(device_hostname_uses_the_configured_base) {
+  HostnameConfig config;
+  config.base = "desk";
+  CHECK_EQ(effective_hostname(config, kMac), std::string("desk-24-0a-c4-12-34-56"));
 }
 
 TEST(device_hostname_without_mac_suffix) {
-  DeviceSettings settings;
-  settings.hostname_base = "desk";
-  settings.hostname_append_mac = false;
-  CHECK_EQ(effective_hostname(settings, "buttons", true, kMac), std::string("desk"));
+  HostnameConfig config;
+  config.base = "desk";
+  config.append_mac = false;
+  CHECK_EQ(effective_hostname(config, kMac), std::string("desk"));
 }
 
-TEST(device_hostname_uses_the_default_mac_suffix_choice) {
-  DeviceSettings settings;
-  settings.hostname_base = "desk";
-  CHECK_EQ(effective_hostname(settings, "buttons", false, kMac), std::string("desk"));
-  settings.hostname_append_mac = true;
-  CHECK_EQ(effective_hostname(settings, "buttons", false, kMac), std::string("desk-24-0a-c4-12-34-56"));
-  settings.hostname_append_mac = false;
-  CHECK_EQ(effective_hostname(settings, "buttons", true, kMac), std::string("desk"));
+TEST(device_hostname_base_is_trimmed_and_lowercased) {
+  HostnameConfig config;
+  config.base = "  Living-Room ";
+  config.append_mac = false;
+  std::string problem = "stale";
+  CHECK_EQ(effective_hostname(config, kMac, &problem), std::string("living-room"));
+  CHECK_EQ(problem, std::string());
+}
+
+TEST(device_hostname_empty_base_means_dispatcher) {
+  HostnameConfig config;
+  config.base = "";
+  config.append_mac = false;
+  CHECK_EQ(effective_hostname(config, kMac), std::string("dispatcher"));
 }
 
 TEST(device_hostname_leaves_out_an_unknown_mac) {
-  DeviceSettings settings;
-  CHECK_EQ(effective_hostname(settings, "buttons", true, ""), std::string("buttons"));
-  CHECK_EQ(effective_hostname(settings, "buttons", true, "junk"), std::string("buttons"));
+  HostnameConfig config;
+  config.base = "buttons";
+  CHECK_EQ(effective_hostname(config, ""), std::string("buttons"));
+  CHECK_EQ(effective_hostname(config, "junk"), std::string("buttons"));
 }
 
-TEST(device_hostname_falls_back_to_dispatcher) {
-  DeviceSettings settings;
-  CHECK_EQ(effective_hostname(settings, "", true, kMac), std::string("dispatcher-24-0a-c4-12-34-56"));
-  CHECK_EQ(effective_hostname(settings, "", true, ""), std::string("dispatcher"));
+TEST(device_hostname_invalid_base_falls_back_to_the_default_with_the_mac) {
+  HostnameConfig config;
+  config.base = "my desk";
+  config.append_mac = false;
+  std::string problem;
+  CHECK_EQ(effective_hostname(config, kMac, &problem), std::string("dispatcher-24-0a-c4-12-34-56"));
+  CHECK(problem.find("my desk") != std::string::npos);
+}
+
+TEST(device_hostname_too_long_with_the_suffix_falls_back) {
+  HostnameConfig config;
+  config.base = std::string(50, 'a');
+  std::string problem;
+  CHECK_EQ(effective_hostname(config, kMac, &problem), std::string("dispatcher-24-0a-c4-12-34-56"));
+  CHECK(!problem.empty());
+  config.append_mac = false;
+  CHECK_EQ(effective_hostname(config, kMac, &problem), std::string(50, 'a'));
+  CHECK_EQ(problem, std::string());
+}
+
+TEST(device_board_config_prefix) {
+  CHECK_EQ(board_config_prefix(kMac), std::string("board.24-0a-c4-12-34-56."));
+  CHECK_EQ(board_config_prefix(""), std::string());
+  CHECK_EQ(board_config_prefix("junk"), std::string());
 }
 
 TEST(device_check_hostname_accepts_empty_and_valid_names) {
@@ -188,22 +215,16 @@ TEST(device_settings_default_to_a_dispatcher) {
   const Parsed<DeviceSettings> parsed = device_settings_from_text("{}");
   CHECK(parsed.ok());
   CHECK(parsed.value->role == Role::kDispatcher);
-  CHECK_EQ(parsed.value->hostname_base, std::string());
-  CHECK(!parsed.value->hostname_append_mac.has_value());
   CHECK(!parsed.value->pairing.has_value());
 }
 
 TEST(device_settings_round_trip) {
   DeviceSettings settings;
   settings.role = Role::kSatellite;
-  settings.hostname_base = "porch";
-  settings.hostname_append_mac = false;
   settings.pairing = make_pairing();
   const Parsed<DeviceSettings> parsed = device_settings_from_text(device_settings_to_text(settings));
   CHECK(parsed.ok());
   CHECK(parsed.value->role == Role::kSatellite);
-  CHECK_EQ(parsed.value->hostname_base, std::string("porch"));
-  CHECK(parsed.value->hostname_append_mac == std::optional<bool>(false));
   CHECK(parsed.value->pairing.has_value());
   CHECK_EQ(parsed.value->pairing->id, std::string("sat-1a2b3c"));
   CHECK_EQ(parsed.value->pairing->secret, secret_bytes());
@@ -219,28 +240,13 @@ TEST(device_settings_without_pairing_round_trip) {
   CHECK(parsed.value->role == Role::kDispatcher);
 }
 
-TEST(device_settings_unset_mac_suffix_choice_round_trips) {
-  const DeviceSettings settings;
-  const std::string text = device_settings_to_text(settings);
-  CHECK(text.find("hostname_append_mac") == std::string::npos);
-  const Parsed<DeviceSettings> parsed = device_settings_from_text(text);
-  CHECK(parsed.ok());
-  CHECK(!parsed.value->hostname_append_mac.has_value());
-}
-
 TEST(device_settings_reject_invalid_documents) {
   CHECK(!device_settings_from_text("").ok());
   CHECK(!device_settings_from_text("[]").ok());
   CHECK(!device_settings_from_text("{\"role\":\"boss\"}").ok());
   CHECK(!device_settings_from_text("{\"role\":3}").ok());
-  CHECK(!device_settings_from_text("{\"hostname_base\":\"bad name\"}").ok());
-  CHECK(!device_settings_from_text("{\"hostname_base\":5}").ok());
-  CHECK(!device_settings_from_text("{\"hostname_append_mac\":\"yes\"}").ok());
   CHECK(!device_settings_from_text("{\"pairing\":\"nonsense\"}").ok());
   CHECK(!device_settings_from_text("{\"pairing\":5}").ok());
-  CHECK(!device_settings_from_text("{\"hostname_base\":\"" + std::string(50, 'a') + "\",\"hostname_append_mac\":true}").ok());
-  CHECK(!device_settings_from_text("{\"hostname_base\":\"" + std::string(64, 'a') + "\"}").ok());
-  CHECK(device_settings_from_text("{\"hostname_base\":\"" + std::string(50, 'a') + "\",\"hostname_append_mac\":false}").ok());
 }
 
 TEST(device_role_names) {

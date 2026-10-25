@@ -70,8 +70,6 @@ class Platform {
   // ---- the board ----
   // The board's Wi-Fi MAC address ("AA:BB:CC:DD:EE:FF"), used in its default host name; empty if unknown.
   virtual std::string device_mac() const { return ""; }
-  // Starts using `hostname` on the network (mDNS, and the name sent with DHCP requests).
-  virtual void apply_hostname(const std::string& hostname) { (void)hostname; }
 
   // ---- feedback ----
   // Sounds `count` beeps of the given kind on the buzzer, if there is one. Returns at once; the platform

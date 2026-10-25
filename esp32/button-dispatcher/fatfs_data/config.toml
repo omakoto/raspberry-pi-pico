@@ -2,7 +2,13 @@
 # Secrets (keys ending in _password, _key or _token) are moved into private storage at the next boot and
 # commented out here as `# key = "***"`; to change one, add a line with the new value again.
 # Everything else (buttons, bindings, SwitchBot credentials, password) is set on the web page.
+# The network name is <hostname>-<Wi-Fi MAC>, for example dispatcher-24-0a-c4-12-34-56.local, so
+# boards flashed with the same files get different names. To give one board its own name, add keys with its
+# MAC (the web page's Settings tab shows the lines to copy):
+#   board.24-0a-c4-12-34-56.hostname = "dispatcher"
+#   board.24-0a-c4-12-34-56.hostname_append_mac = false
 hostname = "dispatcher"
+hostname_append_mac = true
 http_port = 80
 
 # Optional status LED. -1 disables it. GPIO21 is the XIAO ESP32-S3's yellow LED (active low) and
