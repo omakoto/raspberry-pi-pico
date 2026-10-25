@@ -1846,6 +1846,8 @@ struct SatelliteFixture {
   Pairing pairing = receiver_pairing();
   int answer_status = 200;
   bool unreachable = false;
+  // The "devices" member of the dispatcher's answer; none by default.
+  std::string answer_devices;
 
   SatelliteFixture() {
     env.sign_in();
@@ -1857,7 +1859,8 @@ struct SatelliteFixture {
         response.failure = HttpResponse::Failure::kConnect;
       } else {
         response.status = answer_status;
-        response.body = answer_status == 200 ? "{\"ok\":true,\"accepted\":1}" : "{\"error\":\"nope\"}";
+        const std::string devices = answer_devices.empty() ? "" : ",\"devices\":" + answer_devices;
+        response.body = answer_status == 200 ? "{\"ok\":true,\"accepted\":1" + devices + "}" : "{\"error\":\"nope\"}";
       }
       return response;
     };
@@ -1981,6 +1984,69 @@ TEST(api_satellite_http_errors_from_the_dispatcher_are_reported) {
   f.answer_status = 401;
   f.env.app->forward_once();
   CHECK(contains(f.env.log_text(), "answered HTTP 401: nope"));
+}
+
+TEST(api_satellite_report_answer_lists_the_dispatchers_devices) {
+  DeskFixture f;
+  const PairedSatellite satellite = add_satellite(f.env);
+  const Reply reply = send_report(f.env, satellite, report_body(f.env, 1));
+  CHECK_EQ(reply.status, 200);
+  CHECK_EQ(reply.size("devices"), static_cast<size_t>(1));
+  CHECK_EQ(reply.str("devices.0"), std::string(kDesk));
+}
+
+// The satellite's buzzer, for a press of a device the dispatcher listed.
+struct BeepingSatellite : SatelliteFixture {
+  BeepingSatellite() {
+    answer_devices = std::string("[\"") + kDesk + "\"]";
+    env.app->forward_once();  // the first report, a heartbeat, brings the list
+    env.platform.beeps.clear();
+  }
+};
+
+TEST(api_satellite_beeps_when_it_hears_a_known_press_and_when_it_is_delivered) {
+  BeepingSatellite f;
+  f.hear();
+  CHECK_EQ(f.env.platform.beeps.size(), static_cast<size_t>(1));
+  CHECK(f.env.platform.beeps[0] == std::make_pair(Beep::kShort, 1));
+  f.env.app->forward_once();
+  CHECK_EQ(f.env.platform.beeps.size(), static_cast<size_t>(2));
+  CHECK(f.env.platform.beeps[1] == std::make_pair(Beep::kShort, 1));
+}
+
+TEST(api_satellite_is_silent_for_devices_the_dispatcher_does_not_know) {
+  BeepingSatellite f;
+  f.hear(kPressB2, "AA:BB:CC:DD:EE:99");
+  f.env.app->forward_once();
+  CHECK(f.env.platform.beeps.empty());
+  CHECK_EQ(f.env.app->forwarder.forwarded(), static_cast<int64_t>(1));  // still forwarded
+}
+
+TEST(api_satellite_sounds_the_failure_beeps_when_a_known_press_cannot_be_delivered) {
+  BeepingSatellite f;
+  f.unreachable = true;
+  f.hear();
+  f.env.app->forward_once();
+  CHECK_EQ(f.env.platform.beeps.size(), static_cast<size_t>(1));  // only the acknowledgement so far
+  for (int i = 0; i < 6; ++i) {
+    f.env.platform.mono += 1.1;
+    f.env.app->forward_once();
+  }
+  CHECK_EQ(f.env.app->forwarder.queued(), static_cast<size_t>(0));
+  CHECK_EQ(f.env.platform.beeps.size(), static_cast<size_t>(2));
+  CHECK(f.env.platform.beeps[1] == std::make_pair(Beep::kLong, 3));
+}
+
+TEST(api_satellite_a_retry_that_gets_through_beeps_success) {
+  BeepingSatellite f;
+  f.unreachable = true;
+  f.hear();
+  f.env.app->forward_once();
+  f.unreachable = false;
+  f.env.platform.mono += 1.1;
+  f.env.app->forward_once();
+  CHECK_EQ(f.env.platform.beeps.size(), static_cast<size_t>(2));
+  CHECK(f.env.platform.beeps[1] == std::make_pair(Beep::kShort, 1));
 }
 
 TEST(api_satellite_forward_once_idles_when_it_is_not_a_paired_satellite) {

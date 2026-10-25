@@ -123,6 +123,9 @@ class AppCore {
   ActionResult run_binding(const Binding& binding);
   // Queues run_binding on the platform's background worker. Does not need `mutex`.
   void spawn_binding(const Binding& binding);
+  // Satellite role: sounds the failure beeps if presses the satellite acknowledged were lost on the way to
+  // the dispatcher. Call with `mutex` held.
+  void beep_if_known_lost();
 
   // How a device is named in the log: the button's name, or "unknown device <mac>" (plus the advertised
   // name, if heard). Call with `mutex` held.

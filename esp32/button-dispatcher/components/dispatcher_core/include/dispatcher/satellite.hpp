@@ -10,6 +10,10 @@
 //   {"time": <Unix ms>, "boot": "<random hex>", "seq": <n>, "uptime_s": ..., "dropped": ..., "queued": ...,
 //    "events": [{"mac": "AA:BB:CC:DD:EE:FF", "rssi": -52, "data": "<hex payload>", "age_ms": 40}]}
 //
+// The dispatcher answers {"ok": true, "accepted": <events it took>, "devices": ["AA:BB:CC:DD:EE:FF", ...]}, the
+// MACs of its devices, so the satellite can beep for presses of those devices and not for every BTHome
+// device in range.
+//
 // The signature proves the sender has the secret. `time` (both boards set their clocks with SNTP) limits how
 // long a recorded request stays usable, and `boot` with `seq` (increasing within one boot) rejects replays
 // inside that window without the dispatcher having to remember every request.
@@ -59,6 +63,9 @@ struct Report {
 };
 
 constexpr size_t kMaxReportBytes = 8 * 1024;
+// The answer to a report lists at most this many devices, so that it fits in kMaxReportAnswerBytes.
+constexpr size_t kMaxReportedDevices = 128;
+constexpr size_t kMaxReportAnswerBytes = 4 * 1024;
 constexpr size_t kMaxReportEvents = 16;
 constexpr size_t kMaxEventPayload = 64;
 
@@ -123,6 +130,9 @@ class SatelliteRegistry {
 
 // The forwarding state machine: queues new presses, decides when to send and what, and keeps the status
 // shown on the page. The caller (AppCore) does the sending and serializes calls with its mutex.
+//
+// It also decides what the satellite's buzzer says, for presses of the devices the dispatcher knows: an
+// acknowledgement when a press is heard, then whether it reached the dispatcher.
 class Forwarder {
  public:
   static constexpr size_t kMaxQueue = 32;
@@ -134,16 +144,35 @@ class Forwarder {
 
   explicit Forwarder(std::string boot) : boot_(std::move(boot)) {}
 
-  // Takes one advertisement. Returns true if it was queued: it reports a press, a turn or is encrypted (the
-  // dispatcher logs those for known devices), and it is not a repeat of an event already queued or sent.
-  bool offer(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length, double now);
+  struct Offer {
+    // Whether the advertisement was queued: it reports a press, a turn or is encrypted (the dispatcher logs
+    // those for known devices), and it is not a repeat of an event already queued or sent.
+    bool queued = false;
+    // The short beeps that acknowledge it, as the dispatcher would: 1 for a press, 2 for a double press, 3 for
+    // a triple press, and 1 for an encrypted packet (which only the dispatcher can read). 0 for a device the
+    // dispatcher doesn't know, since every BTHome device in range is forwarded (learn mode needs them).
+    int ack_beeps = 0;
+  };
+
+  // Takes one advertisement.
+  Offer offer(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length, double now);
 
   // The report to send now, if one is due; otherwise sets `*wait_s` to the time until the next one is due.
   // Events too old to be worth sending are dropped first.
   std::optional<Report> next_report(double now, int64_t wall_ms, double* wait_s);
 
-  // The outcome of the report next_report returned last. `error` says why it failed.
-  void report_done(bool ok, const std::string& error, double now);
+  // The outcome of the report next_report returned last. `error` says why it failed; `accepted` is how many
+  // of its events the dispatcher took (it refuses events that grew too old on the way), and `devices` the
+  // dispatcher's devices from its answer, if it listed them. Returns true if the report delivered presses of
+  // known devices, all of which the dispatcher took.
+  bool report_done(bool ok, const std::string& error, double now, size_t accepted = SIZE_MAX,
+                   const std::optional<std::vector<std::string>>& devices = std::nullopt);
+
+  // True, once, after presses of known devices were lost: dropped for being too old to send or for lack of
+  // room, or refused by the dispatcher.
+  bool take_known_lost();
+
+  bool is_known(const std::string& mac) const;
 
   // Drops queued events and makes the next report due at once (pairing or role changes).
   void reset(double now);
@@ -167,13 +196,19 @@ class Forwarder {
     uint64_t serial;
     ReportEvent event;
     double heard_at;
+    bool known;  // a device of the dispatcher's when it was heard
   };
+
+  void drop_front();
 
   std::string boot_;
   PacketDedupe dedupe_;
   std::deque<Queued> queue_;
   uint64_t next_serial_ = 1;
   uint64_t in_flight_up_to_ = 0;  // the newest serial in the report being sent
+  size_t in_flight_events_ = 0;
+  std::vector<std::string> known_devices_;  // normalized MACs
+  bool known_lost_ = false;
   int64_t seq_ = 0;
   double next_heartbeat_ = 0;
   double retry_at_ = 0;

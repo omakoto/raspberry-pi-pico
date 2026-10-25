@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cmath>
 
+#include "dispatcher/beeps.hpp"
 #include "dispatcher/bthome.hpp"
 #include "dispatcher/models.hpp"
 #include "dispatcher/util.hpp"
@@ -223,15 +224,17 @@ bool SatelliteRegistry::is_fresh(const SatelliteStatus& status, const Report& re
 
 // ---- the satellite's side ----------------------------------------------------------------------------
 
-bool Forwarder::offer(const std::string& mac_text, std::optional<int> rssi, const uint8_t* data, size_t length,
-                      double now) {
-  if (length == 0 || length > kMaxEventPayload) return false;
+Forwarder::Offer Forwarder::offer(const std::string& mac_text, std::optional<int> rssi, const uint8_t* data,
+                                  size_t length, double now) {
+  Offer offer;
+  if (length == 0 || length > kMaxEventPayload) return offer;
   const std::optional<std::string> mac = normalize_mac(mac_text);
-  if (!mac) return false;
+  if (!mac) return offer;
   const std::optional<bthome::Packet> packet = bthome::decode(data, length);
-  if (!packet) return false;
-  if (!packet->encrypted && bthome::input_events(*packet).empty()) return false;
-  if (dedupe_.is_duplicate(*mac, *packet, now)) return false;
+  if (!packet) return offer;
+  const std::vector<bthome::InputEvent> events = bthome::input_events(*packet);
+  if (!packet->encrypted && events.empty()) return offer;
+  if (dedupe_.is_duplicate(*mac, *packet, now)) return offer;
 
   Queued queued;
   queued.serial = next_serial_++;
@@ -239,19 +242,38 @@ bool Forwarder::offer(const std::string& mac_text, std::optional<int> rssi, cons
   queued.event.rssi = rssi;
   queued.event.data.assign(data, data + length);
   queued.heard_at = now;
+  queued.known = is_known(*mac);
   queue_.push_back(std::move(queued));
-  while (queue_.size() > kMaxQueue) {
-    queue_.pop_front();
-    ++dropped_;
+  while (queue_.size() > kMaxQueue) drop_front();
+
+  offer.queued = true;
+  if (is_known(*mac)) {
+    offer.ack_beeps = 1;
+    for (const bthome::InputEvent& event : events) {
+      offer.ack_beeps = std::max(offer.ack_beeps, click_count(event.event));
+    }
   }
-  return true;
+  return offer;
+}
+
+bool Forwarder::is_known(const std::string& mac) const {
+  return std::find(known_devices_.begin(), known_devices_.end(), mac) != known_devices_.end();
+}
+
+void Forwarder::drop_front() {
+  if (queue_.front().known) known_lost_ = true;
+  queue_.pop_front();
+  ++dropped_;
+}
+
+bool Forwarder::take_known_lost() {
+  const bool lost = known_lost_;
+  known_lost_ = false;
+  return lost;
 }
 
 void Forwarder::expire(double now) {
-  while (!queue_.empty() && now - queue_.front().heard_at > kMaxEventAgeS) {
-    queue_.pop_front();
-    ++dropped_;
-  }
+  while (!queue_.empty() && now - queue_.front().heard_at > kMaxEventAgeS) drop_front();
 }
 
 std::optional<Report> Forwarder::next_report(double now, int64_t wall_ms, double* wait_s) {
@@ -272,24 +294,39 @@ std::optional<Report> Forwarder::next_report(double now, int64_t wall_ms, double
   report.uptime_s = static_cast<int64_t>(now);
   report.dropped = dropped_;
   in_flight_up_to_ = 0;
+  in_flight_events_ = 0;
   for (const Queued& queued : queue_) {
     if (report.events.size() >= kMaxReportEvents) break;
     ReportEvent event = queued.event;
     event.age_ms = static_cast<int>(std::lround((now - queued.heard_at) * 1000.0));
     report.events.push_back(std::move(event));
     in_flight_up_to_ = queued.serial;
+    ++in_flight_events_;
   }
   report.queued = static_cast<int64_t>(queue_.size() - report.events.size());
   *wait_s = 0;
   return report;
 }
 
-void Forwarder::report_done(bool ok, const std::string& error, double now) {
+bool Forwarder::report_done(bool ok, const std::string& error, double now, size_t accepted,
+                            const std::optional<std::vector<std::string>>& devices) {
+  bool delivered = false;
   if (ok) {
     // New events may have been queued, and old ones dropped, while the report was on its way.
+    bool had_known = false;
     while (!queue_.empty() && queue_.front().serial <= in_flight_up_to_) {
+      had_known = had_known || queue_.front().known;
       queue_.pop_front();
       ++forwarded_;
+    }
+    // The dispatcher doesn't say which events it refused, so a known press may be among them.
+    if (accepted < in_flight_events_ && had_known) known_lost_ = true;
+    delivered = had_known && accepted >= in_flight_events_;
+    if (devices) {
+      known_devices_.clear();
+      for (const std::string& text : *devices) {
+        if (const std::optional<std::string> mac = normalize_mac(text)) known_devices_.push_back(*mac);
+      }
     }
     last_ok_ = now;
     failures_ = 0;
@@ -303,11 +340,17 @@ void Forwarder::report_done(bool ok, const std::string& error, double now) {
     next_heartbeat_ = now + kIdleRetryS;
   }
   in_flight_up_to_ = 0;
+  in_flight_events_ = 0;
+  return delivered;
 }
 
 void Forwarder::reset(double now) {
   queue_.clear();
   in_flight_up_to_ = 0;
+  in_flight_events_ = 0;
+  // The devices belong to the dispatcher the satellite was paired with; a new one sends its own.
+  known_devices_.clear();
+  known_lost_ = false;
   next_heartbeat_ = now;
   retry_at_ = now;
   failures_ = 0;

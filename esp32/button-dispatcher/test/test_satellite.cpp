@@ -20,13 +20,31 @@ const char* const kOther = "AA:BB:CC:DD:EE:02";
 const char* const kPressB2 = "44002101643a003a013a003a00";       // id 33, button 2 press
 const char* const kPressB2Again = "44002201643a003a013a003a00";  // id 34, button 2 press
 const char* const kBatteryOnly = "4400210164";                    // id 33, battery 100 and nothing else
+const char* const kDoubleB2 = "44002301643a003a023a003a00";       // id 35, button 2 double press
+const char* const kEncrypted = "45aabbcc";                         // encrypted: only the dispatcher can read it
 
 std::vector<uint8_t> bytes(const std::string& hex) { return test_util::from_hex(hex); }
 
 bool offer(Forwarder& f, const std::string& hex, double now, const char* mac = kDesk,
            std::optional<int> rssi = -40) {
   const std::vector<uint8_t> data = bytes(hex);
-  return f.offer(mac, rssi, data.data(), data.size(), now);
+  return f.offer(mac, rssi, data.data(), data.size(), now).queued;
+}
+
+// The acknowledgement beeps for an advertisement; -1 if it was not queued.
+int ack_beeps(Forwarder& f, const std::string& hex, double now, const char* mac = kDesk) {
+  const std::vector<uint8_t> data = bytes(hex);
+  const Forwarder::Offer offer = f.offer(mac, -40, data.data(), data.size(), now);
+  return offer.queued ? offer.ack_beeps : -1;
+}
+
+// A forwarder whose dispatcher has answered a heartbeat, listing kDesk (in lowercase, which is accepted).
+Forwarder knowing_the_desk(double now = 1000.0) {
+  Forwarder f("cafe");
+  double wait = -1;
+  f.next_report(now, 5, &wait);
+  f.report_done(true, "", now, 0, std::vector<std::string>{"aa:bb:cc:dd:ee:01", "not a mac"});
+  return f;
 }
 
 // "4400%02x01643a003a013a003a00" with the given packet id: a button 2 press.
@@ -531,4 +549,116 @@ TEST(satellite_forwarder_reset_clears_the_queue_and_makes_a_report_due) {
   const auto report = f.next_report(1002.0, 5, &wait);
   CHECK(report.has_value());
   CHECK(report->events.empty());
+}
+
+// ---- Forwarder: what the buzzer says ----
+
+TEST(satellite_forwarder_does_not_acknowledge_devices_the_dispatcher_has_not_listed) {
+  Forwarder f("cafe");
+  CHECK_EQ(ack_beeps(f, kPressB2, 1000.0), 0);  // no answer from the dispatcher yet
+  Forwarder g = knowing_the_desk();
+  CHECK_EQ(ack_beeps(g, kPressB2, 1001.0, kOther), 0);
+  CHECK(g.is_known(kDesk));
+  CHECK(!g.is_known(kOther));
+}
+
+TEST(satellite_forwarder_acknowledges_known_presses_like_the_dispatcher) {
+  Forwarder f = knowing_the_desk();
+  CHECK_EQ(ack_beeps(f, kPressB2, 1001.0), 1);
+  CHECK_EQ(ack_beeps(f, kPressB2, 1001.1), -1);  // a repeat is neither queued nor acknowledged
+  CHECK_EQ(ack_beeps(f, kDoubleB2, 1002.0), 2);
+  CHECK_EQ(ack_beeps(f, kEncrypted, 1003.0), 1);
+  CHECK_EQ(ack_beeps(f, kBatteryOnly, 1004.0), -1);
+}
+
+TEST(satellite_forwarder_reports_delivery_of_known_presses) {
+  Forwarder f = knowing_the_desk();
+  double wait = -1;
+  offer(f, kPressB2, 1001.0);
+  CHECK(f.next_report(1001.0, 5, &wait).has_value());
+  CHECK(f.report_done(true, "", 1001.1, 1));
+  CHECK(!f.take_known_lost());
+}
+
+TEST(satellite_forwarder_delivery_of_unknown_presses_or_heartbeats_is_silent) {
+  Forwarder f = knowing_the_desk();
+  double wait = -1;
+  offer(f, kPressB2, 1001.0, kOther);
+  CHECK(f.next_report(1001.0, 5, &wait).has_value());
+  CHECK(!f.report_done(true, "", 1001.1, 1));
+  CHECK(f.next_report(1040.0, 5, &wait).has_value());  // a heartbeat
+  CHECK(!f.report_done(true, "", 1040.1, 0));
+  CHECK(!f.take_known_lost());
+}
+
+TEST(satellite_forwarder_a_failed_attempt_is_not_yet_a_loss) {
+  Forwarder f = knowing_the_desk();
+  double wait = -1;
+  offer(f, kPressB2, 1001.0);
+  CHECK(f.next_report(1001.0, 5, &wait).has_value());
+  CHECK(!f.report_done(false, "down", 1001.1));
+  CHECK(!f.take_known_lost());
+  // The retry gets through, so the press is delivered after all.
+  CHECK(f.next_report(1002.2, 5, &wait).has_value());
+  CHECK(f.report_done(true, "", 1002.3, 1));
+  CHECK(!f.take_known_lost());
+}
+
+TEST(satellite_forwarder_known_presses_that_grow_too_old_are_lost_once) {
+  Forwarder f = knowing_the_desk();
+  offer(f, kPressB2, 1001.0);
+  offer(f, kPressB2Again, 1001.5);
+  f.expire(1007.0);
+  CHECK_EQ(f.queued(), static_cast<size_t>(0));
+  CHECK(f.take_known_lost());
+  CHECK(!f.take_known_lost());
+}
+
+TEST(satellite_forwarder_unknown_presses_that_grow_too_old_are_not_a_loss) {
+  Forwarder f = knowing_the_desk();
+  offer(f, kPressB2, 1001.0, kOther);
+  f.expire(1007.0);
+  CHECK_EQ(f.dropped(), static_cast<int64_t>(1));
+  CHECK(!f.take_known_lost());
+}
+
+TEST(satellite_forwarder_known_presses_refused_by_the_dispatcher_are_lost) {
+  Forwarder f = knowing_the_desk();
+  double wait = -1;
+  offer(f, kPressB2, 1001.0);
+  offer(f, kPressB2Again, 1001.1, kOther);
+  CHECK(f.next_report(1001.2, 5, &wait).has_value());
+  CHECK(!f.report_done(true, "", 1001.3, 1));  // one of the two refused, perhaps the known one
+  CHECK(f.take_known_lost());
+}
+
+TEST(satellite_forwarder_known_presses_pushed_out_of_a_full_queue_are_lost) {
+  Forwarder f = knowing_the_desk();
+  offer(f, kPressB2, 1001.0);
+  for (int i = 0; i < static_cast<int>(Forwarder::kMaxQueue); ++i) {
+    char mac[32];
+    std::snprintf(mac, sizeof(mac), "AA:BB:CC:00:00:%02X", i);
+    offer(f, kPressB2, 1001.0, mac);
+  }
+  CHECK(f.take_known_lost());
+}
+
+TEST(satellite_forwarder_an_answer_without_devices_keeps_the_list) {
+  Forwarder f = knowing_the_desk();
+  double wait = -1;
+  CHECK(f.next_report(1040.0, 5, &wait).has_value());
+  f.report_done(true, "", 1040.1, 0);
+  CHECK(f.is_known(kDesk));
+  CHECK(f.next_report(1080.0, 5, &wait).has_value());
+  f.report_done(true, "", 1080.1, 0, std::vector<std::string>{});
+  CHECK(!f.is_known(kDesk));
+}
+
+TEST(satellite_forwarder_reset_forgets_the_devices_and_losses) {
+  Forwarder f = knowing_the_desk();
+  offer(f, kPressB2, 1001.0);
+  f.expire(1007.0);
+  f.reset(1008.0);
+  CHECK(!f.is_known(kDesk));
+  CHECK(!f.take_known_lost());
 }

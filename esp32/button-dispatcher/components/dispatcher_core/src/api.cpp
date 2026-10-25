@@ -962,6 +962,7 @@ Response satellite_report(Context& c) {
   if (c.request.body.size() > kMaxReportBytes) return fail(413, "report too large");
   std::vector<ReportEvent> events;
   std::string name;
+  std::vector<std::string> devices;
   {
     std::lock_guard<std::mutex> lock(c.app.mutex);
     // A satellite would run the presses through its own bindings, or forward them again.
@@ -1023,6 +1024,10 @@ Response satellite_report(Context& c) {
     }
     status.events += static_cast<int64_t>(events.size());
     name = record->name;
+    for (const Button& button : c.app.config.buttons) {
+      if (devices.size() >= kMaxReportedDevices) break;
+      devices.push_back(button.mac);
+    }
   }
   // Without the lock: handle_packet locks for itself, and may queue actions.
   for (const ReportEvent& event : events) {
@@ -1031,6 +1036,9 @@ Response satellite_report(Context& c) {
   JsonPtr json = make_json(cJSON_CreateObject());
   cJSON_AddTrueToObject(json.get(), "ok");
   cJSON_AddNumberToObject(json.get(), "accepted", static_cast<double>(events.size()));
+  // The satellite beeps only for presses of these devices.
+  cJSON* list = cJSON_AddArrayToObject(json.get(), "devices");
+  for (const std::string& mac : devices) cJSON_AddItemToArray(list, cJSON_CreateString(mac.c_str()));
   return reply(200, json);
 }
 

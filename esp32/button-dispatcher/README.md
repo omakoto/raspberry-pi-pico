@@ -53,6 +53,16 @@ An active buzzer (it has its own oscillator, so a single fixed pitch) acknowledg
 - Every sequence of beeps starts at least 1 s after the previous one ended, so an acknowledgement and its
   result are heard as separate things.
 
+A satellite has its own buzzer (same pins and wiring), for presses of the devices the dispatcher knows:
+
+- When it hears a press: the same acknowledgement as the dispatcher's (1, 2 or 3 short beeps; 1 for an
+  encrypted button, which only the dispatcher can read). Other BTHome devices in range are forwarded too,
+  for learn mode, but silently.
+- When the dispatcher has taken the press: one short beep. This means it was delivered, not that the action
+  succeeded; the dispatcher's own buzzer reports that.
+- When the press is lost (it could not be delivered within 5 s, or the dispatcher refused it): three long
+  beeps. A failed attempt that a retry fixes within the 5 s still ends with the success beep.
+
 Wiring for a ready-made module with `GND`, `VCC` and `I/O` pins that beeps when `I/O` is shorted to `GND`
 (a low-level trigger, the default): `I/O` to `GPIO9`, `VCC` to `3V3`, `GND` to `GND`. The module has its own
 transistor. For a bare buzzer, drive it through an NPN transistor (GPIO through about 1 kΩ to the base,
@@ -186,7 +196,8 @@ The pairing code is `bdsat1:<id>:<secret>@<dispatcher host>:<port>`; its address
 example to an IP address) before pasting. Removing a satellite on the dispatcher revokes its secret.
 
 On a satellite, the Devices, Bindings and Satellites tabs are hidden (its buttons and bindings are kept, and
-come back if it is made a dispatcher again), and the buzzer stays silent because nothing fires there. The LED
+come back if it is made a dispatcher again), and the buzzer reports what happened to each press (see
+[Ack buzzer](#ack-buzzer)). The LED
 blinks slowly (1 s on, 1 s off) while the dispatcher cannot be reached.
 
 ### Protocol and security
@@ -200,6 +211,10 @@ X-Signature: <hex HMAC-SHA256 of the body with the satellite's 32-byte secret>
 {"time": <Unix ms>, "boot": "<random per boot>", "seq": <n>, "uptime_s": .., "dropped": .., "queued": ..,
  "events": [{"mac": "AA:BB:CC:DD:EE:FF", "rssi": -52, "data": "<BTHome payload hex>", "age_ms": 40}]}
 ```
+
+The dispatcher answers `{"ok": true, "accepted": <events taken>, "devices": ["AA:BB:CC:DD:EE:FF", ...]}`: the
+MACs of its devices (at most 128), which the satellite's buzzer uses to tell the user's buttons from other
+BTHome devices in range.
 
 - Each satellite has its own secret, created by the dispatcher and stored only in the two boards' `state`
   partitions (never in `config.json`, exports or the USB drive). The report route needs no session or CSRF
