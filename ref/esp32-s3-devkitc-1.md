@@ -4,6 +4,12 @@ A standard 44-pin (2×22 pin headers) ESP32-S3 development board (including offi
 
 Features a dual-core 32-bit Xtensa LX7 processor (up to 240 MHz), vector instructions for AI acceleration, 512KB SRAM, 384KB ROM, Wi-Fi 4 (802.11 b/g/n), Bluetooth 5.0 (BLE), dual USB Type-C connectors (`USB` for Native USB OTG and `UART` for USB-to-UART bridge), and an addressable RGB LED (`RGB@IO48` on v1.0, `RGB@IO38` on v1.1).
 
+### The board on the bench: ESP32-S3-DevKitC-1-N8R8
+
+- **Module**: ESP32-S3-WROOM-1-N8R8, with **8 MB flash** (quad SPI) and **8 MB PSRAM** (octal SPI). The octal PSRAM takes `GPIO35`, `GPIO36` and `GPIO37` (see [Important Hardware & Pin Usage Cautions](#important-hardware--pin-usage-cautions)).
+- **PSRAM in ESP-IDF**: used only when the firmware enables it (`CONFIG_SPIRAM=y` with `CONFIG_SPIRAM_MODE_OCT=y`); otherwise only the internal SRAM is available.
+- **USB-to-UART bridge**: a WCH CH343 (USB vendor `1a86`; on Linux `/dev/ttyACM*`, listed as `usb-1a86_USB_Single_Serial_...` under `/dev/serial/by-id/`), not the CP2102N drawn below. It is wired to `UART0` (`GPIO43`/`GPIO44`), so it keeps working while the native `USB` port runs TinyUSB or after a crash, and it carries ESP-IDF's panic output and backtraces.
+
 ---
 
 ## ASCII Pinout Diagrams
