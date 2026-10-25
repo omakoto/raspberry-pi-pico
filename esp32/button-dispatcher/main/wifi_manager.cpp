@@ -42,6 +42,12 @@ WifiManager::~WifiManager() {
     }
 }
 
+void WifiManager::set_hostname(const std::string& hostname) {
+    if (netif_sta_ == nullptr) return;
+    const esp_err_t err = esp_netif_set_hostname(netif_sta_, hostname.c_str());
+    if (err != ESP_OK) ESP_LOGW(TAG, "Cannot set the DHCP hostname: %s", esp_err_to_name(err));
+}
+
 bool WifiManager::init() {
     wifi_event_group_ = xEventGroupCreate();
     if (wifi_event_group_ == nullptr) {

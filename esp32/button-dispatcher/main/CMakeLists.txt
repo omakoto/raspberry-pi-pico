@@ -37,10 +37,10 @@ idf_component_register(
         esp_tinyusb
 )
 
-# The web page is the one the Raspberry Pi version serves (pi/button-dispatcher/.../static), so there is a
-# single copy of the UI. Its files are gzip-compressed into the build directory and embedded in the
-# firmware; web_server.cpp sends them with "Content-Encoding: gzip".
-set(WEB_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../pi/button-dispatcher/button_dispatcher/static")
+# The web page (web/, forked from the Raspberry Pi version's page and extended with the device and satellite
+# settings). Its files are gzip-compressed into the build directory and embedded in the firmware;
+# web_server.cpp sends them with "Content-Encoding: gzip".
+set(WEB_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../web")
 set(WEB_GZIP_DIR "${CMAKE_CURRENT_BINARY_DIR}/web")
 file(MAKE_DIRECTORY "${WEB_GZIP_DIR}")
 foreach(web_file index.html app.js style.css favicon.svg)

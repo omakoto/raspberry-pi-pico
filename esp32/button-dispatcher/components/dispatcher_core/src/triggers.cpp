@@ -51,7 +51,7 @@ ProcessResult TriggerEngine::process(const std::string& mac_text, std::optional<
   }
 
   const double now = clock_();
-  if (is_duplicate(*mac, *packet, now)) {
+  if (dedupe_.is_duplicate(*mac, *packet, now)) {
     result.duplicate = true;
     result.packet = std::move(packet);
     return result;
@@ -74,7 +74,7 @@ ProcessResult TriggerEngine::process(const std::string& mac_text, std::optional<
   return result;
 }
 
-bool TriggerEngine::is_duplicate(const std::string& mac, const bthome::Packet& packet, double now) {
+bool PacketDedupe::is_duplicate(const std::string& mac, const bthome::Packet& packet, double now) {
   // Without a packet id the whole payload identifies the event.
   std::string key;
   if (packet.packet_id) {
@@ -97,7 +97,7 @@ bool TriggerEngine::is_duplicate(const std::string& mac, const bthome::Packet& p
   // Entries older than the window are gone, so a recycled packet id counts as new again.
   std::vector<Seen>& recent = it->recent;
   recent.erase(std::remove_if(recent.begin(), recent.end(),
-                              [now](const Seen& s) { return now - s.time > kDedupeWindowS; }),
+                              [now](const Seen& s) { return now - s.time > kWindowS; }),
                recent.end());
 
   for (Seen& seen : recent) {

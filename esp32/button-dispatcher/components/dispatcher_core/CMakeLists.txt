@@ -16,6 +16,8 @@ idf_component_register(
         "src/api.cpp"
         "src/switchbot.cpp"
         "src/switchbot_commands.cpp"
+        "src/device.cpp"
+        "src/satellite.cpp"
     INCLUDE_DIRS
         "include"
     REQUIRES

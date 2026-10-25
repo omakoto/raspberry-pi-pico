@@ -2,7 +2,8 @@
 
 A standalone ESP32-S3 version of the BLE button dispatcher: it turns BLE (BTHome) button presses,
 such as those of Shelly BLU remotes, into HTTP/HTTPS requests and SwitchBot commands or scenes. Set
-it up once from a web page; no Raspberry Pi needed.
+it up once from a web page; no Raspberry Pi needed. A second board running the same firmware can act as a
+[satellite](#satellites) that extends the Bluetooth range.
 
 **Status: the firmware builds and the core is tested on the PC; it has not been flashed or run on a board yet.**
 
@@ -18,10 +19,12 @@ Hardware findings behind both (packet formats, wheel behavior):
 
 To keep the Python and C++ versions equivalent:
 
-- **Same web page.** The firmware embeds the files from `pi/button-dispatcher/button_dispatcher/static/`
-  at build time (gzip-compressed); there is no second copy of the UI.
+- **Forked web page.** `web/` started as a copy of `pi/button-dispatcher/button_dispatcher/static/` and adds
+  what only this version has (the board's role and host name, satellites). Fixes to the shared parts should be
+  made in both copies.
 - **Same JSON API and config format.** A config exported from one imports into the other
-  (credentials stay out of exports by default, as on the Pi).
+  (credentials stay out of exports by default, as on the Pi). The routes this version adds (`/api/device`,
+  `/api/satellites`, `/api/satellite/report`) keep their data out of `config.json`, so exports stay compatible.
 - **Same test vectors.** The C++ unit tests use the packets captured from the real remotes, the same
   ones the Python tests use.
 - **Same behavior fixes.** Dedupe remembers several recent packet ids per device (this fixes a gap in
@@ -73,9 +76,11 @@ emitter to `GND`, buzzer between `3V3` and the collector) and set `buzzer_active
 esp32/button-dispatcher/
   README.md  00-build.sh  01-install.sh  02-monitor.sh  CMakeLists.txt  partitions.csv
   sdkconfig.defaults  fatfs_data/config.toml          Wi-Fi etc. (same keys as wol-bridge)
+  web/                                                the web page (forked from the Pi version, see above)
   components/dispatcher_core/                         plain C++17, no ESP-IDF includes: unit-tested on the PC
     include/dispatcher/  src/
       bthome triggers learn config models eventlog    decoder, trigger engine, learn flow, config document
+      device satellite                                role, host name, pairing; satellite reports and forwarding
       auth switchbot switchbot_commands               password/sessions, SwitchBot client, command table
       app api                                         the state, the press flow, the JSON API
       platform.hpp                                    the interface to the outside (time, crypto, storage, HTTP, worker)
@@ -117,7 +122,8 @@ second, which helps).
 
 ## Configuration (`config.toml`, `config-override.toml`)
 
-Same file and keys as `wol-bridge`, plus: `hostname`, `http_port`, `led_pin`, `led_active_low`,
+Same file and keys as `wol-bridge`, plus: `hostname` and `hostname_append_mac` (only defaults, see
+[Host name](#host-name)), `http_port`, `led_pin`, `led_active_low`,
 `buzzer_pin`, `buzzer_active_low`, `wifi_ssid[0-9]` / `wifi_password[0-9]`, and the tuning keys `ble_scan_interval_ms`,
 `ble_scan_window_ms`, `ble_scan_active` and `pbkdf2_iterations` (default 20000; the time one login
 takes is logged at boot, raise it if there is room).
@@ -130,13 +136,86 @@ partition, namespace `secrets`, one blob), `components/dispatcher_core/src/confi
 parsing and scrubbing (covered by `test/test_config_secrets.cpp`). SwitchBot credentials and the password hash are
 not in the config files at all; they live in the `state` partition and are set on the web page.
 
+## Host name
+
+The board's network name is `<base>-<Wi-Fi MAC>`, for example `dispatcher-24-0a-c4-12-34-56.local`, so that
+boards flashed with the same `config.toml` (the shared `ESP32_CONFIG_TOML` override) don't claim the same
+name. Settings, This board, changes the base and turns the MAC suffix off. The change takes effect at once for
+mDNS (`.local`); the name sent to the router with DHCP changes at the next lease renewal. The base defaults to
+`config.toml`'s `hostname` (`dispatcher` if unset), and the suffix to `hostname_append_mac` (`true` if unset);
+what is set on the page is stored in `device.json` and wins. To give one board an exact name from the first
+boot, build it with `ESP32_CONFIG_TOML` pointing at a copy of the shared override with
+`hostname_append_mac = false` added (or add it to `config-override.toml` on the board's USB drive later); with
+the default `hostname`, it comes up as `dispatcher.local`.
+
+## Satellites
+
+The Bluetooth range of one board limits where its buttons work. A satellite is a second board with this
+firmware, set to the satellite role and placed near the far buttons: it scans the same way, and forwards each
+new press over Wi-Fi to its dispatcher, which handles it exactly like a press it heard itself (same dedupe,
+bindings, cooldowns and "Find device"). The dispatcher logs these presses with "(via <satellite name>)".
+
+```
+button --BLE--> satellite: scan -> press/turn? -> drop repeats -> signed POST --+
+                                                                               |
+dispatcher: dedupe -> bindings -> actions  <---- /api/satellite/report <-------+
+            (its own scanner feeds the same path)
+```
+
+### Setting one up
+
+1. Flash the firmware on the second board (same `config.toml` / override for Wi-Fi).
+2. On the dispatcher's page: Satellites, Add satellite, give it a name. A pairing code is shown once.
+3. On the satellite's page (its name is on its serial log, or find it by MAC): set a password, then Settings,
+   This board, Role: Satellite. On its Status tab, paste the pairing code and Pair.
+4. The Status tab says "Reporting to ..." and the dispatcher lists the satellite as Online.
+
+The pairing code is `bdsat1:<id>:<secret>@<dispatcher host>:<port>`; its address part can be edited (for
+example to an IP address) before pasting. Removing a satellite on the dispatcher revokes its secret.
+
+On a satellite, the Devices, Bindings and Satellites tabs are hidden (its buttons and bindings are kept, and
+come back if it is made a dispatcher again), and the buzzer stays silent because nothing fires there. The LED
+blinks slowly (1 s on, 1 s off) while the dispatcher cannot be reached.
+
+### Protocol and security
+
+One request, sent for presses and every 30 s as a heartbeat:
+
+```
+POST /api/satellite/report
+X-Satellite: <satellite id>
+X-Signature: <hex HMAC-SHA256 of the body with the satellite's 32-byte secret>
+{"time": <Unix ms>, "boot": "<random per boot>", "seq": <n>, "uptime_s": .., "dropped": .., "queued": ..,
+ "events": [{"mac": "AA:BB:CC:DD:EE:FF", "rssi": -52, "data": "<BTHome payload hex>", "age_ms": 40}]}
+```
+
+- Each satellite has its own secret, created by the dispatcher and stored only in the two boards' `state`
+  partitions (never in `config.json`, exports or the USB drive). The report route needs no session or CSRF
+  header; the signature is its authentication.
+- Replays: the dispatcher refuses a report whose `time` is more than 30 s from its own clock, and requires `seq`
+  to grow within one `boot` (a new `boot` must carry a newer time than anything accepted). So both boards need
+  the clock from NTP; a satellite holds its reports until its clock is set. After a dispatcher restart, a report
+  recorded in the last 30 s could be replayed once, but its events are then either more than 5 s old (dropped,
+  see below) or still within the dedupe window, so nothing fires twice.
+- A board in the satellite role refuses reports, so satellites cannot be chained.
+- The requests are plain HTTP: the signature protects integrity, and the contents (button presses) are not
+  secret.
+- Stale presses: events more than 5 s old (time at the satellite plus time on the way) are dropped, so a
+  "wake the PC" never fires late. A satellite retries a failed report every second until its events are 5 s
+  old, and queues at most 32 events.
+- Several receivers hearing the same press (the dispatcher and satellites) are fine: the dedupe remembers
+  several recent packet ids per device. Data flows one way and nothing re-forwards what it received, so there
+  are no loops.
+
 ## Testing
 
 - `test/run.sh` builds and runs the unit tests of `dispatcher_core` on the PC (g++, no exceptions or
   RTTI, AddressSanitizer and UndefinedBehaviorSanitizer; `-n` skips the sanitizers). Check its exit
   status, not just the output.
-- `tools/run_host_server.sh` runs the real core and API on the PC with the shared web page, so the
-  page can be exercised in a browser or by script without a board.
+- `tools/run_host_server.sh` runs the real core and API on the PC with the web page, so the page can be
+  exercised in a browser or by script without a board. Two of them with different `--port`, `--data-dir` and
+  `--mac` can be paired as dispatcher and satellite (edit the pairing code's address to `127.0.0.1:<port>`);
+  `GET /test/packet` on the satellite then forwards to the dispatcher.
 - Config validation was compared against the Python implementation on a corpus of valid and invalid
   documents; the two agree except for the deviations below.
 
@@ -154,7 +233,8 @@ runs before using it. Run `00-build.sh` to build only.
 
 ## Untested on hardware
 
-NimBLE scanning together with Wi-Fi, heap headroom, how long PBKDF2 takes, `esp_http_client`
+Satellite mode as a whole (forwarding from one board to another, `.local` name resolution by
+`esp_http_client`, the forwarding task's stack size, live mDNS renames), NimBLE scanning together with Wi-Fi, heap headroom, how long PBKDF2 takes, `esp_http_client`
 timeouts and error mapping, wildcard routes and async handlers in `esp_http_server`, the USB drive,
 SNTP, mDNS, and the atomic save to the `state` partition.
 

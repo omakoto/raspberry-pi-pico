@@ -65,19 +65,46 @@ struct ProcessResult {
 // True if `binding`'s trigger matches an observed action from `button`.
 bool trigger_matches(const Binding& binding, const Button& button, const Observed& observed);
 
-class TriggerEngine {
+// Recognizes the repeated copies of one event: a sender repeats each advertisement many times, with the same
+// packet id. Used by the trigger engine and by a satellite before it forwards a packet.
+class PacketDedupe {
  public:
-  // Seconds from a monotonic clock.
-  using Clock = std::function<double()>;
-
   // Repeats of one event arrive within a few seconds; an identical packet id seen again after this
   // long is a counter wrap or a restarted device, so it counts as a new event.
-  static constexpr double kDedupeWindowS = 10.0;
+  static constexpr double kWindowS = 10.0;
   // A device's recent packet ids are remembered so that a late copy of an earlier event, for example
   // one heard by a second receiver, is still recognized after newer events have arrived.
   static constexpr size_t kRecentIdsPerDevice = 8;
   // Bound on remembered devices, so a flood of random addresses cannot grow memory without limit.
   static constexpr size_t kMaxTrackedDevices = 256;
+
+  // True if `packet` from `mac` (normalized) repeats one seen within the window; otherwise remembers it.
+  bool is_duplicate(const std::string& mac, const bthome::Packet& packet, double now);
+
+  size_t tracked_devices() const { return devices_.size(); }
+
+ private:
+  struct Seen {
+    std::string key;
+    double time;
+  };
+  struct Device {
+    std::string mac;
+    std::vector<Seen> recent;
+  };
+
+  // Least recently used device last.
+  std::list<Device> devices_;
+};
+
+class TriggerEngine {
+ public:
+  // Seconds from a monotonic clock.
+  using Clock = std::function<double()>;
+
+  static constexpr double kDedupeWindowS = PacketDedupe::kWindowS;
+  static constexpr size_t kRecentIdsPerDevice = PacketDedupe::kRecentIdsPerDevice;
+  static constexpr size_t kMaxTrackedDevices = PacketDedupe::kMaxTrackedDevices;
 
   explicit TriggerEngine(Clock clock) : clock_(std::move(clock)) {}
 
@@ -93,26 +120,15 @@ class TriggerEngine {
   // The enabled bindings an observed action matches, ignoring dedupe and cooldown.
   std::vector<Binding> matching_bindings(const Observed& observed) const;
 
-  size_t tracked_devices() const { return devices_.size(); }
+  size_t tracked_devices() const { return dedupe_.tracked_devices(); }
 
  private:
-  struct Seen {
-    std::string key;
-    double time;
-  };
-  struct Device {
-    std::string mac;
-    std::vector<Seen> recent;
-  };
-
-  bool is_duplicate(const std::string& mac, const bthome::Packet& packet, double now);
   void fire(const Observed& observed, double now, ProcessResult& result);
 
   Clock clock_;
   std::vector<Button> buttons_;
   std::vector<Binding> bindings_;
-  // Least recently used device last.
-  std::list<Device> devices_;
+  PacketDedupe dedupe_;
   std::map<std::string, double> last_fired_;
 };
 

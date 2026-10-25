@@ -28,6 +28,9 @@ struct Request {
   std::string cookie;  // the raw value of the Cookie header, possibly empty
   std::string csrf;    // the value of the X-Button-Dispatcher header, possibly empty
   std::string client;  // the client's address, used to throttle failed logins
+  // The X-Satellite and X-Signature headers of a satellite's report, possibly empty.
+  std::string satellite;
+  std::string signature;
 };
 
 struct Response {
@@ -43,7 +46,7 @@ class Api {
 
   // Handles one request. Every /api route except the sign-in ones needs a valid session cookie, and every
   // request that is not a read must carry the X-Button-Dispatcher header (a browser does not add it to a
-  // cross-site request). Paths outside /api give 404; the HTTP layer serves the page files itself.
+  // cross-site request). The exception is a satellite's report, which is authenticated by its signature. Paths outside /api give 404; the HTTP layer serves the page files itself.
   Response handle(const Request& request);
 
   // True for requests that call out to the network and may take seconds ("Run now" and the SwitchBot device,

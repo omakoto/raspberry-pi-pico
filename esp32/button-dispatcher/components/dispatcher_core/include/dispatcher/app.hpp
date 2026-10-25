@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -19,9 +20,11 @@
 
 #include "dispatcher/auth.hpp"
 #include "dispatcher/config.hpp"
+#include "dispatcher/device.hpp"
 #include "dispatcher/eventlog.hpp"
 #include "dispatcher/learn.hpp"
 #include "dispatcher/platform.hpp"
+#include "dispatcher/satellite.hpp"
 #include "dispatcher/switchbot.hpp"
 #include "dispatcher/triggers.hpp"
 
@@ -39,12 +42,16 @@ class AppCore {
   static constexpr double kErrorLogIntervalS = 60.0;
   // Only the start of an action's HTTP response is read; the status is all that is reported.
   static constexpr size_t kMaxActionResponseBytes = 4096;
+  // A satellite gives up on one report after this long; it retries a second later.
+  static constexpr double kForwardTimeoutS = 3.0;
+  // How long forward_once() asks to wait when there is nothing to forward to (not a satellite, or unpaired).
+  static constexpr double kForwardIdleWaitS = 5.0;
 
   // `switchbot_api_base` is only changed by tests and the host harness, to talk to a local fake server.
   explicit AppCore(Platform& platform, int pbkdf2_iterations = AuthService::kDefaultIterations,
                    std::string switchbot_api_base = kSwitchBotApiBase);
 
-  // Loads the stored config and password. If config.json exists but is invalid the app starts with an empty
+  // Loads the stored config, device settings, satellites and password. If config.json exists but is invalid the app starts with an empty
   // config and `*error` (if given) says why; the invalid document is left alone until the next save.
   void init(std::string* error = nullptr);
 
@@ -61,16 +68,57 @@ class AppCore {
   SwitchBotService switchbot;
   // Advertised device names by MAC, when a scan has heard them (passive scans usually do not).
   std::map<std::string, std::string> names;
+  // The board's role, host name and pairing (device.json).
+  DeviceSettings device;
+  // Dispatcher role: the satellites that may report to this board (satellites.json) and what they reported.
+  SatelliteRegistry satellites;
+  // Satellite role: what is waiting to be forwarded.
+  Forwarder forwarder;
+
+  // ---- set once by the firmware before init(), then read-only ----
+  // The host name base used when the device settings leave it empty (config.toml's `hostname`).
+  std::string default_hostname_base = kDefaultHostnameBase;
+  // Whether the MAC is appended when the device settings don't say (config.toml's `hostname_append_mac`).
+  bool default_hostname_append_mac = true;
+  // The port of the web server, for the pairing codes this board hands out.
+  int http_port = 80;
+  // Called when there is something new to forward; it should wake the task that calls forward_once(). It is
+  // called with or without `mutex` held, so it must not lock it.
+  std::function<void()> on_forward_queued;
 
   // ---- operations ----
 
   // Saves the config document and applies the config to the trigger engine and the credential copy.
   // Call with `mutex` held. Returns false, setting `*error`, if the document could not be stored.
   bool commit_config(std::string* error);
+  // Saves device.json, and applies the host name if it changed. Call with `mutex` held.
+  bool commit_device(std::string* error);
+  // Saves satellites.json. Call with `mutex` held.
+  bool commit_satellites(std::string* error);
+
+  // The board's current network name, such as "dispatcher-aa-bb-cc-dd-ee-ff". Call with `mutex` held.
+  std::string hostname() const;
+  // Whether the MAC is appended to the host name, from the device settings or the default. Call with `mutex` held.
+  bool hostname_append_mac() const;
+
+  // Forgets what is queued for forwarding and makes a report due now; for changes of role or pairing. Call
+  // with `mutex` held.
+  void reset_forwarding();
 
   // The Bluetooth entry point: one BTHome service-data payload heard from `mac`. Locks internally. Actions of
   // bindings that fire are queued on the platform's background worker after the lock is released.
-  void handle_packet(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length);
+  // `via` names the satellite that forwarded the packet, empty if this board heard it.
+  void handle_packet(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length,
+                     const std::string& via = "");
+
+  // Where the Bluetooth scanner hands its packets: to handle_packet on a dispatcher, to the forwarding queue
+  // on a satellite. Locks internally.
+  void handle_advert(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length);
+
+  // Satellite role: sends the next report to the dispatcher if one is due, blocking while it is on its way.
+  // Returns how many seconds to wait before calling again (0 means call again at once). Locks internally, so
+  // the caller must not hold `mutex`. One task calls this in a loop, woken early by on_forward_queued.
+  double forward_once();
 
   // Runs an action and returns its result; blocks while talking to the network. Locks internally (briefly), so
   // the caller must not hold `mutex`. Does not log.
@@ -95,6 +143,9 @@ class AppCore {
   std::mutex credentials_mutex_;
   std::pair<std::string, std::string> credentials_;
   std::map<std::string, double> last_error_log_;
+  std::string applied_hostname_;
+  // Bumped by reset_forwarding(), so the outcome of a report sent before the change is ignored.
+  uint64_t forward_generation_ = 0;
 };
 
 }  // namespace dispatcher

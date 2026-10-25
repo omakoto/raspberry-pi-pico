@@ -22,6 +22,9 @@ public:
     void set_state(LedState state);
     LedState get_state() const;
     void pulse(uint32_t duration_ms = 100);
+    // While set, READY shows a slow blink instead of solid on: Wi-Fi is up, but a satellite cannot reach its
+    // dispatcher. Kept apart from the state, which the Wi-Fi task owns.
+    void set_link_down(bool down);
 
 private:
     static void task_entry(void* arg);
@@ -32,6 +35,7 @@ private:
     bool active_low_;
     std::atomic<LedState> current_state_;
     std::atomic<uint32_t> pulse_until_ms_;
+    std::atomic<bool> link_down_;
     TaskHandle_t task_handle_;
     std::atomic<bool> running_;
 };

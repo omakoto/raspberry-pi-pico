@@ -1,8 +1,8 @@
 // host_server.cpp: runs the firmware's platform-independent core on this PC behind a real HTTP server, so the
 // web page can be tried (and browser-tested) against the C++ implementation without an ESP32.
 //
-// It serves the page files from the Pi project's static directory and hands /api requests to dispatcher::Api,
-// exactly as the firmware's web server does. There is no Bluetooth: a test route injects advertisements,
+// It serves the page files from web/ and hands /api requests to dispatcher::Api, exactly as the firmware's web
+// server does, and runs the satellite forwarder like the firmware's forwarding task. There is no Bluetooth: a test route injects advertisements,
 //   GET /test/packet?mac=AA:BB:CC:DD:EE:01&hex=44002101643a003a013a003a00&rssi=-40
 // standing in for a button press.
 //
@@ -15,7 +15,9 @@
 // Options:
 //   --port N               port to listen on (default 8097)
 //   --data-dir DIR         where config.json and auth.json are kept (default /tmp/button-dispatcher-host)
-//   --static-dir DIR       the page files (default ../../pi/button-dispatcher/button_dispatcher/static)
+//   --static-dir DIR       the page files (default web)
+//   --mac MAC              the board MAC address to pretend (default 02:00:00:00:00:01); two servers with
+//                          different MACs and ports can be paired as dispatcher and satellite
 //   --switchbot-base URL   SwitchBot API base to use, for example http://127.0.0.1:8096/v1.1
 //   --iterations N         PBKDF2 iterations (default 200: this build's SHA-256 is slow)
 
@@ -64,7 +66,7 @@ std::string read_file(const std::string& path, bool* ok) {
 
 class HostPlatform : public Platform {
  public:
-  explicit HostPlatform(std::string data_dir) : data_dir_(std::move(data_dir)) {
+  HostPlatform(std::string data_dir, std::string mac) : data_dir_(std::move(data_dir)), mac_(std::move(mac)) {
     mkdir(data_dir_.c_str(), 0700);
     worker_ = std::thread([this] { work(); });
     worker_.detach();
@@ -74,6 +76,8 @@ class HostPlatform : public Platform {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   }
   bool wall_clock_valid() const override { return true; }
+  std::string device_mac() const override { return mac_; }
+  void apply_hostname(const std::string& hostname) override { std::cerr << "host name is now " << hostname << "\n"; }
   int64_t wall_time_ms() const override {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
         .count();
@@ -214,6 +218,7 @@ class HostPlatform : public Platform {
   }
 
   std::string data_dir_;
+  std::string mac_;
   std::thread worker_;
   std::mutex queue_mutex_;
   std::condition_variable queue_condition_;
@@ -225,7 +230,8 @@ class HostPlatform : public Platform {
 struct Options {
   int port = 8097;
   std::string data_dir = "/tmp/button-dispatcher-host";
-  std::string static_dir = "../../pi/button-dispatcher/button_dispatcher/static";
+  std::string static_dir = "web";
+  std::string mac = "02:00:00:00:00:01";
   std::string switchbot_base = kSwitchBotApiBase;
   int iterations = 200;
 };
@@ -354,6 +360,8 @@ void handle_connection(int fd, const std::string& client, AppCore& app, Api& api
   request.cookie = headers.count("cookie") ? headers["cookie"] : "";
   request.csrf = headers.count("x-button-dispatcher") ? headers["x-button-dispatcher"] : "";
   request.client = client;
+  request.satellite = headers.count("x-satellite") ? headers["x-satellite"] : "";
+  request.signature = headers.count("x-signature") ? headers["x-signature"] : "";
 
   if (request.path == "/test/packet") {
     // A stand-in for the Bluetooth scanner: feeds one advertisement to the application core.
@@ -366,7 +374,7 @@ void handle_connection(int fd, const std::string& client, AppCore& app, Api& api
       std::lock_guard<std::mutex> lock(app.mutex);
       app.names[mac] = request.query["name"];
     }
-    app.handle_packet(mac, rssi, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
+    app.handle_advert(mac, rssi, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
     respond(fd, 200, "text/plain", "ok", {}, true);
   } else if (request.path.rfind("/api/", 0) == 0) {
     const Response response = api.handle(request);
@@ -401,18 +409,38 @@ int main(int argc, char** argv) {
     else if (flag == "--static-dir") options.static_dir = value;
     else if (flag == "--switchbot-base") options.switchbot_base = value;
     else if (flag == "--iterations") options.iterations = std::atoi(value.c_str());
+    else if (flag == "--mac") options.mac = value;
     else {
       std::cerr << "unknown option " << flag << "\n";
       return 2;
     }
   }
 
-  HostPlatform platform(options.data_dir);
+  HostPlatform platform(options.data_dir, options.mac);
   AppCore app(platform, options.iterations, options.switchbot_base);
+  app.http_port = options.port;
   std::string error;
   app.init(&error);
   if (!error.empty()) std::cerr << error << "\n";
   Api api(app);
+
+  // The forwarding loop of a satellite, as in the firmware: woken early when a press is queued.
+  static std::mutex wake_mutex;
+  static std::condition_variable wake;
+  static bool woken = false;
+  app.on_forward_queued = [] {
+    std::lock_guard<std::mutex> lock(wake_mutex);
+    woken = true;
+    wake.notify_one();
+  };
+  std::thread([&app] {
+    while (true) {
+      const double wait_s = app.forward_once();
+      std::unique_lock<std::mutex> lock(wake_mutex);
+      if (wait_s > 0) wake.wait_for(lock, std::chrono::duration<double>(wait_s), [] { return woken; });
+      woken = false;
+    }
+  }).detach();
 
   const int listener = socket(AF_INET, SOCK_STREAM, 0);
   int yes = 1;

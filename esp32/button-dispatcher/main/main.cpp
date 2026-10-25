@@ -57,6 +57,23 @@ static void start_time_sync(dispatcher::AppCore* app) {
     esp_sntp_init();
 }
 
+// The forwarding task: sends reports whenever forward_once() says one is due, woken early when a press is
+// queued. Reports are plain HTTP, so this needs less stack than the action worker, which also does TLS.
+constexpr int kForwardStackBytes = 8 * 1024;
+
+[[noreturn]] static void forward_loop(dispatcher::AppCore& app, StatusLed& led) {
+    while (true) {
+        const double wait_s = app.forward_once();
+        bool link_down = false;
+        {
+            std::lock_guard<std::mutex> lock(app.mutex);
+            link_down = app.device.role == dispatcher::Role::kSatellite && app.forwarder.failing();
+        }
+        led.set_link_down(link_down);
+        if (wait_s > 0) ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(static_cast<uint32_t>(wait_s * 1000) + 1));
+    }
+}
+
 extern "C" void app_main() {
     // 1. Logging to both UART0 and the USB serial port
     dual_logger_init();
@@ -104,12 +121,20 @@ extern "C" void app_main() {
     if (!platform.init()) ESP_LOGE(TAG, "Platform start-up problem; settings may not be saved");
     static dispatcher::AppCore app(platform,
                                    config.get_int("pbkdf2_iterations", dispatcher::AuthService::kDefaultIterations));
+    // config.toml's hostname is only the default: the web page can rename the board (stored in device.json).
+    app.default_hostname_base = config.get_string("hostname", dispatcher::kDefaultHostnameBase);
+    app.default_hostname_append_mac = config.get_bool("hostname_append_mac", true);
+    app.http_port = config.get_int("http_port", 80);
     std::string init_error;
     app.init(&init_error);
     if (!init_error.empty()) ESP_LOGE(TAG, "%s", init_error.c_str());
+    std::string hostname;
+    dispatcher::Role role;
     {
         std::lock_guard<std::mutex> lock(app.mutex);
-        app.log.add("info", "Started");
+        hostname = app.hostname();
+        role = app.device.role;
+        app.log.add("info", std::string("Started as a ") + dispatcher::role_name(role));
         if (!init_error.empty()) app.log.add("error", init_error);
     }
 
@@ -125,21 +150,33 @@ extern "C" void app_main() {
     }
     static WifiManager wifi(ap_list);
     wifi.init();
+    wifi.set_hostname(hostname);
     xTaskCreate([](void*) { wifi.run(&status_led); }, "wifi_task", 4096, nullptr, 5, nullptr);
 
     ESP_LOGI(TAG, "Waiting for Wi-Fi connection...");
     while (!wifi.is_connected()) vTaskDelay(pdMS_TO_TICKS(200));
     start_time_sync(&app);
 
-    const std::string hostname = config.get_string("hostname", "dispatcher");
-    const int http_port = config.get_int("http_port", 80);
+    const int http_port = app.http_port;
 
-    // 8. mDNS (for example dispatcher.local) and the web server
+    // 8. mDNS (for example dispatcher-aa-bb-cc-dd-ee-ff.local) and the web server
     static MdnsService mdns;
     mdns.init(hostname, http_port);
+    platform.set_hostname_handler([](const std::string& name) {
+        mdns.set_hostname(name);
+        wifi.set_hostname(name);
+    });
     static dispatcher::Api api(app);
     static WebServer web(api);
     web.start(http_port);
+
+    // 8b. Forwarding to the dispatcher (satellite role); idle on a dispatcher, so a role change needs no restart
+    static TaskHandle_t forward_task = nullptr;
+    app.on_forward_queued = [] {
+        if (forward_task != nullptr) xTaskNotifyGive(forward_task);
+    };
+    xTaskCreate([](void*) { forward_loop(app, status_led); }, "forwarder", kForwardStackBytes, nullptr, 4,
+                &forward_task);
 
     // 9. Bluetooth scanning: presses feed the application core
     static BleScanner scanner(app, [] { status_led.pulse(150); });
@@ -154,7 +191,7 @@ extern "C" void app_main() {
 
     status_led.set_state(LedState::READY);
     ESP_LOGI(TAG, "=================================================");
-    ESP_LOGI(TAG, " BLE button dispatcher ready");
+    ESP_LOGI(TAG, " BLE button dispatcher ready (%s)", dispatcher::role_name(role));
     ESP_LOGI(TAG, " Wi-Fi IP:  %s", wifi.get_ip_address().c_str());
     ESP_LOGI(TAG, " Web page:  http://%s.local:%d/", hostname.c_str(), http_port);
     ESP_LOGI(TAG, "=================================================");

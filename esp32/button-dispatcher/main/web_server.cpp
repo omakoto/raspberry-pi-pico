@@ -7,6 +7,7 @@
 #include <string>
 #include <sys/socket.h>
 
+#include "dispatcher/satellite.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/task.h"
@@ -176,6 +177,8 @@ bool build_request(httpd_req_t* req, dispatcher::Request* request, dispatcher::R
     }
     request->cookie = header_value(req, "Cookie");
     request->csrf = header_value(req, dispatcher::kCsrfHeaderName);
+    request->satellite = header_value(req, dispatcher::kSatelliteIdHeader);
+    request->signature = header_value(req, dispatcher::kSatelliteSignatureHeader);
     request->client = peer_address(req);
 
     if (req->content_len > kMaxRequestBody) {

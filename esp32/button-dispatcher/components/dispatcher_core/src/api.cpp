@@ -8,7 +8,10 @@
 
 #include "dispatcher/api.hpp"
 
+#include <cctype>
+#include <cmath>
 #include <cstdint>
+#include <algorithm>
 #include <cstdlib>
 #include <mutex>
 #include <string>
@@ -17,7 +20,10 @@
 #include "cJSON.h"
 #include "dispatcher/bthome.hpp"
 #include "dispatcher/config.hpp"
+#include "dispatcher/device.hpp"
 #include "dispatcher/learn.hpp"
+#include "dispatcher/satellite.hpp"
+#include "dispatcher/util.hpp"
 
 namespace dispatcher {
 
@@ -294,6 +300,10 @@ Response get_state(Context& c) {
     move_member(config.get(), json.get(), "settings");
     cJSON* switchbot = cJSON_AddObjectToObject(json.get(), "switchbot");
     cJSON_AddBoolToObject(switchbot, "configured", c.app.config.has_switchbot_credentials());
+    // Enough for the page to pick its layout; GET /api/device has the rest.
+    cJSON* device = cJSON_AddObjectToObject(json.get(), "device");
+    cJSON_AddStringToObject(device, "role", role_name(c.app.device.role));
+    cJSON_AddStringToObject(device, "hostname", c.app.hostname().c_str());
   }
   cJSON_AddItemToObject(json.get(), "choices", choices_json().release());
   return reply(200, json);
@@ -758,6 +768,295 @@ Response import_config_route(Context& c) {
   return reply(200, json);
 }
 
+// ---- device settings and pairing ----------------------------------------------------------------------
+
+// A monotonic time as Unix seconds for the page, or null if `when` is not set.
+void add_time(AppCore& app, cJSON* object, const char* key, bool set, double when) {
+  if (set) {
+    cJSON_AddNumberToObject(object, key, app.wall_time_of(when));
+  } else {
+    cJSON_AddNullToObject(object, key);
+  }
+}
+
+// Call with app.mutex held.
+JsonPtr device_json(AppCore& app) {
+  const DeviceSettings& device = app.device;
+  JsonPtr json = make_json(cJSON_CreateObject());
+  cJSON_AddStringToObject(json.get(), "role", role_name(device.role));
+  cJSON_AddStringToObject(json.get(), "mac", app.platform().device_mac().c_str());
+  cJSON_AddStringToObject(json.get(), "hostname", app.hostname().c_str());
+  cJSON_AddStringToObject(json.get(), "hostname_base", device.hostname_base.c_str());
+  cJSON_AddStringToObject(json.get(), "default_hostname_base", app.default_hostname_base.c_str());
+  cJSON_AddBoolToObject(json.get(), "hostname_append_mac", app.hostname_append_mac());
+  cJSON_AddBoolToObject(json.get(), "default_hostname_append_mac", app.default_hostname_append_mac);
+  cJSON_AddNumberToObject(json.get(), "http_port", app.http_port);
+  if (device.pairing) {
+    cJSON* pairing = cJSON_AddObjectToObject(json.get(), "pairing");
+    cJSON_AddStringToObject(pairing, "id", device.pairing->id.c_str());
+    cJSON_AddStringToObject(pairing, "host", device.pairing->host.c_str());
+    cJSON_AddNumberToObject(pairing, "port", device.pairing->port);
+  } else {
+    cJSON_AddNullToObject(json.get(), "pairing");
+  }
+  const Forwarder& forwarder = app.forwarder;
+  cJSON* forwarding = cJSON_AddObjectToObject(json.get(), "forwarding");
+  cJSON_AddBoolToObject(forwarding, "clock_set", app.platform().wall_clock_valid());
+  cJSON_AddBoolToObject(forwarding, "connected", forwarder.has_succeeded() && !forwarder.failing());
+  add_time(app, forwarding, "last_ok", forwarder.has_succeeded(), forwarder.last_ok());
+  cJSON_AddStringToObject(forwarding, "last_error", forwarder.last_error().c_str());
+  add_time(app, forwarding, "last_error_time", !forwarder.last_error().empty(), forwarder.last_error_at());
+  cJSON_AddNumberToObject(forwarding, "forwarded", static_cast<double>(forwarder.forwarded()));
+  cJSON_AddNumberToObject(forwarding, "dropped", static_cast<double>(forwarder.dropped()));
+  cJSON_AddNumberToObject(forwarding, "queued", static_cast<double>(forwarder.queued()));
+  return json;
+}
+
+Response get_device(Context& c) {
+  std::lock_guard<std::mutex> lock(c.app.mutex);
+  return reply(200, device_json(c.app));
+}
+
+Response put_device(Context& c) {
+  Response error;
+  JsonPtr body = read_object(c.request, &error);
+  if (!body) return error;
+  std::lock_guard<std::mutex> lock(c.app.mutex);
+  DeviceSettings updated = c.app.device;
+  const cJSON* role = field(body.get(), "role");
+  if (role != nullptr) {
+    const std::optional<Role> parsed = cJSON_IsString(role) ? parse_role(role->valuestring) : std::nullopt;
+    if (!parsed) return fail(400, "role must be \"dispatcher\" or \"satellite\"");
+    updated.role = *parsed;
+  }
+  const cJSON* base = field(body.get(), "hostname_base");
+  if (base != nullptr) {
+    if (!cJSON_IsString(base)) return fail(400, "the host name must be text");
+    updated.hostname_base = trim(base->valuestring);
+    for (char& ch : updated.hostname_base) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  const cJSON* append = field(body.get(), "hostname_append_mac");
+  if (append != nullptr) {
+    if (!cJSON_IsBool(append)) return fail(400, "hostname_append_mac must be true or false");
+    updated.hostname_append_mac = cJSON_IsTrue(append);
+  } else if (base != nullptr && !updated.hostname_append_mac) {
+    // A base is only known to fit with the suffix setting it was checked against, so that setting is stored with
+    // it rather than left to a default that could change.
+    updated.hostname_append_mac = c.app.default_hostname_append_mac;
+  }
+  const bool append_mac = updated.hostname_append_mac.value_or(c.app.default_hostname_append_mac);
+  const std::string problem = check_hostname_base(updated.hostname_base, append_mac);
+  if (!problem.empty()) return fail(400, problem);
+
+  const bool role_changed = updated.role != c.app.device.role;
+  const std::string old_hostname = c.app.hostname();
+  c.app.device = std::move(updated);
+  const std::string new_hostname = c.app.hostname();
+  std::string save_error;
+  const bool saved = c.app.commit_device(&save_error);
+  if (role_changed) {
+    c.app.reset_forwarding();
+    c.app.log.add("info", std::string("This board is now a ") + role_name(c.app.device.role));
+  }
+  if (new_hostname != old_hostname) c.app.log.add("info", "Host name is now " + new_hostname);
+  if (!saved) return save_failed(save_error);
+  return reply(200, device_json(c.app));
+}
+
+Response put_pairing(Context& c) {
+  Response error;
+  JsonPtr body = read_object(c.request, &error);
+  if (!body) return error;
+  const Parsed<Pairing> pairing = parse_pairing_code(text_of(field(body.get(), "code")));
+  if (!pairing.ok()) return fail(400, pairing.error);
+  std::lock_guard<std::mutex> lock(c.app.mutex);
+  c.app.device.pairing = *pairing.value;
+  std::string save_error;
+  const bool saved = c.app.commit_device(&save_error);
+  c.app.reset_forwarding();
+  c.app.log.add("info", "Paired with the dispatcher at " + pairing.value->host + ":" +
+                            std::to_string(pairing.value->port) + " as " + pairing.value->id);
+  if (!saved) return save_failed(save_error);
+  return reply(200, device_json(c.app));
+}
+
+Response delete_pairing(Context& c) {
+  std::lock_guard<std::mutex> lock(c.app.mutex);
+  c.app.device.pairing.reset();
+  std::string save_error;
+  const bool saved = c.app.commit_device(&save_error);
+  c.app.reset_forwarding();
+  c.app.log.add("info", "Unpaired from the dispatcher");
+  if (!saved) return save_failed(save_error);
+  return reply(200, device_json(c.app));
+}
+
+// ---- satellites (dispatcher role) -------------------------------------------------------------------------
+
+// Call with app.mutex held.
+JsonPtr satellite_json(AppCore& app, const SatelliteRecord& record) {
+  JsonPtr json = make_json(cJSON_CreateObject());
+  cJSON_AddStringToObject(json.get(), "id", record.id.c_str());
+  cJSON_AddStringToObject(json.get(), "name", record.name.c_str());
+  auto it = app.satellites.status.find(record.id);
+  const SatelliteStatus status = it != app.satellites.status.end() ? it->second : SatelliteStatus();
+  const double now = app.platform().monotonic_s();
+  cJSON_AddBoolToObject(json.get(), "online", status.seen && now - status.last_seen <= SatelliteRegistry::kOnlineS);
+  add_time(app, json.get(), "last_seen", status.seen, status.last_seen);
+  cJSON_AddStringToObject(json.get(), "address", status.address.c_str());
+  cJSON_AddNumberToObject(json.get(), "uptime_s", static_cast<double>(status.uptime_s));
+  cJSON_AddNumberToObject(json.get(), "events", static_cast<double>(status.events));
+  cJSON_AddNumberToObject(json.get(), "stale", static_cast<double>(status.stale));
+  cJSON_AddNumberToObject(json.get(), "dropped", static_cast<double>(status.dropped));
+  cJSON_AddNumberToObject(json.get(), "queued", static_cast<double>(status.queued));
+  cJSON_AddStringToObject(json.get(), "last_error", status.last_error.c_str());
+  add_time(app, json.get(), "last_error_time", !status.last_error.empty(), status.last_error_at);
+  return json;
+}
+
+Response get_satellites(Context& c) {
+  std::lock_guard<std::mutex> lock(c.app.mutex);
+  JsonPtr json = make_json(cJSON_CreateObject());
+  cJSON* list = cJSON_AddArrayToObject(json.get(), "satellites");
+  for (const SatelliteRecord& record : c.app.satellites.records) {
+    cJSON_AddItemToArray(list, satellite_json(c.app, record).release());
+  }
+  cJSON_AddNumberToObject(json.get(), "max", static_cast<double>(SatelliteRegistry::kMaxSatellites));
+  return reply(200, json);
+}
+
+Response post_satellite(Context& c) {
+  Response error;
+  JsonPtr body = read_object(c.request, &error);
+  if (!body) return error;
+  const std::string name = trim(text_of(field(body.get(), "name")));
+  std::lock_guard<std::mutex> lock(c.app.mutex);
+  SatelliteRegistry& satellites = c.app.satellites;
+  if (satellites.records.size() >= SatelliteRegistry::kMaxSatellites) {
+    return fail(409, "there can be at most " + std::to_string(SatelliteRegistry::kMaxSatellites) + " satellites");
+  }
+  const std::string problem = satellites.check_name(name);
+  if (!problem.empty()) return fail(400, problem);
+
+  SatelliteRecord record;
+  record.id = fresh_id(c.app, "sat", [&](const std::string& id) { return satellites.find(id) != nullptr; });
+  record.name = name;
+  record.secret.resize(SatelliteRegistry::kSecretBytes);
+  c.app.platform().random_bytes(reinterpret_cast<uint8_t*>(record.secret.data()), record.secret.size());
+  satellites.records.push_back(record);
+  std::string save_error;
+  if (!c.app.commit_satellites(&save_error)) {
+    satellites.records.pop_back();
+    return save_failed(save_error);
+  }
+  c.app.log.add("info", "Added satellite \"" + name + "\"");
+
+  // The secret leaves the board only now, inside the pairing code; it is never shown again.
+  Pairing pairing;
+  pairing.id = record.id;
+  pairing.secret = record.secret;
+  pairing.host = c.app.hostname() + ".local";
+  pairing.port = c.app.http_port;
+  JsonPtr json = make_json(cJSON_CreateObject());
+  cJSON_AddItemToObject(json.get(), "satellite", satellite_json(c.app, record).release());
+  cJSON_AddStringToObject(json.get(), "pairing_code", format_pairing_code(pairing).c_str());
+  return reply(201, json);
+}
+
+Response delete_satellite(Context& c) {
+  std::lock_guard<std::mutex> lock(c.app.mutex);
+  std::vector<SatelliteRecord>& records = c.app.satellites.records;
+  auto it = std::find_if(records.begin(), records.end(), [&](const SatelliteRecord& r) { return r.id == c.id; });
+  if (it == records.end()) return fail(404, "no such satellite");
+  const SatelliteRecord removed = *it;
+  records.erase(it);
+  std::string save_error;
+  if (!c.app.commit_satellites(&save_error)) {
+    records.push_back(removed);
+    return save_failed(save_error);
+  }
+  c.app.satellites.status.erase(removed.id);
+  c.app.log.add("info", "Removed satellite \"" + removed.name + "\"");
+  return ok_reply();
+}
+
+// A satellite's report: checks who sent it and that it is new, then handles its events like local packets.
+Response satellite_report(Context& c) {
+  if (c.request.body.size() > kMaxReportBytes) return fail(413, "report too large");
+  std::vector<ReportEvent> events;
+  std::string name;
+  {
+    std::lock_guard<std::mutex> lock(c.app.mutex);
+    // A satellite would run the presses through its own bindings, or forward them again.
+    if (c.app.device.role != Role::kDispatcher) return fail(409, "this board is a satellite, not a dispatcher");
+    const SatelliteRecord* record = c.app.satellites.find(c.request.satellite);
+    // Not logged: without a known satellite there is nothing to rate-limit the messages by.
+    if (record == nullptr) return fail(401, "unknown satellite; pair it with this dispatcher again");
+    SatelliteStatus& status = c.app.satellites.status[record->id];
+    const double now = c.app.platform().monotonic_s();
+    auto refuse = [&](int code, const std::string& message) {
+      status.last_error = message;
+      status.last_error_at = now;
+      if (now - status.last_error_logged >= AppCore::kErrorLogIntervalS) {
+        status.last_error_logged = now;
+        c.app.log.add("error", "Report from satellite \"" + record->name + "\" refused: " + message);
+      }
+      return fail(code, message);
+    };
+
+    std::string signature = c.request.signature;
+    for (char& ch : signature) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    const std::string expected = hex_encode(c.app.platform().hmac_sha256(record->secret, c.request.body));
+    if (!constant_time_equals(signature, expected)) {
+      return refuse(401, "wrong signature; pair the satellite with this dispatcher again");
+    }
+    Parsed<Report> report = report_from_text(c.request.body);
+    if (!report.ok()) return refuse(400, report.error);
+    if (!c.app.platform().wall_clock_valid()) return refuse(503, "the dispatcher's clock is not set yet");
+    const int64_t skew_ms = c.app.platform().wall_time_ms() - report.value->time_ms;
+    if (std::llabs(skew_ms) > SatelliteRegistry::kMaxClockSkewMs) {
+      return refuse(409, "the satellite's clock differs from the dispatcher's by " +
+                             std::to_string(std::llabs(skew_ms) / 1000) + " s");
+    }
+    if (!SatelliteRegistry::is_fresh(status, *report.value)) return refuse(409, "repeated or out-of-order report");
+
+    const bool was_online = status.seen && now - status.last_seen <= SatelliteRegistry::kOnlineS;
+    status.seen = true;
+    status.last_seen = now;
+    status.address = c.request.client;
+    status.boot = report.value->boot;
+    status.seq = report.value->seq;
+    status.last_time_ms = report.value->time_ms;
+    status.uptime_s = report.value->uptime_s;
+    status.dropped = report.value->dropped;
+    status.queued = report.value->queued;
+    status.last_error.clear();
+    if (!was_online) {
+      c.app.log.add("info", "Satellite \"" + record->name + "\" is online" +
+                                (c.request.client.empty() ? "" : " (" + c.request.client + ")"));
+    }
+    // The time the report spent on its way counts towards each event's age.
+    const int64_t transit_ms = skew_ms > 0 ? skew_ms : 0;
+    for (ReportEvent& event : report.value->events) {
+      if (event.age_ms + transit_ms > SatelliteRegistry::kMaxEventAgeMs) {
+        ++status.stale;
+        continue;
+      }
+      events.push_back(std::move(event));
+    }
+    status.events += static_cast<int64_t>(events.size());
+    name = record->name;
+  }
+  // Without the lock: handle_packet locks for itself, and may queue actions.
+  for (const ReportEvent& event : events) {
+    c.app.handle_packet(event.mac, event.rssi, event.data.data(), event.data.size(), name);
+  }
+  JsonPtr json = make_json(cJSON_CreateObject());
+  cJSON_AddTrueToObject(json.get(), "ok");
+  cJSON_AddNumberToObject(json.get(), "accepted", static_cast<double>(events.size()));
+  return reply(200, json);
+}
+
 // ---- routing -----------------------------------------------------------------------------------------
 
 const Route kRoutes[] = {
@@ -787,6 +1086,14 @@ const Route kRoutes[] = {
     {"GET", "/api/switchbot/commands", switchbot_commands, true},
     {"GET", "/api/export", export_config, false},
     {"POST", "/api/import", import_config_route, false},
+    {"GET", "/api/device", get_device, false},
+    {"PUT", "/api/device", put_device, false},
+    {"PUT", "/api/device/pairing", put_pairing, false},
+    {"DELETE", "/api/device/pairing", delete_pairing, false},
+    {"GET", "/api/satellites", get_satellites, false},
+    {"POST", "/api/satellites", post_satellite, false},
+    {"DELETE", "/api/satellites/{id}", delete_satellite, false},
+    {"POST", kSatelliteReportPath, satellite_report, false},
 };
 
 // The sign-in routes work without a session.
@@ -852,10 +1159,12 @@ bool is_api_path(const std::string& path) { return path.compare(0, 5, "/api/") =
 
 Response Api::handle(const Request& request) {
   if (!is_api_path(request.path)) return fail(404, "not found");
-  if (!is_safe_method(request.method) && request.csrf != "1") {
+  // A satellite is not a browser: its report carries a signature instead of a session and the CSRF header.
+  const bool report = request.path == kSatelliteReportPath;
+  if (!report && !is_safe_method(request.method) && request.csrf != "1") {
     return fail(403, std::string("missing ") + kCsrfHeaderName + " header");
   }
-  if (!is_public_path(request.path) && !session_valid(app_, request)) return fail(401, "not signed in");
+  if (!report && !is_public_path(request.path) && !session_valid(app_, request)) return fail(401, "not signed in");
 
   Match match = find_route(request.method, request.path);
   if (match.route == nullptr) {

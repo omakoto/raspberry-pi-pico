@@ -9,6 +9,7 @@ StatusLed::StatusLed(gpio_num_t pin, bool active_low)
       active_low_(active_low),
       current_state_(LedState::INITIALIZING),
       pulse_until_ms_(0),
+      link_down_(false),
       task_handle_(nullptr),
       running_(false) {}
 
@@ -65,6 +66,10 @@ void StatusLed::pulse(uint32_t duration_ms) {
     pulse_until_ms_.store(until != 0 ? until : 1, std::memory_order_relaxed);
 }
 
+void StatusLed::set_link_down(bool down) {
+    link_down_.store(down, std::memory_order_relaxed);
+}
+
 void StatusLed::set_raw(bool on) {
     if (pin_ < 0) return;
     gpio_set_level(pin_, (active_low_ ? !on : on) ? 1 : 0);
@@ -114,6 +119,13 @@ void StatusLed::run_task() {
                 break;
 
             case LedState::READY:
+                if (link_down_.load(std::memory_order_relaxed)) {
+                    // Slow blink 1s ON / 1s OFF: the network is up but the dispatcher is not answering.
+                    set_raw((step % 2) == 0);
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    step++;
+                    break;
+                }
                 // Solid ON: only the non-idle states blink, so any blinking means attention is needed.
                 set_raw(true);
                 vTaskDelay(pdMS_TO_TICKS(100));

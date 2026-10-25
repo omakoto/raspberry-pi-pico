@@ -8,7 +8,7 @@
 // press or a wheel turn to the application core.
 //
 // NimBLE's callback only recognizes BTHome service data and queues it; a worker task decodes it and calls
-// AppCore::handle_packet, so the Bluetooth host task is never held up by locks or logging.
+// AppCore::handle_advert (which handles it, or forwards it on a satellite), so the Bluetooth host task is never held up by locks or logging.
 class BleScanner {
 public:
     struct Settings {

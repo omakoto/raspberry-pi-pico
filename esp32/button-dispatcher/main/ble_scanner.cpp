@@ -157,6 +157,6 @@ void BleScanner::worker_loop() {
         const bool has_input = !dispatcher::bthome::input_events(*packet).empty();
         if (!has_input && !packet->encrypted) continue;
         if (has_input && on_press_heard_) on_press_heard_();
-        app_.handle_packet(format_mac(advert.mac), advert.rssi, advert.data, advert.length);
+        app_.handle_advert(format_mac(advert.mac), advert.rssi, advert.data, advert.length);
     }
 }

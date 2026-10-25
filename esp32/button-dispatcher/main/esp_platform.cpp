@@ -7,6 +7,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "nvs.h"
@@ -265,6 +266,18 @@ dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, co
     }
     esp_http_client_cleanup(client);
     return result;
+}
+
+std::string EspPlatform::device_mac() const {
+    uint8_t mac[6];
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return "";
+    char text[18];
+    snprintf(text, sizeof(text), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return text;
+}
+
+void EspPlatform::apply_hostname(const std::string& hostname) {
+    if (hostname_handler_) hostname_handler_(hostname);
 }
 
 void EspPlatform::run_in_background(std::function<void()> task) {

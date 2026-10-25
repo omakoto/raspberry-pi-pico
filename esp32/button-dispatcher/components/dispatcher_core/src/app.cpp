@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "cJSON.h"
 #include "dispatcher/util.hpp"
 
 namespace dispatcher {
@@ -12,6 +13,20 @@ namespace dispatcher {
 namespace {
 
 constexpr const char* kConfigDocument = "config.json";
+
+// A new random id for each start, so the dispatcher can tell a satellite's restart from a replayed report.
+std::string random_boot_id(Platform& platform) {
+  uint8_t bytes[8];
+  platform.random_bytes(bytes, sizeof(bytes));
+  return hex_encode(std::string(reinterpret_cast<const char*>(bytes), sizeof(bytes)));
+}
+
+// The "error" member of a JSON answer, if there is one.
+std::string error_in_body(const std::string& body) {
+  JsonPtr json = make_json(cJSON_Parse(body.c_str()));
+  const cJSON* error = json ? cJSON_GetObjectItemCaseSensitive(json.get(), "error") : nullptr;
+  return cJSON_IsString(error) ? error->valuestring : "";
+}
 
 // A duration for messages: 10 prints as "10", 2.5 as "2.5".
 std::string format_seconds(double seconds) {
@@ -56,6 +71,7 @@ AppCore::AppCore(Platform& platform, int pbkdf2_iterations, std::string switchbo
                   return credentials_;
                 },
                 std::move(switchbot_api_base)),
+      forwarder(random_boot_id(platform)),
       platform_(platform) {}
 
 void AppCore::init(std::string* error) {
@@ -74,6 +90,32 @@ void AppCore::init(std::string* error) {
   }
   engine.configure(config.buttons, config.bindings);
   auth.load();
+
+  // A damaged device.json or satellites.json leaves the defaults in place, like config.json does.
+  auto add_error = [error](const std::string& message) {
+    if (error == nullptr) return;
+    if (!error->empty()) *error += "; ";
+    *error += message;
+  };
+  if (platform_.load_document(kDeviceDocument, &text)) {
+    Parsed<DeviceSettings> parsed = device_settings_from_text(text);
+    if (parsed.ok()) {
+      device = std::move(*parsed.value);
+    } else {
+      add_error(std::string(kDeviceDocument) + " is invalid: " + parsed.error);
+    }
+  }
+  if (platform_.load_document(kSatellitesDocument, &text)) {
+    Parsed<std::vector<SatelliteRecord>> parsed = satellites.parse(text);
+    if (parsed.ok()) {
+      satellites.records = std::move(*parsed.value);
+    } else {
+      add_error(std::string(kSatellitesDocument) + " is invalid: " + parsed.error);
+    }
+  }
+  forwarder.reset(platform_.monotonic_s());
+  // The firmware starts the network under this name.
+  applied_hostname_ = hostname();
 }
 
 bool AppCore::commit_config(std::string* error) {
@@ -91,6 +133,39 @@ bool AppCore::commit_config(std::string* error) {
   return true;
 }
 
+bool AppCore::commit_device(std::string* error) {
+  const std::string name = hostname();
+  if (name != applied_hostname_) {
+    applied_hostname_ = name;
+    platform_.apply_hostname(name);
+  }
+  if (!platform_.save_document(kDeviceDocument, device_settings_to_text(device))) {
+    if (error != nullptr) *error = "the device settings could not be saved";
+    return false;
+  }
+  return true;
+}
+
+bool AppCore::commit_satellites(std::string* error) {
+  if (!platform_.save_document(kSatellitesDocument, satellites.to_text())) {
+    if (error != nullptr) *error = "the satellite list could not be saved";
+    return false;
+  }
+  return true;
+}
+
+std::string AppCore::hostname() const {
+  return effective_hostname(device, default_hostname_base, default_hostname_append_mac, platform_.device_mac());
+}
+
+bool AppCore::hostname_append_mac() const { return device.hostname_append_mac.value_or(default_hostname_append_mac); }
+
+void AppCore::reset_forwarding() {
+  ++forward_generation_;
+  forwarder.reset(platform_.monotonic_s());
+  if (on_forward_queued) on_forward_queued();
+}
+
 std::string AppCore::label_for(const std::string& mac) const {
   for (const Button& button : config.buttons) {
     if (button.mac == mac) return button.name;
@@ -105,7 +180,8 @@ double AppCore::wall_time_of(double mono) const {
   return static_cast<double>(platform_.wall_time_ms()) / 1000.0 - (platform_.monotonic_s() - mono);
 }
 
-void AppCore::handle_packet(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length) {
+void AppCore::handle_packet(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length,
+                            const std::string& via) {
   std::vector<Binding> to_run;
   {
     std::lock_guard<std::mutex> lock(mutex);
@@ -122,7 +198,7 @@ void AppCore::handle_packet(const std::string& mac, std::optional<int> rssi, con
     for (const Observed& observed : result.observed) {
       auto name = names.find(observed.mac);
       learn.feed(observed, name != names.end() ? name->second : "");
-      log.add("ble", label_for(observed.mac) + ": " + describe(observed));
+      log.add("ble", label_for(observed.mac) + ": " + describe(observed) + (via.empty() ? "" : " (via " + via + ")"));
     }
     for (const Firing& firing : result.fired) {
       log.add("fire", "Binding \"" + firing.binding.name + "\" fired");
@@ -135,6 +211,90 @@ void AppCore::handle_packet(const std::string& mac, std::optional<int> rssi, con
   if (ack_beeps > 0) platform_.beep(Beep::kShort, ack_beeps);
   // Queued only after the lock is released: a platform may run the task right here, and the task takes the lock.
   for (const Binding& binding : to_run) spawn_binding(binding);
+}
+
+void AppCore::handle_advert(const std::string& mac, std::optional<int> rssi, const uint8_t* data, size_t length) {
+  bool queued = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (device.role == Role::kSatellite) {
+      queued = forwarder.offer(mac, rssi, data, length, platform_.monotonic_s());
+      if (!queued) return;
+    }
+  }
+  if (queued) {
+    if (on_forward_queued) on_forward_queued();
+    return;
+  }
+  handle_packet(mac, rssi, data, length);
+}
+
+double AppCore::forward_once() {
+  Report report;
+  Pairing pairing;
+  uint64_t generation = 0;
+  double started = 0;
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    started = platform_.monotonic_s();
+    if (device.role != Role::kSatellite || !device.pairing) {
+      forwarder.expire(started);
+      return kForwardIdleWaitS;
+    }
+    // The dispatcher refuses reports whose time is far from its own clock.
+    if (!platform_.wall_clock_valid()) {
+      forwarder.expire(started);
+      return Forwarder::kRetryS;
+    }
+    double wait_s = 0;
+    std::optional<Report> next = forwarder.next_report(started, platform_.wall_time_ms(), &wait_s);
+    if (!next) return wait_s;
+    report = std::move(*next);
+    pairing = *device.pairing;
+    generation = forward_generation_;
+  }
+
+  const std::string body = report_to_text(report);
+  const HeaderList headers = {
+      {"Content-Type", "application/json"},
+      {kSatelliteIdHeader, pairing.id},
+      {kSatelliteSignatureHeader, hex_encode(platform_.hmac_sha256(pairing.secret, body))},
+  };
+  const std::string url = "http://" + pairing.host + ":" + std::to_string(pairing.port) + kSatelliteReportPath;
+  const HttpResponse response = platform_.http_request("POST", url, headers, body, kForwardTimeoutS, 1024);
+
+  bool ok = false;
+  std::string error;
+  const std::string where = pairing.host + ":" + std::to_string(pairing.port);
+  const std::string why = response.detail.empty() ? "" : " (" + response.detail + ")";
+  switch (response.failure) {
+    case HttpResponse::Failure::kTimeout:
+      error = where + " did not answer within " + format_seconds(kForwardTimeoutS) + "s" + why;
+      break;
+    case HttpResponse::Failure::kConnect:
+      error = "cannot reach " + where + why;
+      break;
+    case HttpResponse::Failure::kNone:
+      ok = response.status == 200;
+      if (!ok) {
+        const std::string message = error_in_body(response.body);
+        error = where + " answered HTTP " + std::to_string(response.status) + (message.empty() ? "" : ": " + message);
+      }
+      break;
+  }
+
+  std::lock_guard<std::mutex> lock(mutex);
+  // A change of role or pairing while the report was on its way has already reset the forwarder.
+  if (generation != forward_generation_) return 0;
+  const bool was_failing = forwarder.failing();
+  const bool had_succeeded = forwarder.has_succeeded();
+  forwarder.report_done(ok, error, platform_.monotonic_s());
+  if (ok && (was_failing || !had_succeeded)) {
+    log.add("info", "Reporting to the dispatcher at " + where);
+  } else if (!ok && !was_failing) {
+    log.add("error", "Cannot report to the dispatcher: " + error);
+  }
+  return 0;
 }
 
 void AppCore::spawn_binding(const Binding& binding) {

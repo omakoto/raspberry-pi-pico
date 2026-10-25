@@ -45,6 +45,9 @@ class FakePlatform : public dispatcher::Platform {
   int pbkdf2_calls = 0;
   // Every beep the core asked for, in order (kind, count).
   std::vector<std::pair<dispatcher::Beep, int>> beeps;
+  // The board's Wi-Fi MAC, and every host name the core asked to apply.
+  std::string mac = "24:0A:C4:12:34:56";
+  std::vector<std::string> applied_hostnames;
 
   void run_queued_background() {
     std::vector<std::function<void()>> tasks;
@@ -53,6 +56,8 @@ class FakePlatform : public dispatcher::Platform {
   }
 
   // ---- Platform ----
+  std::string device_mac() const override { return mac; }
+  void apply_hostname(const std::string& h) override { applied_hostnames.push_back(h); }
   double monotonic_s() const override { return mono; }
   bool wall_clock_valid() const override { return clock_valid; }
   int64_t wall_time_ms() const override { return wall_ms; }

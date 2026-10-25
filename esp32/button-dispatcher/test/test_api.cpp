@@ -216,6 +216,7 @@ struct Env {
   ApiClient client{nullptr};
   FakeSwitchBot switchbot;
   std::vector<std::string> hits;  // "<method> <url>" of requests to the target
+  bool default_append_mac = true;  // config.toml's hostname_append_mac, applied by open()
 
   Env() {
     platform.http_handler = [this](const test_support::RecordedRequest& request) { return network(request); };
@@ -240,6 +241,7 @@ struct Env {
   void open() {
     api.reset();
     app = std::make_unique<AppCore>(platform, kFastIterations);
+    app->default_hostname_append_mac = default_append_mac;
     app->init();
     api = std::make_unique<Api>(*app);
     client.use(api.get());
@@ -1315,7 +1317,9 @@ TEST(api_every_route_except_sign_in_needs_a_session) {
       {"PUT", "/api/settings"}, {"PUT", "/api/switchbot/credentials"},
       {"DELETE", "/api/switchbot/credentials"}, {"GET", "/api/switchbot/devices"},
       {"GET", "/api/switchbot/scenes"}, {"GET", "/api/switchbot/commands"}, {"GET", "/api/export"},
-      {"POST", "/api/import"}};
+      {"POST", "/api/import"}, {"GET", "/api/device"}, {"PUT", "/api/device"},
+      {"PUT", "/api/device/pairing"}, {"DELETE", "/api/device/pairing"}, {"GET", "/api/satellites"},
+      {"POST", "/api/satellites"}, {"DELETE", "/api/satellites/a"}};
   for (const auto& route : routes) {
     const Reply reply = env.client.call(route[0], route[1], "{}");
     if (reply.status != 401) std::printf("  %s %s answered %d\n", route[0], route[1], reply.status);
@@ -1365,4 +1369,801 @@ TEST(api_concurrent_requests_and_presses_are_safe) {
   presser.join();
   CHECK_EQ(failures.load(), 0);
   CHECK_EQ(env.hits.size(), static_cast<size_t>(100));
+}
+
+// ---- device settings ----
+
+TEST(api_device_defaults) {
+  Env env;
+  env.sign_in();
+  const Reply device = env.client.get("/api/device");
+  CHECK_EQ(device.status, 200);
+  CHECK_EQ(device.str("role"), std::string("dispatcher"));
+  CHECK_EQ(device.str("mac"), std::string("24:0A:C4:12:34:56"));
+  CHECK_EQ(device.str("hostname"), std::string("dispatcher-24-0a-c4-12-34-56"));
+  CHECK_EQ(device.str("hostname_base"), std::string());
+  CHECK_EQ(device.str("default_hostname_base"), std::string("dispatcher"));
+  CHECK(device.flag("hostname_append_mac"));
+  CHECK(device.flag("default_hostname_append_mac"));
+  CHECK(device.is_null("pairing"));
+  CHECK(env.platform.applied_hostnames.empty());
+}
+
+TEST(api_state_has_the_device_role_and_hostname) {
+  Env env;
+  env.sign_in();
+  const Reply state = env.client.get("/api/state");
+  CHECK_EQ(state.str("device.role"), std::string("dispatcher"));
+  CHECK_EQ(state.str("device.hostname"), std::string("dispatcher-24-0a-c4-12-34-56"));
+}
+
+TEST(api_device_hostname_base_is_trimmed_and_lowercased) {
+  Env env;
+  env.sign_in();
+  const Reply put = env.client.put("/api/device", "{\"hostname_base\":\"  Living-Room \"}");
+  CHECK_EQ(put.status, 200);
+  CHECK_EQ(put.str("hostname_base"), std::string("living-room"));
+  CHECK_EQ(put.str("hostname"), std::string("living-room-24-0a-c4-12-34-56"));
+  CHECK_EQ(env.platform.applied_hostnames.size(), static_cast<size_t>(1));
+  CHECK_EQ(env.platform.applied_hostnames[0], std::string("living-room-24-0a-c4-12-34-56"));
+  CHECK_EQ(env.client.get("/api/state").str("device.hostname"), std::string("living-room-24-0a-c4-12-34-56"));
+  CHECK(contains(env.log_text(), "Host name is now living-room-24-0a-c4-12-34-56"));
+}
+
+TEST(api_device_toggling_the_mac_suffix) {
+  Env env;
+  env.sign_in();
+  const Reply off = env.client.put("/api/device", "{\"hostname_append_mac\":false}");
+  CHECK_EQ(off.status, 200);
+  CHECK(!off.flag("hostname_append_mac"));
+  CHECK_EQ(off.str("hostname"), std::string("dispatcher"));
+  const Reply on = env.client.put("/api/device", "{\"hostname_append_mac\":true}");
+  CHECK_EQ(on.str("hostname"), std::string("dispatcher-24-0a-c4-12-34-56"));
+  CHECK_EQ(env.platform.applied_hostnames.size(), static_cast<size_t>(2));
+  CHECK_EQ(env.platform.applied_hostnames[0], std::string("dispatcher"));
+}
+
+TEST(api_device_config_can_turn_the_mac_suffix_off) {
+  Env env;
+  env.default_append_mac = false;
+  env.open();
+  env.sign_in();
+  const Reply device = env.client.get("/api/device");
+  CHECK_EQ(device.str("hostname"), std::string("dispatcher"));
+  CHECK(!device.flag("hostname_append_mac"));
+  CHECK(!device.flag("default_hostname_append_mac"));
+  CHECK_EQ(env.app->hostname(), std::string("dispatcher"));
+}
+
+TEST(api_device_role_change_leaves_the_mac_suffix_to_the_config) {
+  Env env;
+  env.default_append_mac = false;
+  env.open();
+  env.sign_in();
+  CHECK_EQ(env.client.put("/api/device", "{\"role\":\"satellite\"}").status, 200);
+  CHECK(!contains(env.platform.documents["device.json"], "hostname_append_mac"));
+  env.default_append_mac = true;
+  env.open();
+  CHECK_EQ(env.app->hostname(), std::string("dispatcher-24-0a-c4-12-34-56"));
+}
+
+TEST(api_device_setting_a_base_stores_the_mac_suffix_choice) {
+  Env env;
+  env.default_append_mac = false;
+  env.open();
+  env.sign_in();
+  // 50 characters only fit without the suffix, so the choice it was checked against is kept with it.
+  const std::string base(50, 'a');
+  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"" + base + "\"}").status, 200);
+  CHECK(contains(env.platform.documents["device.json"], "\"hostname_append_mac\":false"));
+  env.default_append_mac = true;
+  env.open();
+  CHECK_EQ(env.app->hostname(), base);
+}
+
+TEST(api_device_unchanged_hostname_is_not_applied_again) {
+  Env env;
+  env.sign_in();
+  env.client.put("/api/device", "{\"hostname_base\":\"desk\"}");
+  env.client.put("/api/device", "{\"hostname_base\":\"desk\"}");
+  CHECK_EQ(env.platform.applied_hostnames.size(), static_cast<size_t>(1));
+}
+
+TEST(api_device_rejects_invalid_values) {
+  Env env;
+  env.sign_in();
+  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"bad name\"}").status, 400);
+  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"-x\"}").status, 400);
+  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":7}").status, 400);
+  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"" + std::string(46, 'a') + "\"}").status, 400);
+  CHECK_EQ(env.client.put("/api/device", "{\"hostname_append_mac\":\"no\"}").status, 400);
+  CHECK_EQ(env.client.put("/api/device", "{\"role\":\"boss\"}").status, 400);
+  CHECK_EQ(env.client.put("/api/device", "[]").status, 400);
+  // Turning the suffix off makes room for a longer name.
+  CHECK_EQ(env.client.put("/api/device",
+                          "{\"hostname_base\":\"" + std::string(46, 'a') + "\",\"hostname_append_mac\":false}")
+               .status,
+           200);
+  CHECK(env.platform.applied_hostnames.size() == 1);
+}
+
+TEST(api_device_settings_are_saved_and_survive_a_restart) {
+  Env env;
+  env.sign_in();
+  env.client.put("/api/device", "{\"hostname_base\":\"porch\",\"hostname_append_mac\":false,\"role\":\"satellite\"}");
+  CHECK(env.platform.documents.count("device.json") == 1);
+  CHECK(contains(env.platform.documents["device.json"], "porch"));
+  // The device settings never travel in config.json.
+  CHECK(!contains(env.config_document(), "porch"));
+
+  env.open();
+  CHECK_EQ(env.client.post("/api/auth/login", password_body(kPassword)).status, 200);
+  const Reply device = env.client.get("/api/device");
+  CHECK_EQ(device.str("role"), std::string("satellite"));
+  CHECK_EQ(device.str("hostname"), std::string("porch"));
+  CHECK(!device.flag("hostname_append_mac"));
+}
+
+TEST(api_device_role_change_is_logged) {
+  Env env;
+  env.sign_in();
+  const Reply put = env.client.put("/api/device", "{\"role\":\"satellite\"}");
+  CHECK_EQ(put.status, 200);
+  CHECK_EQ(put.str("role"), std::string("satellite"));
+  CHECK_EQ(env.client.get("/api/state").str("device.role"), std::string("satellite"));
+  CHECK(contains(env.log_text(), "This board is now a satellite"));
+}
+
+TEST(api_device_save_failure_is_reported) {
+  Env env;
+  env.sign_in();
+  env.platform.fail_saves = true;
+  CHECK_EQ(env.client.put("/api/device", "{\"hostname_base\":\"desk\"}").status, 500);
+}
+
+TEST(api_corrupt_device_json_leaves_the_defaults) {
+  Env env;
+  env.platform.documents["device.json"] = "{\"role\":\"boss\"}";
+  env.platform.documents["satellites.json"] = "garbage";
+  env.open();
+  env.sign_in();
+  CHECK_EQ(env.client.get("/api/device").str("role"), std::string("dispatcher"));
+  CHECK_EQ(env.client.get("/api/satellites").size("satellites"), static_cast<size_t>(0));
+}
+
+// ---- satellites (dispatcher side) ----
+
+namespace {
+
+struct PairedSatellite {
+  std::string id;
+  std::string name;
+  std::string code;
+  std::string secret;
+};
+
+PairedSatellite add_satellite(Env& env, const std::string& name = "Porch") {
+  const Reply created = env.client.post("/api/satellites", "{\"name\":\"" + name + "\"}");
+  CHECK_EQ(created.status, 201);
+  PairedSatellite satellite;
+  satellite.id = created.str("satellite.id");
+  satellite.name = name;
+  satellite.code = created.str("pairing_code");
+  const Parsed<Pairing> pairing = parse_pairing_code(satellite.code);
+  CHECK(pairing.ok());
+  if (pairing.ok()) satellite.secret = pairing.value->secret;
+  return satellite;
+}
+
+std::string sign(const std::string& secret, const std::string& body) {
+  return hex_encode(test_crypto::hmac_sha256(secret, body));
+}
+
+std::string report_body(Env& env, int64_t seq, const std::string& boot = "ab12", int age_ms = 40,
+                        const char* data = kPressB2, const char* mac = kDesk, int64_t time_offset_ms = 0) {
+  Report report;
+  report.time_ms = env.platform.wall_ms + time_offset_ms;
+  report.boot = boot;
+  report.seq = seq;
+  ReportEvent event;
+  event.mac = mac;
+  event.rssi = -40;
+  event.data = test_util::from_hex(data);
+  event.age_ms = age_ms;
+  report.events.push_back(event);
+  return report_to_text(report);
+}
+
+// Sends a satellite's report straight to the Api: no cookie, no CSRF header, just the two satellite headers.
+Reply send_report(Env& env, const PairedSatellite& satellite, const std::string& body,
+                  const std::string& signature = "", const std::string& id = "") {
+  Request request;
+  request.method = "POST";
+  request.path = "/api/satellite/report";
+  request.body = body;
+  request.client = "10.0.0.7";
+  request.satellite = id.empty() ? satellite.id : id;
+  request.signature = signature.empty() ? sign(satellite.secret, body) : signature;
+  const Response response = env.api->handle(request);
+  Reply reply;
+  reply.status = response.status;
+  reply.body = response.body;
+  reply.content_type = response.content_type;
+  reply.json = make_json(cJSON_ParseWithOpts(reply.body.c_str(), nullptr, true));
+  return reply;
+}
+
+size_t count_of(const std::string& text, const std::string& part) {
+  size_t count = 0;
+  for (size_t pos = text.find(part); pos != std::string::npos; pos = text.find(part, pos + 1)) ++count;
+  return count;
+}
+
+}  // namespace
+
+TEST(api_satellite_create_returns_a_pairing_code) {
+  Env env;
+  env.sign_in();
+  const Reply created = env.client.post("/api/satellites", "{\"name\":\"  Porch \"}");
+  CHECK_EQ(created.status, 201);
+  CHECK(starts_with(created.str("satellite.id"), "sat-"));
+  CHECK_EQ(created.str("satellite.name"), std::string("Porch"));
+  CHECK(!created.flag("satellite.online"));
+  const std::string code = created.str("pairing_code");
+  CHECK(starts_with(code, "bdsat1:"));
+  CHECK(contains(code, "@dispatcher-24-0a-c4-12-34-56.local:80"));
+  CHECK(contains(code, created.str("satellite.id") + ":"));
+  // The secret is only in the code, never in the satellite object.
+  CHECK(!contains(created.body.substr(0, created.body.find("pairing_code")), "secret"));
+}
+
+TEST(api_satellite_create_uses_the_http_port_and_new_hostname) {
+  Env env;
+  env.app->http_port = 8080;
+  env.sign_in();
+  env.client.put("/api/device", "{\"hostname_base\":\"hub\"}");
+  const Reply created = env.client.post("/api/satellites", "{\"name\":\"Porch\"}");
+  CHECK(contains(created.str("pairing_code"), "@hub-24-0a-c4-12-34-56.local:8080"));
+}
+
+TEST(api_satellite_names_must_be_valid_and_unique) {
+  Env env;
+  env.sign_in();
+  add_satellite(env, "Porch");
+  CHECK_EQ(env.client.post("/api/satellites", "{\"name\":\"porch\"}").status, 400);
+  CHECK_EQ(env.client.post("/api/satellites", "{\"name\":\"\"}").status, 400);
+  CHECK_EQ(env.client.post("/api/satellites", "{}").status, 400);
+  CHECK_EQ(env.client.post("/api/satellites", "{\"name\":\"" + std::string(41, 'x') + "\"}").status, 400);
+  CHECK_EQ(env.client.get("/api/satellites").size("satellites"), static_cast<size_t>(1));
+}
+
+TEST(api_satellite_list_and_delete) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  const Reply list = env.client.get("/api/satellites");
+  CHECK_EQ(list.status, 200);
+  CHECK_EQ(list.size("satellites"), static_cast<size_t>(1));
+  CHECK_EQ(list.str("satellites.0.id"), satellite.id);
+  CHECK_EQ(list.str("satellites.0.name"), std::string("Porch"));
+  CHECK(!list.flag("satellites.0.online"));
+  CHECK(list.is_null("satellites.0.last_seen"));
+  CHECK(list.num("max") > 0);
+
+  CHECK_EQ(env.client.del("/api/satellites/" + satellite.id).status, 200);
+  CHECK_EQ(env.client.get("/api/satellites").size("satellites"), static_cast<size_t>(0));
+  CHECK_EQ(env.client.del("/api/satellites/" + satellite.id).status, 404);
+}
+
+TEST(api_satellites_are_saved_and_survive_a_restart) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  CHECK(env.platform.documents.count("satellites.json") == 1);
+  env.open();
+  CHECK_EQ(env.client.post("/api/auth/login", password_body(kPassword)).status, 200);
+  const Reply list = env.client.get("/api/satellites");
+  CHECK_EQ(list.size("satellites"), static_cast<size_t>(1));
+  CHECK_EQ(list.str("satellites.0.id"), satellite.id);
+  // The restored secret still verifies reports.
+  CHECK_EQ(send_report(env, satellite, report_body(env, 1)).status, 200);
+}
+
+TEST(api_satellite_save_failure_leaves_the_list_unchanged) {
+  Env env;
+  env.sign_in();
+  env.platform.fail_saves = true;
+  CHECK_EQ(env.client.post("/api/satellites", "{\"name\":\"Porch\"}").status, 500);
+  env.platform.fail_saves = false;
+  CHECK_EQ(env.client.get("/api/satellites").size("satellites"), static_cast<size_t>(0));
+}
+
+TEST(api_satellites_are_limited) {
+  Env env;
+  env.sign_in();
+  for (size_t i = 0; i < SatelliteRegistry::kMaxSatellites; ++i) add_satellite(env, "Sat " + std::to_string(i));
+  CHECK_EQ(env.client.post("/api/satellites", "{\"name\":\"One too many\"}").status, 409);
+}
+
+TEST(api_export_never_contains_satellite_secrets) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  const Reply exported = env.client.get("/api/export?credentials=1");
+  CHECK_EQ(exported.status, 200);
+  CHECK(!contains(exported.body, hex_encode(satellite.secret)));
+  CHECK(!contains(exported.body, "satellites"));
+  CHECK(!contains(exported.body, satellite.id));
+  CHECK(!contains(exported.body, "bdsat1"));
+}
+
+// ---- satellite reports (dispatcher side) ----
+
+TEST(api_satellite_report_fires_the_binding_and_marks_the_satellite_online) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  const Reply reply = send_report(f.env, satellite, report_body(f.env, 1));
+  CHECK_EQ(reply.status, 200);
+  CHECK(reply.flag("ok"));
+  CHECK_EQ(reply.num("accepted"), 1.0);
+  CHECK_EQ(f.env.hits.size(), static_cast<size_t>(1));
+  const std::string log = f.env.log_text();
+  CHECK(contains(log, "(via Porch)"));
+  CHECK(contains(log, "fire: Binding \"Hit target\" fired"));
+  CHECK(contains(log, "Satellite \"Porch\" is online (10.0.0.7)"));
+
+  const Reply list = f.env.client.get("/api/satellites");
+  CHECK(list.flag("satellites.0.online"));
+  CHECK(!list.is_null("satellites.0.last_seen"));
+  CHECK_EQ(list.str("satellites.0.address"), std::string("10.0.0.7"));
+  CHECK_EQ(list.num("satellites.0.events"), 1.0);
+  CHECK_EQ(list.str("satellites.0.last_error"), std::string());
+}
+
+TEST(api_satellite_goes_offline_after_a_while) {
+  DeskFixture f;
+  const PairedSatellite satellite = add_satellite(f.env);
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 1)).status, 200);
+  f.env.platform.mono += 60;
+  CHECK(f.env.client.get("/api/satellites").flag("satellites.0.online"));
+  f.env.platform.mono += 20;
+  CHECK(!f.env.client.get("/api/satellites").flag("satellites.0.online"));
+}
+
+TEST(api_satellite_report_needs_neither_a_session_nor_the_csrf_header) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  env.client.cookie.clear();
+  CHECK_EQ(env.client.get("/api/satellites").status, 401);
+  CHECK_EQ(send_report(env, satellite, report_body(env, 1)).status, 200);
+  // The other new routes still need a session and the header.
+  CHECK_EQ(env.client.get("/api/device").status, 401);
+  CHECK_EQ(env.client.post("/api/satellites", "{\"name\":\"X\"}").status, 401);
+  CHECK_EQ(env.client.call("POST", "/api/satellites", "{\"name\":\"X\"}", false).status, 403);
+}
+
+TEST(api_satellite_report_replays_are_refused) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  const std::string body = report_body(f.env, 1);
+  CHECK_EQ(send_report(f.env, satellite, body).status, 200);
+  const Reply replay = send_report(f.env, satellite, body);
+  CHECK_EQ(replay.status, 409);
+  CHECK(!replay.error().empty());
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 2, "ab12", 40, kPressB2Again)).status, 200);
+  // An older sequence number of the same boot is refused too.
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 1, "ab12", 40, kPressB2Again)).status, 409);
+  CHECK_EQ(f.env.hits.size(), static_cast<size_t>(2));
+  CHECK(f.env.client.get("/api/satellites").str("satellites.0.last_error").size() > 0);
+}
+
+TEST(api_satellite_restart_with_a_new_boot_id_is_accepted_only_if_newer) {
+  DeskFixture f;
+  const PairedSatellite satellite = add_satellite(f.env);
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 5)).status, 200);
+  // A recorded report from an older boot cannot be replayed.
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 6, "cd34", 40, kPressB2, kDesk, -1000)).status, 409);
+  f.env.platform.wall_ms += 1000;
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 1, "cd34")).status, 200);
+}
+
+TEST(api_satellite_report_with_a_wrong_signature_or_id_is_refused) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  const std::string body = report_body(f.env, 1);
+  const Reply wrong = send_report(f.env, satellite, body, sign("not the secret, but 32 bytes long!", body));
+  CHECK_EQ(wrong.status, 401);
+  CHECK_EQ(send_report(f.env, satellite, body, "deadbeef").status, 401);
+  CHECK_EQ(send_report(f.env, satellite, body, sign(satellite.secret, body + " ")).status, 401);
+  CHECK_EQ(send_report(f.env, satellite, body, "", "sat-unknown").status, 401);
+  CHECK_EQ(send_report(f.env, satellite, body, "", "").status, 200);  // the right one still works afterwards
+}
+
+TEST(api_satellite_signature_is_case_insensitive_hex) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  std::string body = report_body(env, 1);
+  std::string signature = sign(satellite.secret, body);
+  for (char& c : signature) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  CHECK_EQ(send_report(env, satellite, body, signature).status, 200);
+}
+
+TEST(api_deleted_satellite_can_no_longer_report) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  CHECK_EQ(send_report(env, satellite, report_body(env, 1)).status, 200);
+  env.client.del("/api/satellites/" + satellite.id);
+  CHECK_EQ(send_report(env, satellite, report_body(env, 2)).status, 401);
+}
+
+TEST(api_satellite_report_with_a_skewed_clock_is_refused) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 1, "ab12", 40, kPressB2, kDesk, 31000)).status, 409);
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 2, "ab12", 40, kPressB2, kDesk, -31000)).status, 409);
+  CHECK(f.env.hits.empty());
+  // Within the limit it is fine, and a slow report counts its transit time as extra age.
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 3, "ab12", 40, kPressB2, kDesk, -29000)).status, 200);
+}
+
+TEST(api_satellite_report_transit_time_counts_towards_the_event_age) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  // The report is 4.9 s old when it arrives and the event was already 200 ms old when it was sent.
+  const Reply reply = send_report(f.env, satellite, report_body(f.env, 1, "ab12", 200, kPressB2, kDesk, -4900));
+  CHECK_EQ(reply.status, 200);
+  CHECK_EQ(reply.num("accepted"), 0.0);
+  CHECK(f.env.hits.empty());
+}
+
+TEST(api_satellite_report_needs_a_valid_clock) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  const std::string body = report_body(f.env, 1);
+  f.env.platform.clock_valid = false;
+  const Reply refused = send_report(f.env, satellite, body);
+  CHECK_EQ(refused.status, 503);
+  CHECK(f.env.hits.empty());
+  f.env.platform.clock_valid = true;
+  CHECK_EQ(send_report(f.env, satellite, body).status, 200);  // a refused report does not use up its sequence number
+}
+
+TEST(api_satellite_report_drops_events_that_are_too_old) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  const Reply reply = send_report(f.env, satellite, report_body(f.env, 1, "ab12", 6000));
+  CHECK_EQ(reply.status, 200);
+  CHECK_EQ(reply.num("accepted"), 0.0);
+  CHECK(f.env.hits.empty());
+  const Reply list = f.env.client.get("/api/satellites");
+  CHECK_EQ(list.num("satellites.0.stale"), 1.0);
+  CHECK_EQ(list.num("satellites.0.events"), 0.0);
+  CHECK(list.flag("satellites.0.online"));  // it still counts as a heartbeat
+  // An event just under the limit is fine.
+  CHECK_EQ(send_report(f.env, satellite, report_body(f.env, 2, "ab12", 4900)).num("accepted"), 1.0);
+}
+
+TEST(api_satellite_report_rejects_malformed_bodies) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  const std::string bad = "{\"time\":1}";
+  CHECK_EQ(send_report(env, satellite, bad).status, 400);
+  CHECK_EQ(send_report(env, satellite, "not json").status, 400);
+  CHECK_EQ(send_report(env, satellite, std::string(9 * 1024, ' ')).status, 413);
+}
+
+TEST(api_satellite_refusals_are_logged_at_most_once_a_minute) {
+  Env env;
+  env.sign_in();
+  const PairedSatellite satellite = add_satellite(env);
+  for (int i = 0; i < 5; ++i) send_report(env, satellite, "not json");
+  CHECK_EQ(count_of(env.log_text(), "refused"), static_cast<size_t>(1));
+  env.platform.mono += 61;
+  send_report(env, satellite, "not json");
+  CHECK_EQ(count_of(env.log_text(), "refused"), static_cast<size_t>(2));
+}
+
+TEST(api_satellite_press_heard_by_two_satellites_and_the_scanner_fires_once) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite porch = add_satellite(f.env, "Porch");
+  const PairedSatellite garage = add_satellite(f.env, "Garage");
+  CHECK_EQ(send_report(f.env, porch, report_body(f.env, 1)).status, 200);
+  CHECK_EQ(send_report(f.env, garage, report_body(f.env, 1, "ff00")).status, 200);
+  f.env.press(kPressB2);
+  CHECK_EQ(f.env.hits.size(), static_cast<size_t>(1));
+  CHECK_EQ(count_of(f.env.log_text(), "fire:"), static_cast<size_t>(1));
+}
+
+TEST(api_satellite_report_of_an_unknown_device_is_logged_but_does_not_fire) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite satellite = add_satellite(f.env);
+  send_report(f.env, satellite, report_body(f.env, 1, "ab12", 40, kPressB2, "11:22:33:44:55:66"));
+  CHECK(f.env.hits.empty());
+  CHECK(contains(f.env.log_text(), "unknown device 11:22:33:44:55:66"));
+  CHECK(contains(f.env.log_text(), "(via Porch)"));
+}
+
+// ---- satellite side ----
+
+namespace {
+
+Pairing receiver_pairing() {
+  Pairing pairing;
+  pairing.id = "sat-abc123";
+  for (int i = 0; i < 32; ++i) pairing.secret += static_cast<char>(i + 100);
+  pairing.host = "receiver.test";
+  pairing.port = 8080;
+  return pairing;
+}
+
+// A signed-in environment set up as a paired satellite.
+struct SatelliteFixture {
+  Env env;
+  Pairing pairing = receiver_pairing();
+  int answer_status = 200;
+  bool unreachable = false;
+
+  SatelliteFixture() {
+    env.sign_in();
+    CHECK_EQ(env.client.put("/api/device", "{\"role\":\"satellite\"}").status, 200);
+    CHECK_EQ(env.client.put("/api/device/pairing", "{\"code\":\"" + format_pairing_code(pairing) + "\"}").status, 200);
+    env.platform.http_handler = [this](const test_support::RecordedRequest&) {
+      HttpResponse response;
+      if (unreachable) {
+        response.failure = HttpResponse::Failure::kConnect;
+      } else {
+        response.status = answer_status;
+        response.body = answer_status == 200 ? "{\"ok\":true,\"accepted\":1}" : "{\"error\":\"nope\"}";
+      }
+      return response;
+    };
+    env.platform.requests.clear();
+  }
+
+  void hear(const char* hex = kPressB2, const char* mac = kDesk) {
+    const std::vector<uint8_t> bytes = test_util::from_hex(hex);
+    env.app->handle_advert(mac, -40, bytes.data(), bytes.size());
+  }
+};
+
+}  // namespace
+
+TEST(api_satellite_pairing_is_stored_and_shown_without_the_secret) {
+  SatelliteFixture f;
+  const Reply device = f.env.client.get("/api/device");
+  CHECK_EQ(device.str("role"), std::string("satellite"));
+  CHECK_EQ(device.str("pairing.id"), std::string("sat-abc123"));
+  CHECK_EQ(device.str("pairing.host"), std::string("receiver.test"));
+  CHECK_EQ(device.num("pairing.port"), 8080.0);
+  CHECK(!contains(device.body, "secret"));
+  CHECK(!contains(device.body, hex_encode(f.pairing.secret)));
+  CHECK(contains(f.env.log_text(), "Paired with the dispatcher at receiver.test:8080 as sat-abc123"));
+  CHECK(contains(f.env.platform.documents["device.json"], "bdsat1:"));
+}
+
+TEST(api_satellite_pairing_rejects_a_bad_code) {
+  Env env;
+  env.sign_in();
+  CHECK_EQ(env.client.put("/api/device/pairing", "{\"code\":\"nonsense\"}").status, 400);
+  CHECK_EQ(env.client.put("/api/device/pairing", "{}").status, 400);
+  CHECK(env.client.get("/api/device").is_null("pairing"));
+}
+
+TEST(api_satellite_pairing_can_be_removed) {
+  SatelliteFixture f;
+  CHECK_EQ(f.env.client.del("/api/device/pairing").status, 200);
+  CHECK(f.env.client.get("/api/device").is_null("pairing"));
+  CHECK(contains(f.env.log_text(), "Unpaired from the dispatcher"));
+  CHECK(!contains(f.env.platform.documents["device.json"], "bdsat1:"));
+}
+
+TEST(api_satellite_forwards_instead_of_firing_locally) {
+  SatelliteFixture f;
+  // Even with a matching button and binding on the satellite itself.
+  f.env.platform.mono += 0;
+  f.hear();
+  CHECK(f.env.hits.empty());
+  CHECK(!contains(f.env.log_text(), "ble:"));
+  CHECK_EQ(f.env.app->forwarder.queued(), static_cast<size_t>(1));
+}
+
+TEST(api_satellite_forward_once_sends_one_signed_report) {
+  SatelliteFixture f;
+  f.hear();
+  f.hear();  // repeated copies are queued once
+  f.hear();
+  const double wait = f.env.app->forward_once();
+  CHECK_EQ(wait, 0.0);
+  CHECK_EQ(f.env.platform.requests.size(), static_cast<size_t>(1));
+  const test_support::RecordedRequest& request = f.env.platform.requests[0];
+  CHECK_EQ(request.method, std::string("POST"));
+  CHECK_EQ(request.url, std::string("http://receiver.test:8080/api/satellite/report"));
+  const std::string* id = test_support::find_header(request.headers, "X-Satellite");
+  const std::string* signature = test_support::find_header(request.headers, "X-Signature");
+  CHECK(id != nullptr);
+  CHECK(signature != nullptr);
+  if (id != nullptr) CHECK_EQ(*id, std::string("sat-abc123"));
+  if (signature != nullptr) CHECK_EQ(*signature, sign(f.pairing.secret, request.body));
+  const Parsed<Report> report = report_from_text(request.body);
+  CHECK(report.ok());
+  CHECK_EQ(report.value->events.size(), static_cast<size_t>(1));
+  CHECK_EQ(report.value->events[0].mac, std::string(kDesk));
+  CHECK(report.value->events[0].data == test_util::from_hex(kPressB2));
+  CHECK_EQ(report.value->time_ms, f.env.platform.wall_ms);
+  CHECK(contains(f.env.log_text(), "Reporting to the dispatcher at receiver.test:8080"));
+  CHECK_EQ(f.env.app->forwarder.forwarded(), static_cast<int64_t>(1));
+  CHECK_EQ(f.env.client.get("/api/device").num("forwarding.forwarded"), 1.0);
+  CHECK(f.env.client.get("/api/device").flag("forwarding.connected"));
+}
+
+TEST(api_satellite_forward_once_waits_for_the_heartbeat_after_success) {
+  SatelliteFixture f;
+  CHECK_EQ(f.env.app->forward_once(), 0.0);  // the first report is a heartbeat
+  CHECK_EQ(f.env.platform.requests.size(), static_cast<size_t>(1));
+  const double wait = f.env.app->forward_once();
+  CHECK(wait > 29.0 && wait <= 30.0);
+  CHECK_EQ(f.env.platform.requests.size(), static_cast<size_t>(1));
+}
+
+TEST(api_satellite_cannot_report_is_logged_once_not_on_every_retry) {
+  SatelliteFixture f;
+  f.unreachable = true;
+  f.hear();
+  f.env.app->forward_once();
+  for (int i = 0; i < 4; ++i) {
+    f.env.platform.mono += 1.1;
+    f.env.app->forward_once();
+  }
+  CHECK_EQ(f.env.platform.requests.size(), static_cast<size_t>(5));
+  CHECK_EQ(count_of(f.env.log_text(), "Cannot report to the dispatcher"), static_cast<size_t>(1));
+  CHECK(contains(f.env.log_text(), "cannot reach receiver.test:8080"));
+  const Reply device = f.env.client.get("/api/device");
+  CHECK(!device.flag("forwarding.connected"));
+  CHECK(contains(device.str("forwarding.last_error"), "receiver.test"));
+
+  // Recovery is announced, and a later failure is reported again.
+  f.unreachable = false;
+  f.env.platform.mono += 5.1;
+  f.env.app->forward_once();
+  CHECK(contains(f.env.log_text(), "Reporting to the dispatcher at receiver.test:8080"));
+  f.unreachable = true;
+  f.env.platform.mono += 31;
+  f.env.app->forward_once();
+  CHECK_EQ(count_of(f.env.log_text(), "Cannot report to the dispatcher"), static_cast<size_t>(2));
+}
+
+TEST(api_satellite_http_errors_from_the_dispatcher_are_reported) {
+  SatelliteFixture f;
+  f.answer_status = 401;
+  f.env.app->forward_once();
+  CHECK(contains(f.env.log_text(), "answered HTTP 401: nope"));
+}
+
+TEST(api_satellite_forward_once_idles_when_it_is_not_a_paired_satellite) {
+  Env env;
+  env.sign_in();
+  CHECK_EQ(env.app->forward_once(), AppCore::kForwardIdleWaitS);  // a dispatcher
+  env.client.put("/api/device", "{\"role\":\"satellite\"}");
+  CHECK_EQ(env.app->forward_once(), AppCore::kForwardIdleWaitS);  // not paired yet
+  CHECK(env.platform.requests.empty());
+}
+
+TEST(api_satellite_sends_nothing_while_the_clock_is_not_set) {
+  SatelliteFixture f;
+  f.env.platform.clock_valid = false;
+  f.hear();
+  CHECK_EQ(f.env.app->forward_once(), Forwarder::kRetryS);
+  CHECK(f.env.platform.requests.empty());
+  // A press that waited too long for the clock is dropped rather than sent late.
+  f.env.platform.mono += 10;
+  f.env.app->forward_once();
+  CHECK_EQ(f.env.app->forwarder.queued(), static_cast<size_t>(0));
+  f.env.platform.clock_valid = true;
+  f.env.app->forward_once();
+  const Parsed<Report> report = report_from_text(f.env.platform.requests.at(0).body);
+  CHECK(report.ok());
+  CHECK(report.value->events.empty());
+}
+
+TEST(api_satellite_changing_the_role_back_stops_forwarding) {
+  SatelliteFixture f;
+  f.hear();
+  f.env.client.put("/api/device", "{\"role\":\"dispatcher\"}");
+  CHECK_EQ(f.env.app->forwarder.queued(), static_cast<size_t>(0));
+  CHECK_EQ(f.env.app->forward_once(), AppCore::kForwardIdleWaitS);
+  // Presses are handled locally again.
+  f.hear(kPressB1);
+  CHECK(contains(f.env.log_text(), "ble:"));
+}
+
+TEST(api_satellite_on_forward_queued_is_called_for_a_queued_press) {
+  SatelliteFixture f;
+  int woken = 0;
+  f.env.app->on_forward_queued = [&woken] { ++woken; };
+  f.hear();
+  CHECK_EQ(woken, 1);
+  f.hear();  // a repeat is not queued, so nothing to wake for
+  CHECK_EQ(woken, 1);
+}
+
+// A satellite board and a dispatcher board wired together: the satellite's HTTP requests are answered by
+// the dispatcher's Api.
+TEST(api_end_to_end_a_press_heard_by_a_satellite_fires_the_dispatchers_binding) {
+  DeskFixture dispatcher;
+  dispatcher.add_binding();
+  const PairedSatellite paired = add_satellite(dispatcher.env, "Porch");
+
+  Env satellite;
+  satellite.sign_in();
+  satellite.client.put("/api/device", "{\"role\":\"satellite\"}");
+  CHECK_EQ(satellite.client.put("/api/device/pairing", "{\"code\":\"" + paired.code + "\"}").status, 200);
+  std::string requested_url;
+  satellite.platform.http_handler = [&](const test_support::RecordedRequest& recorded) {
+    requested_url = recorded.url;
+    Request request;
+    request.method = recorded.method;
+    request.path = "/api/satellite/report";
+    request.body = recorded.body;
+    request.client = "10.0.0.9";
+    if (const std::string* id = test_support::find_header(recorded.headers, "X-Satellite")) request.satellite = *id;
+    if (const std::string* sig = test_support::find_header(recorded.headers, "X-Signature")) request.signature = *sig;
+    const Response response = dispatcher.env.api->handle(request);
+    HttpResponse answer;
+    answer.status = response.status;
+    answer.body = response.body;
+    return answer;
+  };
+
+  const std::vector<uint8_t> press = test_util::from_hex(kPressB2);
+  satellite.app->handle_advert(kDesk, -40, press.data(), press.size());
+  CHECK(dispatcher.env.hits.empty());
+  satellite.platform.mono += 0.05;
+  CHECK_EQ(satellite.app->forward_once(), 0.0);
+
+  CHECK_EQ(requested_url, std::string("http://dispatcher-24-0a-c4-12-34-56.local:80/api/satellite/report"));
+  CHECK_EQ(dispatcher.env.hits.size(), static_cast<size_t>(1));
+  CHECK(contains(dispatcher.env.log_text(), "(via Porch)"));
+  CHECK(contains(satellite.log_text(), "Reporting to the dispatcher"));
+  CHECK_EQ(satellite.app->forwarder.forwarded(), static_cast<int64_t>(1));
+  CHECK(dispatcher.env.client.get("/api/satellites").flag("satellites.0.online"));
+
+  // A second press goes the same way; a heartbeat in between does not fire anything.
+  satellite.platform.mono += 40;
+  dispatcher.env.platform.mono += 40;
+  satellite.app->forward_once();
+  CHECK_EQ(dispatcher.env.hits.size(), static_cast<size_t>(1));
+  const std::vector<uint8_t> again = test_util::from_hex(kPressB2Again);
+  satellite.app->handle_advert(kDesk, -40, again.data(), again.size());
+  satellite.app->forward_once();
+  CHECK_EQ(dispatcher.env.hits.size(), static_cast<size_t>(2));
+}
+
+TEST(api_satellite_report_is_refused_by_a_board_that_is_a_satellite) {
+  DeskFixture f;
+  f.add_binding();
+  const PairedSatellite paired = add_satellite(f.env);
+  CHECK_EQ(f.env.client.put("/api/device", "{\"role\":\"satellite\"}").status, 200);
+  const Reply refused = send_report(f.env, paired, report_body(f.env, 1));
+  CHECK_EQ(refused.status, 409);
+  CHECK(contains(refused.error(), "satellite, not a dispatcher"));
+  // Refused before the id lookup, so an unknown id gets the same answer.
+  CHECK_EQ(send_report(f.env, paired, report_body(f.env, 1), "", "sat-unknown").status, 409);
+  CHECK(f.env.hits.empty());
+  // Back to a dispatcher, the same report is accepted.
+  f.env.client.put("/api/device", "{\"role\":\"dispatcher\"}");
+  CHECK_EQ(send_report(f.env, paired, report_body(f.env, 1)).status, 200);
+  CHECK_EQ(f.env.hits.size(), static_cast<size_t>(1));
 }

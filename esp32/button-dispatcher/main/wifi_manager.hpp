@@ -22,6 +22,9 @@ public:
     void connect(StatusLed* led = nullptr);
     // Connects, then keeps reconnecting whenever the connection drops. Never returns.
     [[noreturn]] void run(StatusLed* led = nullptr);
+    // The name sent with DHCP requests (shown in the router's client list). Call after init(); a change made
+    // while connected is sent with the next DHCP renewal.
+    void set_hostname(const std::string& hostname);
     bool is_connected() const;
     std::string get_ip_address() const;
     std::vector<std::string> get_configured_ssids() const;
