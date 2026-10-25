@@ -124,6 +124,20 @@ esp_http_client_method_t to_client_method(const std::string& method) {
 
 }  // namespace
 
+std::string heap_summary() {
+    char text[128];
+    const size_t psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    int n = snprintf(text, sizeof(text), "internal %u bytes free (lowest %u)",
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)));
+    if (psram > 0 && n > 0 && static_cast<size_t>(n) < sizeof(text)) {
+        snprintf(text + n, sizeof(text) - n, ", PSRAM %u of %u free (lowest %u)",
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)), static_cast<unsigned>(psram),
+                 static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
+    }
+    return text;
+}
+
 EspPlatform::EspPlatform() : state_mounted_(false), work_queue_(nullptr) {}
 
 bool EspPlatform::init() {
@@ -303,9 +317,8 @@ dispatcher::HttpResponse EspPlatform::http_request(const std::string& method, co
             ESP_LOGW(TAG, "%s %s: %s", method.c_str(), url.c_str(), result.detail.c_str());
         }
         // The lowest free heap shows how close requests come to running out (TLS needs the most).
-        ESP_LOGI(TAG, "%s %s -> %d in %lld ms (free heap %u bytes, lowest since boot %u)", method.c_str(),
-                 url.c_str(), result.status, took_ms, static_cast<unsigned>(esp_get_free_heap_size()),
-                 static_cast<unsigned>(esp_get_minimum_free_heap_size()));
+        ESP_LOGI(TAG, "%s %s -> %d in %lld ms (%s)", method.c_str(), url.c_str(), result.status, took_ms,
+                 heap_summary().c_str());
     }
     esp_http_client_cleanup(client);
     return result;

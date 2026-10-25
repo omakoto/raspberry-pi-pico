@@ -4,6 +4,19 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 
+# PSRAM: 8 MB octal on the XIAO ESP32-S3 and the DevKitC-1-N8R8. With Wi-Fi and Bluetooth running, the internal
+# RAM leaves a dispatcher about 60 KB of heap, which HTTPS requests with large answers (the SwitchBot device
+# list) nearly use up. malloc() puts allocations above 4 KB in PSRAM, which keeps the internal RAM for the
+# drivers (32 KB of it stays reserved for DMA and internal-only uses). A board without PSRAM (a DevKitC-1-N8)
+# still boots, and then runs on the internal RAM alone.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+
 # Custom partition table: app, `storage` (config drive shown over USB), `state` (private settings)
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
@@ -46,6 +59,9 @@ CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
+# TLS allocates with malloc(), so its large buffers go to PSRAM when there is some, and to the internal RAM
+# on a board without it ("external only" would break TLS there).
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
 
 # HTTP server: room for the API's routes, long request lines and the asynchronous request helpers
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

@@ -214,11 +214,10 @@ extern "C" void app_main() {
     ESP_LOGI(TAG, " Web page:  http://%s.local:%d/", hostname.c_str(), http_port);
     ESP_LOGI(TAG, "=================================================");
 
-    // Memory is the tightest resource (Wi-Fi, Bluetooth, TLS and the web server share about 340 KB), so the free
+    // Internal RAM is the tightest resource (Wi-Fi, Bluetooth, TLS and the web server share about 340 KB), so the free
     // heap is logged now and every five minutes: a steady drop would point at a leak.
     while (true) {
-        ESP_LOGI(TAG, "Free heap: %u bytes (lowest since boot: %u)", static_cast<unsigned>(esp_get_free_heap_size()),
-                 static_cast<unsigned>(esp_get_minimum_free_heap_size()));
+        ESP_LOGI(TAG, "Free heap: %s", heap_summary().c_str());
         vTaskDelay(pdMS_TO_TICKS(5 * 60 * 1000));
     }
 }

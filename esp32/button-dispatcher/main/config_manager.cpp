@@ -75,7 +75,8 @@ bool read_whole_file(const std::string& path, std::string* text) {
     return true;
 }
 
-// Replaces the file through a temporary one, so a power cut leaves either the old or the new content.
+// Replaces the file through a temporary one, so a reset part-way leaves either the old or the new content
+// (finish_interrupted_replace sorts out which at the next boot).
 bool replace_file(const std::string& path, const std::string& text) {
     const std::string tmp = path + ".tmp";
     FILE* file = fopen(tmp.c_str(), "w");
@@ -95,6 +96,29 @@ bool replace_file(const std::string& path, const std::string& text) {
         }
     }
     return true;
+}
+
+bool file_exists(const std::string& path) {
+    FILE* file = fopen(path.c_str(), "r");
+    if (!file) return false;
+    fclose(file);
+    return true;
+}
+
+// Finishes or undoes a replace_file that a reset interrupted. With the file still there, the temporary one may
+// be incomplete, so it is dropped. Without the file, the temporary one was complete (the file is only removed
+// after it is written), so it becomes the file; otherwise the file would be lost, Wi-Fi settings and all.
+void finish_interrupted_replace(const std::string& path) {
+    const std::string tmp = path + ".tmp";
+    if (!file_exists(tmp)) return;
+    if (file_exists(path)) {
+        remove(tmp.c_str());
+        ESP_LOGW(TAG, "Removed '%s', left over from an interrupted rewrite", tmp.c_str());
+    } else if (rename(tmp.c_str(), path.c_str()) == 0) {
+        ESP_LOGW(TAG, "Restored '%s' from an interrupted rewrite", path.c_str());
+    } else {
+        ESP_LOGE(TAG, "Could not restore '%s' from '%s'", path.c_str(), tmp.c_str());
+    }
 }
 
 }  // namespace
@@ -144,6 +168,9 @@ bool ConfigManager::parse_file(const std::string& path, std::vector<ScrubPlan>* 
 }
 
 bool ConfigManager::load(const std::string& config_path, const std::string& override_path) {
+    finish_interrupted_replace(config_path);
+    finish_interrupted_replace(override_path);
+
     // The override is read last so that it wins.
     std::vector<ScrubPlan> plans;
     bool loaded_base = parse_file(config_path, &plans);

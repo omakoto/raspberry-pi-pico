@@ -8,6 +8,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
+// The free memory, for the log: the internal RAM (which Wi-Fi, Bluetooth and the drivers need, and whose low
+// point shows how close the board came to running out) and the PSRAM, if the board has some.
+std::string heap_summary();
+
 // The ESP-IDF implementation of dispatcher::Platform: esp_timer and SNTP time, hardware-backed mbedtls
 // crypto, the private `state` FAT partition for the stored documents, esp_http_client for the network, and a
 // single worker task for background work.
