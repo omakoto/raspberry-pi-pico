@@ -779,6 +779,14 @@ function switchbotMessage(e) {
   return m;
 }
 
+// The SwitchBot lists come in the order of the SwitchBot app; they are shown by name, ignoring case and with
+// numbers in number order ("Light 2" before "Light 10"), in the browser's language. Equal names stay in their
+// original order (the sort is stable).
+const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+function sortedByName(list) {
+  return [...(list || [])].sort((a, b) => nameCollator.compare(a.name || '', b.name || ''));
+}
+
 // -- device list
 
 function renderDevices() {
@@ -786,7 +794,7 @@ function renderDevices() {
   const stored = ed.storedAction && ed.storedAction.type === 'switchbot_command' ? ed.storedAction : null;
   const wanted = sel.value || (stored ? stored.device_id : '');
   const pairs = [['', 'Select a device...']];
-  for (const d of ed.devices || []) pairs.push([d.id, d.name + (d.type ? ` (${d.type})` : '')]);
+  for (const d of sortedByName(ed.devices)) pairs.push([d.id, d.name + (d.type ? ` (${d.type})` : '')]);
   sel.replaceChildren(...pairs.map(([v, l]) => option(v, l)));
   // The saved device stays selectable even if the list is not loaded or no longer contains it.
   if (wanted && !pairs.some(([v]) => v === wanted)) {
@@ -883,7 +891,7 @@ function renderScenes() {
   const stored = ed.storedAction && ed.storedAction.type === 'switchbot_scene' ? ed.storedAction : null;
   const wanted = sel.value || (stored ? stored.scene_id : '');
   const pairs = [['', 'Select a scene...']];
-  for (const s of ed.scenes || []) pairs.push([s.id, s.name]);
+  for (const s of sortedByName(ed.scenes)) pairs.push([s.id, s.name]);
   sel.replaceChildren(...pairs.map(([v, l]) => option(v, l)));
   if (wanted && !pairs.some(([v]) => v === wanted)) {
     const name = stored && stored.scene_id === wanted && stored.scene_name ? stored.scene_name : wanted;
