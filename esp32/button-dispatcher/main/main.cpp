@@ -110,7 +110,8 @@ extern "C" void app_main() {
     status_led.set_state(LedState::INITIALIZING);
 
     // 4b. Acknowledgement buzzer
-    static Buzzer buzzer(config.get_int("buzzer_pin", 9), config.get_bool("buzzer_active_low", true));
+    static Buzzer buzzer(config.get_int("buzzer_pin", 9),
+                         config.get_int("buzzer_frequency_hz", Buzzer::kDefaultFrequencyHz));
     buzzer.init();
 
     // 5. USB: serial console and the drag-and-drop config drive

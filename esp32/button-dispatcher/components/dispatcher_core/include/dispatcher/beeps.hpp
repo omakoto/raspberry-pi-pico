@@ -1,7 +1,6 @@
 // The beeps of the "ack" buzzer: how many beeps a press earns, and when each beep sounds.
 //
-// The buzzer is active (it has its own oscillator), so it has one pitch and beeps differ only in length and
-// count: short beeps acknowledge a press and report success, long beeps report a failure.
+// The buzzer sounds one fixed pitch, so beeps differ only in length and count: short beeps acknowledge a press and report success, long beeps report a failure.
 
 #pragma once
 

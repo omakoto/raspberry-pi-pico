@@ -326,7 +326,7 @@ void AppCore::beep_if_known_lost() {
 void AppCore::spawn_binding(const Binding& binding) {
   platform_.run_in_background([this, binding] {
     const ActionResult result = run_binding(binding);
-    // A short beep for success; a failure sounds longer, since an active buzzer has only one pitch.
+    // A short beep for success; a failure sounds longer, since the buzzer plays only one pitch.
     if (result.ok) platform_.beep(Beep::kShort, 1);
     else platform_.beep(Beep::kLong, 3);
   });
